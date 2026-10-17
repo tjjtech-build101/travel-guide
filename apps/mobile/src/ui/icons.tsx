@@ -68,3 +68,49 @@ export function BackIcon({ color, size = 24 }: IconProps) {
     </Svg>
   );
 }
+
+// ---------- llamada con el scout (PRD 05) ----------
+
+export function MicIcon({ color, size = 24, off = false }: IconProps & { off?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Rect x={9} y={2} width={6} height={12} rx={3} />
+      <Path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
+      {off ? <Path d="M3 3l18 18" /> : null}
+    </Svg>
+  );
+}
+
+export function SpeakerIcon({ color, size = 24, on = true }: IconProps & { on?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M4 9h4l5-4v14l-5-4H4z" />
+      {on ? <Path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /> : <Path d="M17 10l4 4M21 10l-4 4" />}
+    </Svg>
+  );
+}
+
+export function HangUpIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 14.5c5-5 13-5 18 0l-2.5 2.5-3.5-1.5v-2.5a10 10 0 0 0-6 0v2.5L5.5 17z" />
+    </Svg>
+  );
+}
+
+export function CaptionsIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Rect x={3} y={5} width={18} height={14} rx={2} />
+      <Path d="M7 11h4M13 11h4M7 15h7" />
+    </Svg>
+  );
+}
+
+export function HandIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V5.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 4 16l-1-3a1.5 1.5 0 0 1 2.7-1.2L8 15" />
+    </Svg>
+  );
+}

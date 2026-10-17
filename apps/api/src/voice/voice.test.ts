@@ -11,7 +11,13 @@ const base: InstructionsInput = {
   lang: 'es',
   nowText: 'sábado 17/10, 15:42',
   user: { name: 'Juan', interests: ['arquitectura'], avoid: ['museos'], dietary: [], pace: 'relaxed' },
-  trip: { summary: 'Montevideo + Buenos Aires.', upcoming: ['16:00 Café (Teatro Solís)'], companions: ['Ana', 'Leo'] },
+  trip: {
+    summary: 'Montevideo + Buenos Aires.',
+    upcoming: ['16:00 Café (Teatro Solís)'],
+    companions: ['Ana', 'Leo'],
+    toolData: ['trip_id=t1', 'hoy 2026-10-17: day_id=d1, leg_id=l1'],
+  },
+  userId: 'u1',
   memories: ['No le gusta madrugar'],
   location: { lat: -34.9, lng: -56.2 },
   focus: null,
@@ -29,6 +35,7 @@ describe('instrucciones del scout', () => {
     expect(b).toContain('le interesa arquitectura');
     expect(b).toContain('-34.90000, -56.20000');
     expect(b).toContain('saludá en una frase');
+    expect(b).toContain('- tu persona: user_id=u1\n- trip_id=t1\n- hoy 2026-10-17: day_id=d1, leg_id=l1');
     expect(full).toBe(`${b}\n${voiceLangLine('es')}`);
   });
 

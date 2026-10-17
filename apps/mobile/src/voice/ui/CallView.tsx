@@ -1,0 +1,232 @@
+// Vista de llamada expandida (PRD 05): avatar que late, subtítulos grandes, transcript, tarjetas y controles.
+import { VOICE_LANGS } from '@build101/shared';
+import { useState } from 'react';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { Button } from '../../ui/Button';
+import { CaptionsIcon, HandIcon, HangUpIcon, MicIcon, SpeakerIcon } from '../../ui/icons';
+import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
+import { useVoiceStore, type Line } from '../store';
+import { friendlyToolName } from '../toolBridge';
+import { ActionCards } from './ActionCards';
+import { mmss, useElapsed } from './CallBar';
+import { SCOUT_COLOR, ScoutAvatar } from './ScoutAvatar';
+
+const BG = '#14231A';
+
+export function CallView() {
+  const status = useVoiceStore((s) => s.status);
+  const expanded = useVoiceStore((s) => s.expanded);
+  const error = useVoiceStore((s) => s.error);
+  // Conectando y error también se ven acá (pantalla completa), aunque no se haya expandido.
+  const visible = expanded || status === 'connecting' || status === 'error';
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useVoiceStore.getState().setExpanded(false)}>
+      <SafeAreaView style={styles.root}>{status === 'error' ? <ErrorView code={error?.code} message={error?.message} /> : <Live />}</SafeAreaView>
+    </Modal>
+  );
+}
+
+function ErrorView({ code, message }: { code?: string; message?: string }) {
+  const s = useVoiceStore.getState();
+  const denied = code === 'mic_denied';
+  return (
+    <View style={styles.center}>
+      <ScoutAvatar size={120} />
+      <Text style={styles.title}>{denied ? 'Necesitamos el micrófono' : 'No pudimos conectar'}</Text>
+      <Text style={styles.sub}>{denied ? 'Activá el micrófono en Ajustes para hablar con el scout.' : message}</Text>
+      <View style={styles.errButtons}>
+        {denied ? (
+          <Button label="Abrir Ajustes" onPress={() => Linking.openSettings()} />
+        ) : (
+          <Button label={code === 'reconnect_failed' ? 'Llamar' : 'Reintentar'} onPress={() => void s.startCall(s.args ?? {})} />
+        )}
+        <Button label="Cerrar" variant="ghost" onPress={() => s.dismissSummary()} />
+      </View>
+    </View>
+  );
+}
+
+function Live() {
+  const status = useVoiceStore((s) => s.status);
+  const name = useVoiceStore((s) => s.scoutName);
+  const speaking = useVoiceStore((s) => s.speaking);
+  const startedAt = useVoiceStore((s) => s.startedAt);
+  const tools = useVoiceStore((s) => s.toolsRunning);
+  const captions = useVoiceStore((s) => s.captions);
+  const lines = useVoiceStore((s) => s.lines);
+  const [showAll, setShowAll] = useState(false);
+  const connecting = status === 'connecting';
+  const elapsed = useElapsed(startedAt);
+
+  return (
+    <View style={styles.flex}>
+      <View style={styles.top}>
+        <Pressable onPress={() => useVoiceStore.getState().setExpanded(false)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Minimizar">
+          <Text style={styles.minimize}>⌄</Text>
+        </Pressable>
+        <Text style={styles.timer}>{connecting || !startedAt ? '' : mmss(elapsed)}</Text>
+      </View>
+
+      <View style={styles.hero}>
+        <ScoutAvatar size={132} pulse={connecting ? 'connecting' : speaking} />
+        <Text style={styles.title}>{connecting ? `Llamando a ${name || 'Scout'}…` : name}</Text>
+        <Text style={styles.sub}>
+          {status === 'reconnecting'
+            ? 'Se cortó. Reconectando…'
+            : tools.length
+              ? `${friendlyToolName(tools[0].name)}…`
+              : speaking === 'assistant'
+                ? 'Hablando'
+                : speaking === 'user'
+                  ? 'Te escucha'
+                  : connecting
+                    ? ''
+                    : 'Decí lo que necesites'}
+        </Text>
+      </View>
+
+      <ActionCards style={styles.cards} />
+
+      {captions ? (
+        <Pressable style={styles.captions} onPress={() => setShowAll(true)} accessibilityRole="button" accessibilityHint="Ver todo el transcript">
+          <Captions lines={lines} />
+          {lines.length > 2 ? <Text style={styles.more}>Ver todo</Text> : null}
+        </Pressable>
+      ) : (
+        <View style={styles.flex} />
+      )}
+
+      <Controls />
+      <TranscriptSheet visible={showAll} lines={lines} onClose={() => setShowAll(false)} />
+    </View>
+  );
+}
+
+function Captions({ lines }: { lines: Line[] }) {
+  const last = lines.filter((l) => l.text.trim()).slice(-2);
+  if (!last.length) return <Text style={styles.captionMuted}>Los subtítulos aparecen acá</Text>;
+  return (
+    <View style={{ gap: space.sm }}>
+      {last.map((l) => (
+        <Text key={l.id} style={[styles.caption, l.role === 'user' && styles.captionUser]} numberOfLines={3}>
+          {l.role === 'user' ? 'Vos: ' : ''}
+          {l.text}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+function Controls() {
+  const muted = useVoiceStore((s) => s.muted);
+  const speaker = useVoiceStore((s) => s.speaker);
+  const ptt = useVoiceStore((s) => s.pushToTalk);
+  const captions = useVoiceStore((s) => s.captions);
+  const lang = useVoiceStore((s) => s.lang);
+  const st = useVoiceStore.getState();
+  return (
+    <View style={styles.controls}>
+      <View style={styles.langs}>
+        {VOICE_LANGS.map((l) => (
+          <Pressable
+            key={l}
+            onPress={() => st.setLanguage(l)}
+            style={[styles.lang, lang === l && styles.langOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: lang === l }}
+            accessibilityLabel={`Idioma ${l}`}
+          >
+            <Text style={[styles.langText, lang === l && styles.langTextOn]}>{l.toUpperCase()}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.row}>
+        <Round label={muted ? 'Activar micrófono' : 'Silenciar'} on={muted} onPress={() => st.setMuted(!muted)}>
+          <MicIcon color="#fff" off={muted} />
+        </Round>
+        <Round label={speaker ? 'Usar auricular' : 'Usar parlante'} on={speaker} onPress={() => st.setSpeakerOn(!speaker)}>
+          <SpeakerIcon color="#fff" on={speaker} />
+        </Round>
+        <Round label="Hablar por turnos (anti eco)" on={ptt} onPress={() => st.setPushToTalk(!ptt)}>
+          <HandIcon color="#fff" />
+        </Round>
+        <Round label={captions ? 'Ocultar subtítulos' : 'Mostrar subtítulos'} on={captions} onPress={() => st.setCaptions(!captions)}>
+          <CaptionsIcon color="#fff" />
+        </Round>
+      </View>
+      <Pressable onPress={() => void st.endCall()} style={styles.hangup} accessibilityRole="button" accessibilityLabel="Colgar">
+        <HangUpIcon color="#fff" size={30} />
+      </Pressable>
+    </View>
+  );
+}
+
+function Round({ children, label, on, onPress }: { children: React.ReactNode; label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: on }} style={[styles.round, on && styles.roundOn]}>
+      {children}
+    </Pressable>
+  );
+}
+
+function TranscriptSheet({ visible, lines, onClose }: { visible: boolean; lines: Line[]; onClose: () => void }) {
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={styles.sheet}>
+        <View style={styles.sheetHead}>
+          <Text style={styles.sheetTitle}>Transcript</Text>
+          <Button label="Cerrar" variant="ghost" onPress={onClose} />
+        </View>
+        <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.sm }}>
+          {lines.filter((l) => l.text.trim()).length === 0 ? <Text style={styles.empty}>Todavía no hablaron.</Text> : null}
+          {lines
+            .filter((l) => l.text.trim())
+            .map((l) => (
+              <View key={l.id} style={[styles.bubble, l.role === 'user' ? styles.bubbleUser : styles.bubbleScout]}>
+                <Text style={[styles.bubbleText, l.role === 'user' && { color: '#fff' }]}>{l.text}</Text>
+              </View>
+            ))}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: BG },
+  flex: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl, gap: space.md },
+  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.lg, height: MIN_TOUCH },
+  minimize: { color: '#fff', fontSize: 34, lineHeight: 36, width: MIN_TOUCH },
+  timer: { color: 'rgba(255,255,255,0.8)', fontSize: font.body, fontVariant: ['tabular-nums'] },
+  hero: { alignItems: 'center', gap: space.sm, marginTop: space.lg },
+  title: { color: '#fff', fontSize: font.h2, fontWeight: '800', marginTop: space.md, textAlign: 'center' },
+  sub: { color: 'rgba(255,255,255,0.75)', fontSize: font.body, minHeight: 22, textAlign: 'center' },
+  errButtons: { alignSelf: 'stretch', gap: space.sm, marginTop: space.lg },
+  cards: { marginHorizontal: space.lg, marginTop: space.lg },
+  captions: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: space.xl, paddingBottom: space.lg },
+  caption: { color: '#fff', fontSize: 22, lineHeight: 29, fontWeight: '600' },
+  captionUser: { color: '#9CC3FF' },
+  captionMuted: { color: 'rgba(255,255,255,0.4)', fontSize: font.body, textAlign: 'center' },
+  more: { color: '#9CC3FF', fontSize: font.small, fontWeight: '700', marginTop: space.sm },
+  controls: { paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.lg, alignItems: 'center' },
+  langs: { flexDirection: 'row', gap: space.sm },
+  lang: { paddingHorizontal: space.md, minHeight: 36, justifyContent: 'center', borderRadius: radius.pill, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
+  langOn: { backgroundColor: '#fff' },
+  langText: { color: '#fff', fontWeight: '700', fontSize: font.small },
+  langTextOn: { color: BG },
+  row: { flexDirection: 'row', gap: space.lg },
+  round: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  roundOn: { backgroundColor: SCOUT_COLOR },
+  hangup: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
+  sheet: { flex: 1, backgroundColor: colors.bg },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingLeft: space.lg, paddingTop: space.md },
+  sheetTitle: { fontSize: font.h2, fontWeight: '800', color: colors.text },
+  empty: { color: colors.textMuted, fontSize: font.body },
+  bubble: { maxWidth: '85%', borderRadius: radius.lg, padding: space.md },
+  bubbleUser: { alignSelf: 'flex-end', backgroundColor: colors.primary },
+  bubbleScout: { alignSelf: 'flex-start', backgroundColor: colors.surface },
+  bubbleText: { fontSize: font.body, color: colors.text },
+});

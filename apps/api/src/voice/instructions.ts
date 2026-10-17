@@ -8,7 +8,15 @@ export type InstructionsInput = {
   /** "sábado 17/10, 15:42" en la zona del viaje. */
   nowText: string;
   user: { name: string | null; interests: string[]; avoid: string[]; dietary: string[]; pace: string | null };
-  trip: { summary: string; upcoming: string[]; companions: string[] } | null;
+  trip: {
+    summary: string;
+    upcoming: string[];
+    companions: string[];
+    /** Ids para las herramientas (trip_id, tramos, día de hoy, bloques). El modelo no los dice en voz alta. */
+    toolData: string[];
+  } | null;
+  /** auth uid de la persona (participant_ids: [yo] = bloque personal). */
+  userId?: string;
   memories: string[];
   /** Dónde está el celu (para herramientas con `near`). */
   location: { lat: number; lng: number } | null;
@@ -27,7 +35,9 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     `Sos el mismo personaje en todo: planificás, guiás y respondés. No hay otros guías.`,
     'Respuestas cortas (1-2 frases) salvo que te pidan más. Te pueden interrumpir: si pasa, cortá y respondé a lo nuevo, natural.',
     'Nunca inventes fechas, nombres, horarios ni cifras: usá herramientas o decí que no sabés.',
-    'Para cualquier cosa del plan usá herramientas. En lo compartido tus cambios quedan como propuesta: decilo así ("te lo dejo propuesto al grupo"). En lo personal se aplican.',
+    'Para cualquier cosa del plan usá herramientas. Contá qué pasó recién cuando vuelve el resultado: si dice mode "proposed", quedó como propuesta al grupo (decilo así: "te lo dejo propuesto al grupo"); si dice "applied", ya está hecho. Nunca lo anuncies antes.',
+    'Si algo es solo para la persona ("para mí solo"), mandá participant_ids con su id: eso es personal y se aplica directo.',
+    'Usá siempre los ids reales de "Datos para herramientas"; nunca inventes un id. Si te falta uno, pedilo con get_trip_overview o get_day_plan.',
     'Antes de una herramienta lenta, avisá en 3-4 palabras ("Dale, lo busco").',
     `Hoy es ${i.nowText}.`,
   ];
@@ -35,6 +45,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     lines.push(`Viaje: ${i.trip.summary}`);
     lines.push(i.trip.upcoming.length ? `Hoy sigue:\n${bullets(i.trip.upcoming)}` : 'Hoy no hay nada más en el plan.');
     if (i.trip.companions.length) lines.push(`Con la persona en este tramo: ${i.trip.companions.join(', ')}.`);
+    lines.push(`Datos para herramientas (internos: nunca los leas en voz alta):\n${bullets([...(i.userId ? [`tu persona: user_id=${i.userId}`] : []), ...i.trip.toolData])}`);
   } else {
     lines.push('No hay un viaje abierto: ayudá con lo que pida donde esté.');
   }

@@ -5,7 +5,7 @@
 //    (toClaudeTools, ctx.actor='agent' + excepción de plan sobre tramos vacíos).
 // 4) Cierre: result + 1 fila trip_planned con el undo_token que borra todo lo creado.
 import { randomUUID } from 'node:crypto';
-import type { PlanTripResult, ToolInput, ToolName, ToolResponse, TransferMode } from '@build101/shared';
+import { SCOUT, type PlanTripResult, type ToolInput, type ToolName, type ToolResponse, type TransferMode } from '@build101/shared';
 import type { Op } from '../blocks';
 import { conflict, dbError, forbidden, notFound } from '../errors';
 import { fmtDay, insertFeed } from '../feed';
@@ -643,7 +643,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       const feed = await insertFeed(agentCtx, {
         trip_id: tripId,
         kind: 'trip_planned',
-        payload: { summary: `El asistente armó el viaje: ${summary}`, job_id: jobId, legs: legsForCount.length, blocks: createdBlocks.length, inverse },
+        payload: { summary: `${SCOUT.name} armó el viaje: ${summary}`, job_id: jobId, legs: legsForCount.length, blocks: createdBlocks.length, inverse },
         undoable: true,
       });
       undo_token = feed.undo_token ?? null;

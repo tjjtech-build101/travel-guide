@@ -39,12 +39,17 @@ export function topInterests(interests: Record<string, number> | null | undefine
 
 const hhmm = (t: string | null) => (t ? t.slice(0, 5) : null);
 
-/** "15:30 Café en el Solís (Teatro Solís)" para los bloques que siguen hoy. */
-export function upcomingLines(blocks: BlockVisibleRow[], now: string, limit = UPCOMING_LIMIT): string[] {
+/** Bloques de hoy que todavía no terminaron (sin ideas ni variantes de lluvia/cerrado). */
+export function upcomingBlocks(blocks: BlockVisibleRow[], now: string, limit = UPCOMING_LIMIT): BlockVisibleRow[] {
   return blocks
     .filter((b) => b.status !== 'idea' && b.plan_variant === 'main')
     .filter((b) => !b.end_time || hhmm(b.end_time)! >= now)
-    .slice(0, limit)
+    .slice(0, limit);
+}
+
+/** "15:30 Café en el Solís (Teatro Solís)" para los bloques que siguen hoy. */
+export function upcomingLines(blocks: BlockVisibleRow[], now: string, limit = UPCOMING_LIMIT): string[] {
+  return upcomingBlocks(blocks, now, limit)
     .map((b) => {
       const time = hhmm(b.start_time) ?? 'sin hora';
       const where = b.place_name && b.place_name !== b.title ? ` (${b.place_name})` : '';
@@ -66,25 +71,37 @@ async function loadTrip(ctx: ToolCtx, tripId: string, now: Date) {
   const ov = overview.data as {
     summary: string;
     members: { user_id: string; display_name: string | null }[];
-    legs: { id: string; member_ids: string[]; days: { date: string }[] }[];
+    legs: { id: string; city: string; start_date: string; end_date: string; member_ids: string[]; days: { id: string; date: string }[] }[];
   };
   const today = todayIso(now, TRIP_TZ);
   let upcoming: string[] = [];
   let legId: string | null = null;
+  let dayId: string | null = null;
+  let todayBlocks: BlockVisibleRow[] = [];
   try {
     const plan = await get_day_plan({ trip_id: tripId, date: today }, ctx);
-    const d = plan.data as { leg: { id: string } | null; blocks: BlockVisibleRow[] };
-    upcoming = upcomingLines(d.blocks, nowHHMM(now, TRIP_TZ));
+    const d = plan.data as { day: { id: string } | null; leg: { id: string } | null; blocks: BlockVisibleRow[] };
+    const hm = nowHHMM(now, TRIP_TZ);
+    upcoming = upcomingLines(d.blocks, hm);
+    todayBlocks = upcomingBlocks(d.blocks, hm).filter((b) => !b.masked);
     legId = d.leg?.id ?? null;
+    dayId = d.day?.id ?? null;
   } catch {
     // hoy no es un día del viaje: sin "lo que sigue"
   }
+  const myLegs = ov.legs.filter((l) => l.member_ids.includes(ctx.userId));
+  const toolData = [
+    `trip_id=${tripId}`,
+    dayId && legId ? `hoy ${today}: day_id=${dayId}, leg_id=${legId}` : `hoy ${today}: no es un día del viaje`,
+    ...myLegs.map((l) => `tramo ${l.city} ${l.start_date}→${l.end_date}: leg_id=${l.id}`),
+    ...todayBlocks.map((b) => `bloque «${b.title}» de hoy: block_id=${b.id}`),
+  ];
   const leg = ov.legs.find((l) => l.id === legId);
   const companions = (leg?.member_ids ?? [])
     .filter((id) => id !== ctx.userId)
     .map((id) => firstName(ov.members.find((m) => m.user_id === id)?.display_name))
     .filter((n): n is string => !!n);
-  return { summary: ov.summary, upcoming, companions };
+  return { summary: ov.summary, upcoming, companions, toolData };
 }
 
 async function loadMemories(ctx: ToolCtx, tripId: string | undefined): Promise<string[]> {
@@ -164,6 +181,7 @@ export async function loadVoiceContext(
     memories,
     location: input.location ?? null,
     focus,
+    userId: ctx.userId,
     personaId: persona,
   };
 }

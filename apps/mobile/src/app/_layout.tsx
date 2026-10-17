@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
+import { VoiceProvider } from '../voice/VoiceProvider';
 import { colors } from '../ui/theme';
 
 export default function RootLayout() {
@@ -19,7 +20,9 @@ export default function RootLayout() {
           <AuthProvider>
             <LocationContextProvider>
               <StatusBar style="dark" />
-              <RootNavigator />
+              <VoiceProvider>
+                <RootNavigator />
+              </VoiceProvider>
               <ConnectionBanner />
             </LocationContextProvider>
           </AuthProvider>
