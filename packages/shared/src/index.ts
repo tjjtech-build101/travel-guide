@@ -15,3 +15,5 @@ export * from './profile';
 export * from './scheduleWatcher';
 export * from './nowBrief';
 export * from './timezone';
+export * from './polyline';
+export * from './routeProgress';

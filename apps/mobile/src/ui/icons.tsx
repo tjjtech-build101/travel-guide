@@ -1,4 +1,5 @@
 // Íconos mínimos con react-native-svg (sin librerías de íconos extra).
+import type { ReactNode } from 'react';
 import type { ColorValue } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
@@ -219,5 +220,124 @@ export function CloseIcon({ color, size = 24 }: IconProps) {
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M6 6l12 12M18 6L6 18" />
     </Svg>
+  );
+}
+
+// ───────── Cómo llego: maniobras, modos y recentrar
+
+function Stroke({ color, size = 24, children }: IconProps & { children: ReactNode }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </Svg>
+  );
+}
+
+export function TurnLeftIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M16 21v-8a4 4 0 0 0-4-4H5M9 5L5 9l4 4" />
+    </Stroke>
+  );
+}
+
+export function TurnRightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M8 21v-8a4 4 0 0 1 4-4h7M15 5l4 4-4 4" />
+    </Stroke>
+  );
+}
+
+export function SlightLeftIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M14 21v-6L7 8M7 13V8h5" />
+    </Stroke>
+  );
+}
+
+export function SlightRightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M10 21v-6l7-7M12 8h5v5" />
+    </Stroke>
+  );
+}
+
+export function StraightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M12 21V4M6 10l6-6 6 6" />
+    </Stroke>
+  );
+}
+
+export function UTurnIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M15 21V9a4 4 0 0 0-8 0v6M4 12l3 3 3-3" />
+    </Stroke>
+  );
+}
+
+export function RoundaboutIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={12} cy={10} r={4} />
+      <Path d="M12 21v-7M16 10h4M17 7l3 3-3 3" />
+    </Stroke>
+  );
+}
+
+export function WalkIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={13} cy={4} r={1.8} />
+      <Path d="M9 21l2.5-6.5L14 17v4M11.5 14.5L12 9l-3 2v3M12 9l2.5 2.5L17 12" />
+    </Stroke>
+  );
+}
+
+export function BusIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Rect x={5} y={3} width={14} height={15} rx={2.5} />
+      <Path d="M5 11h14M8 18v2.5M16 18v2.5" />
+      <Circle cx={8.5} cy={14.5} r={0.6} />
+      <Circle cx={15.5} cy={14.5} r={0.6} />
+    </Stroke>
+  );
+}
+
+export function TrainIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Rect x={6} y={3} width={12} height={14} rx={3} />
+      <Path d="M6 10h12M9 17l-2.5 4M15 17l2.5 4" />
+      <Circle cx={9.5} cy={13.5} r={0.6} />
+      <Circle cx={14.5} cy={13.5} r={0.6} />
+    </Stroke>
+  );
+}
+
+export function CarIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M5 16v-4l2-5h10l2 5v4M5 16h14M4 12h16M6 16v2.5M18 16v2.5" />
+      <Circle cx={8} cy={14} r={0.6} />
+      <Circle cx={16} cy={14} r={0.6} />
+    </Stroke>
+  );
+}
+
+/** Recentrar el mapa en mí. */
+export function LocateIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={12} cy={12} r={6} />
+      <Circle cx={12} cy={12} r={1.5} />
+      <Path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </Stroke>
   );
 }
