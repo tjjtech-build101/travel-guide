@@ -29,7 +29,7 @@ Regla: **no se arranca un P1 hasta que el P0 corra punta a punta.**
 | 06 | [Generador de tours + contenido](prd/06-generador-de-tours-y-contenido.md) | Cerebro y contenido | 00 |
 | 07 | [Tour en vivo](prd/07-tour-en-vivo.md) | Columna / voz / nativo | 00, 05, 06 |
 | 08 | [Cámara a pedido](prd/08-camara-a-pedido.md) | Columna / voz / nativo | 00, 05 |
-| 09 | [Simulador de GPS / replay](prd/09-simulador-gps-replay.md) | Cerebro y contenido | 00 |
+| 09 | [Simulador de GPS / replay](prd/09-simulador-gps-replay.md) ✅ | Cerebro y contenido | 00 |
 | 10 | [Onboarding por voz + perfil](prd/10-onboarding-por-voz-y-perfil.md) | App y producto | 00, 05 |
 
 ### P1 — lo que hace que impresione

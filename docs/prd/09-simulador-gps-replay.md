@@ -2,7 +2,7 @@
 nro: 9
 prd: "09 · Simulador de GPS / replay"
 prioridad: P0
-estado: Por hacer
+estado: "Hecho (sin pantalla de demo con video)"
 carril: Cerebro y contenido
 tamano: M (1-3h)
 depende_de: "00"
@@ -11,6 +11,13 @@ notion_url: https://app.notion.com/p/3fc81924a5c68131ac0be877ca0e17dc
 ---
 
 # 09 · Simulador de GPS / replay
+
+> **Estado (sáb 17/10):** hecho, salvo la pantalla de demo con video + mapa (necesita `expo-video` → recompilar; queda para después).
+> - **Cómo se usa:** menú dev (long-press en el título "Mis viajes" o `build101:///dev`) → "Ubicación simulada" → ▶, 1x/2x/5x/10x, ±10 s / ±1 min, "Saltar a parada" (15 s antes). Badge **SIM** flotante con ▶/velocidad/tiempo (toque largo lo achica).
+> - **Fuentes de track:** seed de Ciudad Vieja (por defecto), **"Desde un tour…"** (cualquier tour de la base → track sintético que camina sus paradas a 1,3 m/s con 30 s en cada una; o "Solo paradas" sobre el track actual), archivo JSON (picker de `expo-file-system`, sin módulos nuevos) y grabaciones del celu.
+> - **Grabar:** menú dev → "Grabar track / grabaciones" (`/dev-record`): 1 Hz, marca de sync (flash + haptic, sin pitido), guarda cada 10 s en `Documents/tracks/<fecha>.raw.json`, al parar guarda también el suavizado `<fecha>.json`; "Compartir" abre la hoja del sistema (AirDrop/WhatsApp/Drive).
+> - **Código:** lógica pura en `packages/shared/src/track.ts` (tests: `pnpm --filter @build101/shared test`); provider en `apps/mobile/src/location/simulated.ts`; controles en `useSimulator()` (`LocationContext.tsx`). Scripts: `pnpm track:smooth raw.json > out.json`, `pnpm track:check [track.json] [--stops stops.json]`.
+> - **Desvíos:** la interfaz es la del código (`LocationFix`, `getCurrent()`), no la del PRD; zod como `TrackPointSchema`/`TrackSchema` (el tipo `TrackPoint` ya existía); barra de tiempo con botones en vez de arrastrable; el menú dev se abre como antes (no hay pantalla Perfil todavía).
 
 ## Objetivo
 

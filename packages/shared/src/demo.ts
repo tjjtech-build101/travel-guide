@@ -35,3 +35,17 @@ export const DEMO_PERSONAS = {
 
 /** Desfase entre el inicio del video grabado y el inicio del track de GPS (PRD 09). */
 export const DEMO_VIDEO_OFFSET_S = 0;
+
+/** Paradas del tour curado de Ciudad Vieja (mismas coordenadas que supabase/seed.sql → place_library), en orden. */
+export const CIUDAD_VIEJA_STOPS = [
+  { name: 'Puerta de la Ciudadela', lat: -34.90674, lng: -56.20125 },
+  { name: 'Plaza Independencia', lat: -34.90661, lng: -56.1995 },
+  { name: 'Palacio Salvo', lat: -34.90598, lng: -56.1987 },
+  { name: 'Teatro Solís', lat: -34.90722, lng: -56.20056 },
+  { name: 'Peatonal Sarandí', lat: -34.9069, lng: -56.2025 },
+  { name: 'Plaza Matriz', lat: -34.9069, lng: -56.2052 },
+  { name: 'Catedral Metropolitana', lat: -34.9066, lng: -56.206 },
+  { name: 'Cabildo', lat: -34.90745, lng: -56.20525 },
+  { name: 'Museo Torres García', lat: -34.90697, lng: -56.2033 },
+  { name: 'Mercado del Puerto', lat: -34.9067, lng: -56.2128 },
+] as const;

@@ -10,7 +10,10 @@
     "typecheck": "pnpm -r typecheck",
     "db:start": "npx supabase start",
     "db:reset": "npx supabase db reset",
-    "db:bundle": "node scripts/db-bundle.mjs"
+    "db:bundle": "node scripts/db-bundle.mjs",
+    "track:make": "tsx scripts/make-track.ts",
+    "track:smooth": "tsx scripts/track-smooth.ts",
+    "track:check": "tsx scripts/track-check.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
