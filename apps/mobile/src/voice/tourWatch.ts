@@ -75,7 +75,7 @@ export function watchTourJob(jobId: string, tourId: string): Promise<TourWatchRe
       const { data } = await supabase.auth.getSession();
       await supabase.realtime.setAuth(data.session?.access_token ?? null);
       channel = supabase
-        .channel(`voice-tour-job:${jobId}`)
+        .channel(`voice-tour-job:${jobId}:${Math.random().toString(36).slice(2, 8)}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'agent_jobs', filter: `id=eq.${jobId}` }, (p) =>
           void finish(p.new as AgentJobRow),
         )

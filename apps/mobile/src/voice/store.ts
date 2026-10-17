@@ -19,6 +19,7 @@ import { looksLikeEcho } from './echo';
 import { micPermission, requestMic } from './permissions';
 import { setSpeaker, startCallAudio, stopCallAudio } from './audioRoute';
 import { RealtimeConnection, type ServerEvent } from './realtimeClient';
+import { camera, setBeforeCameraOpen } from './camera/cameraStore';
 import { watchTourJob } from './tourWatch';
 import { actionText, registerLocalTool, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
 
@@ -35,11 +36,15 @@ export type StartCallArgs = {
   context?: Record<string, unknown>;
 };
 
-type Fix = { lat: number; lng: number; accuracy?: number | null } | null;
+type Fix = { lat: number; lng: number; accuracy?: number | null; heading?: number | null } | null;
 let locationSource: () => Fix = () => null;
 /** VoiceProvider registra el LocationProvider actual (real | simulado): el store vive fuera de React. */
 export function setLocationSource(fn: () => Fix) {
   locationSource = fn;
+}
+/** Última posición del LocationProvider actual (la cámara la usa: en modo simulado sale del track). */
+export function currentLocation(): Fix {
+  return locationSource();
 }
 
 export type Line = { id: string; role: 'user' | 'assistant'; text: string; at: string; final: boolean };
@@ -245,6 +250,20 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     if (announce) requestResponse();
     log('→', `idioma ${lang}`);
   };
+
+  // Por voz ("mirá esto", "¿qué dice esa placa?"): abre la cámara y devuelve enseguida. La narración llega después
+  // como [EVENTO:photo_result] (así no hay doble respuesta).
+  registerLocalTool('look_at_photo', async (input) => {
+    const question = typeof input.question === 'string' ? input.question : null;
+    camera.open({ question, source: 'voice' });
+    log('🔧', `cámara abierta${question ? `: «${question}»` : ''}`);
+    return { ok: true, data: { status: 'capturing' } };
+  });
+  setBeforeCameraOpen(() => {
+    if (!get().expanded) return false;
+    set({ expanded: false });
+    return true;
+  });
 
   registerLocalTool('set_language', async (input) => {
     const lang = String(input.lang ?? '').trim().slice(0, 2).toLowerCase();
@@ -460,7 +479,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       trip_id: args.tripId ?? undefined,
       tour_id: args.tourId ?? undefined,
       focus: args.focus,
-      location: (args.location ?? locationSource()) ?? undefined,
+      location: (() => {
+        const f = args.location ?? locationSource();
+        return f ? { lat: f.lat, lng: f.lng, accuracy: f.accuracy ?? null } : undefined;
+      })(),
       lang: isRetry ? get().lang : undefined,
       sdp: c.offer ?? undefined,
     });

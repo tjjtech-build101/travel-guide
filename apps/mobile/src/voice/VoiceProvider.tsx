@@ -13,6 +13,7 @@ import { setLocationSource, useVoiceStore } from './store';
 import { ActionCards } from './ui/ActionCards';
 import { CallBar } from './ui/CallBar';
 import { CallSummary } from './ui/CallSummary';
+import { CameraModal } from './camera/CameraModal';
 import { CallView } from './ui/CallView';
 
 export function VoiceProvider({ children }: { children: ReactNode }) {
@@ -24,7 +25,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setLocationSource(() => {
       const f = provider.getCurrent();
-      return f ? { lat: f.lat, lng: f.lng, accuracy: f.accuracy } : null;
+      return f ? { lat: f.lat, lng: f.lng, accuracy: f.accuracy, heading: f.heading } : null;
     });
   }, [provider]);
   const inCall = status === 'live' || status === 'reconnecting' || status === 'ending';
@@ -39,6 +40,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         </View>
       </SafeAreaInsetsContext.Provider>
       <CallView />
+      <CameraModal />
       <CallSummary />
       <MicPermissionSheet />
     </View>

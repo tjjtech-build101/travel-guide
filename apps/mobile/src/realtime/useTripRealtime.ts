@@ -78,7 +78,9 @@ export function useTripRealtime(tripId: string | undefined) {
       await supabase.realtime.setAuth(data.session?.access_token ?? null);
       if (cancelled) return;
 
-      channel = supabase.channel(`trip:${tripId}`);
+      // Nombre único por suscripción: removeChannel es asíncrono y supabase.channel() devuelve el canal viejo si el
+      // topic coincide (ya suscripto → "cannot add postgres_changes callbacks after subscribe()" al volver de background).
+      channel = supabase.channel(`trip:${tripId}:${Math.random().toString(36).slice(2, 8)}`);
       for (const table of REALTIME_TABLES) {
         channel.on(
           'postgres_changes',
