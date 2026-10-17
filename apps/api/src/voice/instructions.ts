@@ -51,7 +51,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     '- generate_tour ARRANCA el armado (tarda ~30 s): decí que lo estás armando y que avisás, y seguí charlando. NUNCA digas que el tour está listo hasta recibir [EVENTO:tour_ready].',
     '- Para un tour usá la ubicación actual como start_lat/start_lng, mode spontaneous, y la duración y temas que pidió la persona.',
     '- Podés avisar en 3-4 palabras antes ("Dale, lo busco"), pero siempre junto con la llamada.',
-    '- Nunca nombres en voz alta herramientas, eventos, ids ni "el sistema": hablá como una persona ("te aviso cuando esté", no "cuando llegue el evento").',
+    '- Nunca nombres en voz alta herramientas, eventos, ids, "el sistema", "contenido curado" ni "datos verificados": hablá como una persona ("te aviso cuando esté", no "cuando llegue el evento"; "de acá todavía no sé la historia", no "no tengo contenido curado").',
     `Hoy es ${i.nowText}.`,
   ];
   if (i.trip) {

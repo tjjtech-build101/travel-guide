@@ -16,7 +16,7 @@ const assert = {
 };
 
 import { echoScore, looksLikeEcho } from './echo';
-import { actionText, parseArgs } from './toolText';
+import { actionText, parseArgs, promisedWithoutCalling } from './toolText';
 
 // Casos reales del simulador (el scout se escuchó a sí mismo).
 assert.ok(looksLikeEcho('Todo bien por aquí.', '¡Todo bien por acá! ¿Qué necesitás organizar ahora?'));
@@ -39,6 +39,12 @@ assert.deepEqual(actionText('add_block', ok({ mode: 'applied', block: { title: '
 });
 assert.deepEqual(actionText('add_block', ok({ mode: 'proposed' })), { text: 'Propuesta enviada al grupo', proposed: true });
 assert.equal(actionText('search_places', { ok: true, data: [] }), null);
+
+assert.ok(promisedWithoutCalling('No lo tengo, lo averiguo y te cuento.'));
+assert.ok(promisedWithoutCalling('Dale, lo busco.'));
+assert.ok(promisedWithoutCalling('Te aviso cuando esté listo.'));
+assert.ok(!promisedWithoutCalling('El Palacio Salvo lo diseñó Mario Palanti.'));
+assert.ok(!promisedWithoutCalling('¿En qué te doy una mano?'));
 
 if (failures) throw new Error(`${failures} fallas`);
 console.log('voice: ok');

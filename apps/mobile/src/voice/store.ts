@@ -23,6 +23,7 @@ import { RealtimeConnection, type ServerEvent } from './realtimeClient';
 import { camera, setBeforeCameraOpen } from './camera/cameraStore';
 import { watchJob, watchTourJob } from './tourWatch';
 import { actionText, registerLocalTool, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
+import { promisedWithoutCalling } from './toolText';
 
 export type CallStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'ending' | 'summary' | 'error';
 
@@ -129,6 +130,11 @@ let vadMode: 'normal' | 'barge' = 'normal';
 const MAX_EVENTS = 200;
 let echoCount = 0;
 /** Eventos que llegaron mientras la llamada conectaba: se mandan apenas está en vivo. */
+/** Último recordatorio de "dijiste que lo buscabas" (máximo uno cada 30 s, para no entrar en loop). */
+let lastNudgeAt = 0;
+/** Última function call y jobs que se están escuchando: "te aviso cuando esté" después de una llamada es correcto. */
+let lastToolAt = 0;
+let jobsWatching = 0;
 let pendingEvents: { type: VoiceEventType; payload: unknown; respond: boolean }[] = [];
 /** Hay una respuesta del modelo en curso en el servidor (entre response.created y response.done). */
 let responseActive = false;
@@ -299,6 +305,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
 
   // ---------- herramientas ----------
   const flushCalls = async (calls: FunctionCall[]) => {
+    lastToolAt = Date.now();
     set((s) => ({ toolsRunning: [...s.toolsRunning, ...calls.map((c) => ({ callId: c.call_id, name: c.name }))] }));
     hapticLight();
     for (const c of calls) log('🔧', `${c.name}(${c.arguments.replace(/\s+/g, ' ').slice(0, 140)})`);
@@ -327,7 +334,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       const question = String(input.question ?? '');
       log('🔧', `research: «${question.slice(0, 60)}» (job ${jobId.slice(0, 8)}…)`);
       const sessionId = get().session?.voice_session_id;
+      jobsWatching++;
       void watchJob(jobId, 'La búsqueda').then((r) => {
+        jobsWatching = Math.max(0, jobsWatching - 1);
         if (get().session?.voice_session_id !== sessionId) return; // la llamada ya terminó
         if (r.ok) {
           const out = r.row.result as ResearchResult | null;
@@ -346,7 +355,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       if (!job_id || !tour_id) continue;
       log('🔧', `generate_tour: escuchando el job ${job_id.slice(0, 8)}…`);
       const sessionId = get().session?.voice_session_id;
+      jobsWatching++;
       void watchTourJob(job_id, tour_id).then((r) => {
+        jobsWatching = Math.max(0, jobsWatching - 1);
         if (get().session?.voice_session_id !== sessionId) return; // la llamada ya terminó
         if (r.ok) {
           log('🔧', `tour listo: ${r.event.stop_count} paradas`);
@@ -452,6 +463,25 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }
         const response = e.response as { status?: string; output?: { type: string; call_id: string; name: string; arguments: string }[] };
         const calls = (response?.output ?? []).filter((o) => o.type === 'function_call');
+        if (!calls.length && response?.status === 'completed') {
+          const said = (response.output ?? [])
+            .flatMap((o) => ((o as { content?: { transcript?: string; text?: string }[] }).content ?? []).map((c) => c.transcript ?? c.text ?? ''))
+            .join(' ');
+          const toolsBusy = get().toolsRunning.length > 0 || jobsWatching > 0 || Date.now() - lastToolAt < 20_000;
+          if (said && !toolsBusy && promisedWithoutCalling(said) && Date.now() - lastNudgeAt > 30_000) {
+            lastNudgeAt = Date.now();
+            log('⚠️', `prometió buscar sin llamar herramienta: «${said.slice(0, 60)}»`);
+            conn?.send({
+              type: 'conversation.item.create',
+              item: {
+                type: 'message',
+                role: 'system',
+                content: [{ type: 'input_text', text: 'Dijiste que lo ibas a buscar o averiguar pero no llamaste ninguna herramienta. Llamala ahora (research si es un dato que no tenés). No repitas el aviso en voz alta.' }],
+              },
+            });
+            requestResponse();
+          }
+        }
         if (calls.length) {
           void flushCalls(calls.map((c) => ({ call_id: c.call_id, name: c.name, arguments: c.arguments })));
         }
@@ -583,6 +613,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       responseActive = false;
       responseQueued = false;
       pendingEvents = [];
+      lastNudgeAt = 0;
+      lastToolAt = 0;
+      jobsWatching = 0;
       set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
       try {
         startCallAudio(get().speaker);

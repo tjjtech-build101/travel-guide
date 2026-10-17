@@ -17,6 +17,14 @@ export function toModelOutput(res: ToolResponse): string {
   return s.length > 12_000 ? `${s.slice(0, 12_000)}…(recortado)` : s;
 }
 
+/**
+ * El modelo a veces anuncia que va a buscar/averiguar y termina el turno sin llamar la herramienta (visto en el iPhone
+ * con research). Si el texto de una respuesta sin function_call suena a eso, se le recuerda que la llame.
+ */
+export function promisedWithoutCalling(text: string): boolean {
+  return /\b(lo|te lo) (averiguo|busco|investigo|reviso|chequeo|fijo)\b|\b(ya|ahora) (lo )?(busco|averiguo|me fijo)\b|\bdame un (segundo|toque)\b|\bte (aviso|cuento) (cuando|apenas|en cuanto)\b/i.test(text);
+}
+
 const FRIENDLY: Record<string, string> = {
   search_places: 'Buscando lugares',
   place_details: 'Mirando el lugar',
