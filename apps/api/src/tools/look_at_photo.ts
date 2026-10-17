@@ -12,11 +12,12 @@ import type { Db } from '../supabase';
 import type { ToolCtx, ToolOk } from './types';
 
 export const PHOTOS_BUCKET = 'photos';
-const NEARBY_RADIUS_M = 200;
+// 300 m: la Puerta de la Ciudadela está a ~203 m de Plaza Independencia y con 200 quedaba fuera de la lista.
+const NEARBY_RADIUS_M = 300;
 const MAX_NEARBY = 8;
 const MAX_FACTS_PER_PLACE = 5;
-/** ±0,0025° ≈ 280 m: caja para la consulta; después se filtra por distancia real. */
-const BBOX_DEG = 0.0025;
+/** ±0,0035° ≈ 390 m: caja para la consulta; después se filtra por distancia real. */
+const BBOX_DEG = 0.0035;
 const FRONT_DEG = 35;
 
 type Fact = { text: string; source_url: string; verified?: boolean };
@@ -89,10 +90,15 @@ const SYSTEM = [
   'Identificá qué muestra la foto usando la imagen y la lista (los marcados "ENFRENTE" son los más probables). place.place_id solo puede ser un id de la lista; si es algo que no está en la lista, place_id null y el nombre que veas.',
   'confidence: 0 a 1. Si es menor a 0.6, en narration decí que no estás seguro y describí lo que ves, sin afirmar un nombre ni datos históricos.',
   'Podés usar SOLO los DATOS VERIFICADOS dados y el texto que se lee literalmente en la imagen. Nunca agregues años, nombres o cifras que no estén ahí. facts_used = los datos de la lista que usaste, copiados tal cual.',
-  'inscriptions: todo texto legible (placas, carteles) con su idioma; translation al idioma de la persona si difiere, si no null.',
+  'inscriptions: máximo 3, las más relevantes (placas, nombres, carteles cercanos), con su idioma; translation al idioma de la persona si difiere, si no null. No transcribas carteles de publicidad uno por uno.',
   'Si te hacen una pregunta, respondela primero. narration: tono hablado, ≤60 palabras, en el idioma pedido, sin nombrar "la lista" ni "los datos".',
   'quality: blurry si está movida, dark si está oscura (en ese caso narration pide sacar otra).',
 ].join('\n');
+
+/** VISION_MODEL permite comparar modelos por latencia (default Opus 5.5, Arquitectura). */
+export function visionModel(): string {
+  return process.env.VISION_MODEL?.trim() || PLANNER_MODEL;
+}
 
 export type VisionLLM = (args: { system: string; text: string; imageBase64: string }) => Promise<LookAtPhotoModelOutput>;
 
@@ -103,8 +109,8 @@ export const anthropicVision: VisionLLM = async ({ system, text, imageBase64 }) 
   const format = betaZodOutputFormat(LookAtPhotoModelOutput);
   // Mismo patrón que agents/llm.ts: output_config no está tipado en el SDK 0.70 → cast.
   const params = {
-    model: PLANNER_MODEL,
-    max_tokens: 2000,
+    model: visionModel(),
+    max_tokens: 1200,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: format.schema } },
     system: [{ type: 'text', text: system }],
     messages: [
