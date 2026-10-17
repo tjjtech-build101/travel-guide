@@ -13,6 +13,7 @@ import { plan_trip } from './plan_trip';
 import { remove_block } from './remove_block';
 import { route_eta } from './route_eta';
 import { search_places } from './search_places';
+import { get_stop_content, next_stop, skip_stop, start_tour, tour_status } from './tour_live';
 import type { Handler, ToolCtx } from './types';
 import { undo } from './undo';
 import { update_block } from './update_block';
@@ -34,6 +35,11 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   generate_tour,
   weather,
   events_search,
+  start_tour,
+  tour_status,
+  get_stop_content,
+  next_stop,
+  skip_stop,
 };
 
 export type ToolRun = { status: number; body: ToolResponse };

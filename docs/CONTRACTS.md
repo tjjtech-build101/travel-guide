@@ -265,3 +265,14 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - Env de la API: `OPENAI_REALTIME_MODEL` (default `gpt-realtime-2.1`), `VOICE_VAD` (`semantic_vad` default | `server_vad`), `VOICE_VAD_EAGERNESS` (`low`), `VOICE_VAD_THRESHOLD`, `VOICE_VAD_SILENCE_MS`, `API_REGION` (default `gru1`).
 - `activity_feed.payload.summary` de acciones del agente usa `SCOUT.name` (antes "El asistente").
 
+
+---
+
+## Cambios PRD 07 (tour en vivo) — en código
+
+- Herramientas `start_tour` / `tour_status` / `get_stop_content` / `next_stop` / `skip_stop` con Zod en `packages/shared/src/tools/tour.ts` (`TourProgress` = forma de `tours.progress`, `STOP_LAYERS` = valores de `content_told.layer`, tipos de respuesta `StartTourResult`, `TourStatusResult`, `StopContentResult`, `NextStopResult`, `SkipStopResult`).
+- `tour_status` acepta además `progress?` (estado local del celu: si viene, se guarda; ids ajenos al tour se ignoran), `lat?/lng?` (ETA a pie a la próxima con `route_eta`) y `end?: true` (= "Terminar": `tours.status='done'`). No hay herramienta aparte para terminar.
+- `next_stop` acepta `lat?/lng?` (explorador: la pendiente más cercana). Si no quedan pendientes → `done: true` y `tours.status='done'`.
+- `get_stop_content` escribe `content_told` (upsert, no pisa `told_at`) para los participantes de la `voice_sessions` de tour abierta del usuario (o solo el usuario); `already_told` es del usuario que llama. Capa sin contenido → `text: null` y no escribe.
+- Permisos: el tour se lee con RLS (dueño o miembro del viaje); las escrituras (`tours.progress/status`, `content_told` de otros participantes) van con service role. Sin `activity_feed` (no son cambios del itinerario).
+- `POST /voice/session` con `mode:'tour'` suma las reglas del modo tour (`apps/api/src/voice/tourRules.ts`) y la lista de paradas con sus `stop_id`.

@@ -9,6 +9,7 @@ import { buildInstructions, nowText, type InstructionsInput } from './instructio
 import { createHash } from 'node:crypto';
 import { buildRealtimeSession, createCall, createClientSecret } from './openai';
 import { runVoiceSummary, type SummaryLLM } from './summary';
+import { tourModeRules } from './tourRules';
 
 export type VoiceDeps = {
   createClientSecret: typeof createClientSecret;
@@ -47,7 +48,7 @@ async function readJson(text: string): Promise<{ ok: true; value: unknown } | { 
   }
 }
 
-export function voiceRoutes(deps: VoiceDeps = { createClientSecret, createCall }) {
+export function voiceRoutes(deps: VoiceDeps = { createClientSecret, createCall, modeRules: tourModeRules }) {
   const r = new Hono<{ Variables: AuthVars }>();
   r.use('*', requireAuth);
 

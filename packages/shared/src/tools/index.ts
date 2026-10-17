@@ -17,8 +17,10 @@ import {
   UpdateBlockInput,
   WeatherInput,
 } from './schemas';
+import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, TourStatusInput } from './tour';
 
 export * from './schemas';
+export * from './tour';
 
 type ToolDef = { description: string; input: z.ZodObject };
 
@@ -85,6 +87,31 @@ export const toolDefs = {
   events_search: {
     description: 'Busca eventos (con fecha y fuente) en una ciudad para un rango de fechas.',
     input: EventsSearchInput,
+  },
+  // PRD 07 · tour en vivo
+  start_tour: {
+    description:
+      'Arranca un tour listo (status active) y devuelve el tour con sus paradas. Si ya estaba activo, devuelve el progreso guardado.',
+    input: StartTourInput,
+  },
+  tour_status: {
+    description:
+      'Estado del tour en vivo: parada actual, próxima (con ETA a pie), minutos restantes, visitadas y salteadas. Con end:true lo termina.',
+    input: TourStatusInput,
+  },
+  get_stop_content: {
+    description:
+      'Texto verificado de una capa de la parada (short, more, secret, myth, photo, kid, transition) con sus fuentes. already_told=true si ya se lo contaste a esta persona: resumilo en 1 frase o salteala.',
+    input: GetStopContentInput,
+  },
+  next_stop: {
+    description:
+      'Marca la parada actual como visitada y devuelve la siguiente con transition_to_next y nav_to_next (indicaciones para llegar).',
+    input: NextStopInput,
+  },
+  skip_stop: {
+    description: 'Saltea una parada del tour (p. ej. si la persona acepta recortar por tiempo).',
+    input: SkipStopInput,
   },
 } as const satisfies Record<string, ToolDef>;
 
