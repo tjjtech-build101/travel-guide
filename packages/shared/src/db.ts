@@ -91,6 +91,21 @@ export interface BlockTransfer {
   to?: string;
   mode: TransferMode;
   duration_min?: number;
+  /** Traslados dentro del día: detalle de transporte público (ver Transfer en tools/schemas). */
+  lines?: {
+    name: string;
+    vehicle: 'bus' | 'subway' | 'train' | 'tram' | 'ferry' | 'other';
+    from_stop?: string;
+    to_stop?: string;
+    departure?: string;
+    arrival?: string;
+    headsign?: string;
+    stops?: number;
+  }[];
+  walk_min?: number;
+  summary?: string;
+  maps_url?: string;
+  estimated?: boolean;
 }
 
 export interface BlockAlert {

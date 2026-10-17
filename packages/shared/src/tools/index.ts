@@ -3,17 +3,21 @@ import { z } from 'zod';
 import {
   AddBlockInput,
   AddIdeaInput,
+  DeleteTripInput,
   EventsSearchInput,
   GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
   LookAtPhotoInput,
+  ResearchInput,
   MoveBlockInput,
   PlaceDetailsInput,
+  PlanTransfersInput,
   PlanTripInput,
   RemoveBlockInput,
   RouteEtaInput,
   SearchPlacesInput,
+  ShouldGenerateTourInput,
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
@@ -24,6 +28,7 @@ import { GapSuggestionsInput, NowBriefInput, PlanDayInput, ReportLateInput } fro
 export * from './schemas';
 export * from './tour';
 export * from './nowTools';
+export * from './routeDetail';
 
 type ToolDef = { description: string; input: z.ZodObject };
 
@@ -73,6 +78,16 @@ export const toolDefs = {
     description: 'Deshace una acción anterior a partir de su undo_token.',
     input: UndoInput,
   },
+  plan_transfers: {
+    description:
+      'Calcula cómo ir entre los bloques de un día: si a pie es más de 20 min, busca transporte público (líneas, paradas, horario de salida) y agrega bloques de traslado al plan. Sin day_id/leg_id, todo el viaje.',
+    input: PlanTransfersInput,
+  },
+  research: {
+    description:
+      'Investiga en la web una pregunta que no podés responder con lo que tenés (año, origen, quién, curiosidad) y verifica cada dato contra su fuente. Si ya lo teníamos guardado devuelve al toque { cached: true, answer, facts }; si no, es un trabajo en segundo plano (~30-60 s): devuelve { job_id } y la respuesta llega después. Nunca inventes mientras tanto.',
+    input: ResearchInput,
+  },
   look_at_photo: {
     description:
       'Mira una foto (Claude visión + GPS + orientación + lugares cercanos con datos verificados): qué lugar es, inscripciones y su traducción, y una narración corta. Guarda la foto en photos.',
@@ -95,6 +110,16 @@ export const toolDefs = {
   events_search: {
     description: 'Busca eventos (con fecha y fuente) en una ciudad para un rango de fechas.',
     input: EventsSearchInput,
+  },
+  should_generate_tour: {
+    description:
+      'Decide si tiene sentido ofrecer "Generar tour" para un bloque del itinerario (ej. un museo o una zona histórica: sí; una comida puntual, un traslado o un alojamiento: no). Usa OpenAI Decisions API, responde en milisegundos.',
+    input: ShouldGenerateTourInput,
+  },
+  delete_trip: {
+    description:
+      'Borra un viaje entero (tramos, días, bloques, tours, gastos, todo lo que cuelgue de trip_id) de forma IRREVERSIBLE. Solo el organizador puede hacerlo.',
+    input: DeleteTripInput,
   },
   // PRD 07 · tour en vivo
   start_tour: {

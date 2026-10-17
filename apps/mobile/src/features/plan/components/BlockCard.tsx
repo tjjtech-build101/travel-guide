@@ -5,8 +5,10 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { AvatarStack, type AvatarPerson } from '../../../ui/Avatar';
+import { Button } from '../../../ui/Button';
 import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
+import { useShouldGenerateTour } from '../../tours/useShouldGenerateTour';
 import { ALERT_COLORS, ALERT_FALLBACK, STATUS_COLORS, STATUS_LABEL, TRANSFER_MODE_LABEL, TYPE_LABEL } from '../labels';
 import { durationLabel, hhmm, timeLabel, type GhostBlock, type PlanBlock } from '../selectors';
 import { AlertIcon, LockIcon, TypeIcon } from './TypeIcon';
@@ -50,7 +52,12 @@ export function transferLabel(b: Pick<PlanBlock, 'transfer' | 'duration_min'>): 
   if (!b.transfer) return '';
   const mode = TRANSFER_MODE_LABEL[b.transfer.mode] ?? b.transfer.mode;
   const dur = durationLabel(b.transfer.duration_min ?? b.duration_min);
-  return dur ? `${mode} · ${dur}` : mode;
+  // Traslados con transporte público: "Bus 121 · sale 18:05 · 26 min".
+  const lines = b.transfer.lines?.map((l) => l.name).join(' + ');
+  const dep = b.transfer.lines?.[0]?.departure;
+  const head = lines ? `${mode} ${lines}${dep ? ` · sale ${dep}` : ''}` : mode;
+  const est = b.transfer.estimated ? ' (estimado)' : '';
+  return dur ? `${head} · ${dur}${est}` : `${head}${est}`;
 }
 
 export function a11yTime(b: Pick<PlanBlock, 'start_time' | 'end_time' | 'time_flex'>): string {
@@ -67,9 +74,17 @@ type CardProps = {
   people: Map<string, AvatarPerson>;
   onPress?: (b: PlanBlock) => void;
   onLongPress?: (b: PlanBlock) => void;
+  /** Bloque tipo "tour" sin tour_id todavía: ofrece armarlo (PRD 06/18). */
+  onGenerateTour?: (b: PlanBlock) => void;
 };
 
-export const BlockCard = memo(function BlockCard({ block, me, legColor, people, onPress, onLongPress }: CardProps) {
+export const BlockCard = memo(function BlockCard({ block, me, legColor, people, onPress, onLongPress, onGenerateTour }: CardProps) {
+  // Hooks SIEMPRE antes de cualquier return condicional (incluido el de masked, abajo).
+  // "tour" ya es el tipo pensado para esto: siempre sí. Para el resto (activity, meal, lodging...),
+  // lo decide should_generate_tour (OpenAI Decisions API) — un museo sí, un restaurante puntual no.
+  const askAi = !!onGenerateTour && !block.masked && block.type !== 'tour';
+  const aiDecision = useShouldGenerateTour(askAi ? block : null);
+
   if (block.masked) return <BusyCard block={block} legColor={legColor} />;
   const s = hhmm(block.start_time);
   const e = hhmm(block.end_time);
@@ -79,6 +94,7 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
   const label = `${TYPE_LABEL[block.type]} ${block.title}, ${a11yTime(block)}, ${STATUS_LABEL[block.status].toLowerCase()}${
     privateMine ? ', privado' : ''
   }`;
+  const showGenerateTour = !!onGenerateTour && (block.type === 'tour' || aiDecision.data?.should_tour === true);
   return (
     <Animated.View entering={isFresh(block) ? FadeInDown.duration(200) : undefined}>
       <Pressable
@@ -114,6 +130,14 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
           ) : null}
           {transfer ? <Text style={styles.meta}>{transfer}</Text> : null}
           <AlertChips alerts={block.alerts} />
+          {showGenerateTour ? (
+            <Button
+              label={block.tour_id ? 'Generar de nuevo' : 'Generar tour'}
+              variant="secondary"
+              style={styles.genTourBtn}
+              onPress={() => onGenerateTour!(block)}
+            />
+          ) : null}
           <View style={styles.footer}>
             <StatusBadge status={block.status} />
             {participants.length ? <AvatarStack people={participants} size={24} max={3} /> : null}
@@ -224,6 +248,7 @@ const styles = StyleSheet.create({
   title: { flexShrink: 1, fontSize: font.body, fontWeight: '600', color: colors.text },
   meta: { fontSize: font.tiny + 1, color: colors.textMuted },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  genTourBtn: { alignSelf: 'flex-start', paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 0, marginTop: space.xs },
   badge: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
   badgeText: { fontSize: font.tiny - 1, fontWeight: '700' },
   alerts: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginTop: 2 },

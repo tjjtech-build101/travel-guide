@@ -27,6 +27,19 @@ export type PlanTripResult = {
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
 };
 
+/** agent_jobs.result de un job kind='research' (voz: "lo averiguo y te cuento"). */
+export type ResearchResult = {
+  question: string;
+  /** ≤60 palabras, armada SOLO con facts verificados. Vacía si no se encontró nada respaldado. */
+  answer: string;
+  facts: { text: string; source_url: string }[];
+  /** Datos investigados que no pasaron la verificación (para la mini-evaluación). */
+  rejected: number;
+  place_id: string | null;
+  /** Facts nuevos guardados en place_library (dedupe por texto). */
+  saved_facts: number;
+};
+
 /** Respuesta de POST /tools/generate_tour (data). */
 export type GenerateTourStart = { job_id: string; tour_id: string };
 

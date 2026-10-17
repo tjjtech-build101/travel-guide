@@ -105,6 +105,21 @@ type NominatimPlace = {
   extratags?: Record<string, string>;
 };
 
+type NominatimReverse = { address?: { city?: string; town?: string; village?: string; municipality?: string; country?: string } };
+
+/** lat/lng → ciudad + país (Nominatim reverse, sin key). Usa la misma cola que osmDetails (1 req/s). */
+export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string; country: string } | null> {
+  return cached(`osm-reverse:${lat.toFixed(3)}:${lng.toFixed(3)}`, async () => {
+    const r = await throttled(() =>
+      getJson<NominatimReverse>(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&accept-language=es`),
+    );
+    const a = r.address;
+    const city = a?.city ?? a?.town ?? a?.village ?? a?.municipality;
+    if (!city) return null;
+    return { city, country: a?.country ?? '' };
+  });
+}
+
 export async function osmDetails(id: string): Promise<PlaceDetails> {
   return cached(`osm-details:${id}`, async () => {
     const osmId = id.slice(4);

@@ -8,6 +8,8 @@ import { distanceMeters, LookAtPhotoModelOutput, type LookAtPhotoOutput, type To
 import { PLANNER_MODEL } from '../agents/llm';
 import { env } from '../env';
 import { badInput, dbError, notConfigured, ToolFailure, upstream } from '../errors';
+import { runInBackground } from '../jobs';
+import { ensurePlace } from '../places/library';
 import type { Db } from '../supabase';
 import type { ToolCtx, ToolOk } from './types';
 
@@ -19,6 +21,8 @@ const MAX_FACTS_PER_PLACE = 5;
 /** ±0,0035° ≈ 390 m: caja para la consulta; después se filtra por distancia real. */
 const BBOX_DEG = 0.0035;
 const FRONT_DEG = 35;
+/** Confianza mínima para sumar a place_library un lugar que la cámara reconoció y no estaba. */
+const NEW_PLACE_CONFIDENCE = 0.75;
 
 type Fact = { text: string; source_url: string; verified?: boolean };
 type PlaceRow = { id: string; name: string | null; lat: number | null; lng: number | null; tier: string | null; facts: Fact[] | null };
@@ -262,6 +266,21 @@ export async function look_at_photo(input: ToolInput<'look_at_photo'>, ctx: Tool
     .select('id')
     .single();
   if (error) console.warn('[look_at_photo] photos:', error.message);
+
+  // Memoria: un lugar reconocido con confianza que no estaba en place_library se agrega (de fondo, sin sumar latencia)
+  // y la foto queda vinculada. ensurePlace solo crea si search_places lo ubica con ese nombre cerca.
+  const photoId = (photo?.id as string | undefined) ?? null;
+  if (out.place && !out.place.place_id && out.place.confidence >= NEW_PLACE_CONFIDENCE) {
+    const name = out.place.name;
+    runInBackground(
+      'look_at_photo/new_place',
+      ensurePlace(ctx.admin, { name, near: { lat: input.lat, lng: input.lng }, language: lang }).then(async (p) => {
+        if (!p) return;
+        if (p.created) console.log(`[look_at_photo] lugar nuevo desde la cámara: ${name}`);
+        if (photoId) await ctx.admin.from('photos').update({ place_id: p.id, caption: name }).eq('id', photoId);
+      }),
+    );
+  }
   lap('total');
   console.log(`[look_at_photo] ${JSON.stringify(timings)} · ${nearby.length} cercanos · ${out.place?.name ?? '—'} (${out.place?.confidence ?? 0})`);
 

@@ -1,10 +1,11 @@
 // Vista Planificación (decisiones del sábado): pestañas internas Itinerario · Eventos · Tours · Gastos.
 // Itinerario = Plan del PRD 02: línea de tiempo por tramo y día, filtros, tramos paralelos, ideas, propuestas y alertas.
+import { useQueryClient } from '@tanstack/react-query';
 import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
@@ -26,6 +27,7 @@ import {
 import { DotsIcon, PlusIcon } from '../../../../features/plan/components/TypeIcon';
 import { legColorMap } from '../../../../features/plan/labels';
 import { showMenu } from '../../../../features/plan/menu';
+import { calculateTransfers } from '../../../../features/plan/transfers';
 import { openBank, openBlock, openNewBlock, openProposals } from '../../../../features/plan/nav';
 import {
   useMe,
@@ -38,13 +40,13 @@ import { buildPlanSections, selectBranch, type PlanBlock, type PlanRow } from '.
 import { exportIcs, shareDay } from '../../../../features/plan/share';
 import { usePlanMapStore } from '../../../../features/plan/store';
 import {
-  EventsPlaceholder,
   ExpensesPlaceholder,
   parseSection,
   PlanningSectionBar,
-  ToursPlaceholder,
   type PlanningSection,
 } from '../../../../features/planning/sections';
+import { ToursTab } from '../../../../features/planning/ToursTab';
+import { generateTourForBlock } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
@@ -55,6 +57,7 @@ import { colors, font, radius, space } from '../../../../ui/theme';
 
 export default function PlanningTab() {
   // Deep link: /trip/<id>?section=itinerary|events|tours|expenses
+  const tripId = useTripId();
   const { section: linkSection } = useLocalSearchParams<{ section?: string }>();
   const [section, setSection] = useState<PlanningSection>(() => parseSection(linkSection));
   useEffect(() => {
@@ -71,8 +74,7 @@ export default function PlanningTab() {
         }}
       />
       {section === 'itinerary' ? <ItineraryView /> : null}
-      {section === 'events' ? <EventsPlaceholder /> : null}
-      {section === 'tours' ? <ToursPlaceholder /> : null}
+      {section === 'tours' ? <ToursTab tripId={tripId} /> : null}
       {section === 'expenses' ? <ExpensesPlaceholder /> : null}
     </View>
   );
@@ -85,6 +87,7 @@ function openGroup(tripId: string) {
 
 function ItineraryView() {
   const tripId = useTripId();
+  const qc = useQueryClient();
   const me = useMe();
   const trip = useTrip(tripId);
   const overview = usePlanOverview(tripId);
@@ -160,6 +163,15 @@ function ItineraryView() {
     [select, tripId],
   );
 
+  const onGenerateTour = useCallback(
+    async (b: PlanBlock) => {
+      const res = await generateTourForBlock({ id: b.id, trip_id: tripId, lat: b.lat, lng: b.lng, duration_min: b.duration_min });
+      if (!res.ok) Alert.alert('No pude generar el tour', res.message);
+      else Alert.alert('Generando el tour', 'El Scout está armando el recorrido con paradas verificadas. Lo vas a ver en la pestaña Tours cuando esté listo.');
+    },
+    [tripId],
+  );
+
   const addAt = useCallback(
     (legId?: string, dayId?: string | null) => {
       const target = legId ? { legId, dayId } : visibleDay.current;
@@ -214,6 +226,7 @@ function ItineraryView() {
   const tripMenu = () =>
     showMenu(trip.data?.title, [
       { label: 'Grupo y actividad', onPress: () => openGroup(tripId) },
+      { label: 'Calcular traslados (bus, a pie)', onPress: () => void calculateTransfers(qc, tripId) },
       { label: 'Tu perfil', onPress: () => router.push('/profile') },
       {
         label: 'Exportar viaje a calendario',
@@ -232,6 +245,7 @@ function ItineraryView() {
   const dayMenu = (row: Extract<PlanRow, { kind: 'day' }>) =>
     showMenu(undefined, [
       { label: 'Compartir este día', onPress: () => shareDay(row.leg, row.day, blocksByDay.get(row.day.id) ?? []) },
+      { label: 'Calcular traslados de este día', onPress: () => void calculateTransfers(qc, tripId, row.day.id) },
       {
         label: 'Exportar este día a calendario',
         onPress: () => exportIcs(`${trip.data?.title ?? 'Viaje'} ${row.day.date}`, blocksByDay.get(row.day.id) ?? [], [row.day]),
@@ -308,6 +322,7 @@ function ItineraryView() {
             legColor={legColors.get(item.leg.id) ?? colors.primary}
             people={people}
             onPress={onPressBlock}
+            onGenerateTour={onGenerateTour}
           />
         );
       case 'ghost':

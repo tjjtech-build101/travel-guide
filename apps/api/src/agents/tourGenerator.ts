@@ -16,6 +16,7 @@ import {
 } from '@build101/shared';
 import { dbError, notFound } from '../errors';
 import { insertFeed } from '../feed';
+import { reverseGeocode } from '../google/osm';
 import { overpassCandidates } from '../google/overpass';
 import { searchPlaces } from '../google/places';
 import { computeRoute } from '../google/routes';
@@ -23,17 +24,20 @@ import { wikidataSitelinkCount, wikipediaGeosearch } from '../google/wikipedia';
 import { createJob, JobProgress } from '../jobs';
 import type { Db } from '../supabase';
 import type { ToolCtx } from '../tools/types';
+import { runEventsSearch } from './eventsSearch';
 import { JobError } from './llm';
 import { addUsage, emptyUsage, estimateCostUsd, type Usage } from './schemas';
+import { appendFacts, type LibraryFact } from '../places/library';
 import { anthropicTourLlm, type TourLLM, type TourLlmConfig } from './tourLlm';
 import { ALT_SOURCE_SYSTEM, GENERATE_SYSTEM, RESEARCH_SYSTEM, VERIFY_SYSTEM, renderAltSourceUser, renderGenerateUser, renderResearchUser, renderVerifyUser } from './tourPrompts';
 
 // ───────────────────────── Candidatos (puro, testeable sin red)
 
-export type Fact = { text: string; source_url: string; verified: boolean };
+/** Ver LibraryFact (places/library.ts): quote / verified_at / origin se agregaron para la memoria de lugares. */
+export type Fact = { text: string; source_url: string; verified: boolean; quote?: string; verified_at?: string; origin?: LibraryFact['origin'] };
 
 export type RawCandidate = {
-  source: 'place_library' | 'google' | 'osm' | 'wikipedia';
+  source: 'place_library' | 'google' | 'osm' | 'wikipedia' | 'event';
   place_library_id?: string;
   google_place_id?: string | null;
   osm_id?: string | null;
@@ -75,7 +79,7 @@ export function nameSimilarity(a: string, b: string): number {
   return (2 * inter) / (A.size + B.size);
 }
 
-const SOURCE_RANK: Record<RawCandidate['source'], number> = { place_library: 3, google: 2, osm: 1, wikipedia: 0 };
+const SOURCE_RANK: Record<RawCandidate['source'], number> = { place_library: 3, event: 2, google: 2, osm: 1, wikipedia: 0 };
 
 /** Dedupe: mismo wikidata_id/google_place_id, o ≤40m + nombres similares (trigram ≥0.5). Fusiona lo más rico. */
 export function dedupeCandidates(cands: RawCandidate[]): RawCandidate[] {
@@ -222,6 +226,8 @@ export type TourDeps = {
   searchGoogleOrOsm: (args: { lat: number; lng: number; radius_m: number }) => Promise<RawCandidate[]>;
   searchWikipedia: (args: { lat: number; lng: number; radius_m: number }) => Promise<RawCandidate[]>;
   searchOverpass: (args: { lat: number; lng: number; radius_m: number }) => Promise<RawCandidate[]>;
+  /** Eventos reales (PRD 16, events_search) convertidos en candidatos: facts ya verificados, sin pasar por investigación. */
+  searchEvents: (args: { lat: number; lng: number; date: string; language: string }) => Promise<RawCandidate[]>;
   computeWalk: (stops: { lat: number; lng: number }[]) => Promise<{ total_min: number; total_m: number; polyline: string | null }>;
   heartbeatMs?: number;
 };
@@ -254,11 +260,41 @@ function placeLibraryRowToCandidate(row: {
   };
 }
 
-export function defaultDeps(admin: Db): TourDeps {
+export function defaultDeps(admin: Db, userId: string): TourDeps {
   return {
     llm: anthropicTourLlm(),
     config: { effort: 'medium', maxTokens: 8000, maxIterations: 10, fallbacks: true },
     now: () => new Date(),
+    searchEvents: async ({ lat, lng, date, language }) => {
+      const place = await reverseGeocode(lat, lng).catch(() => null);
+      if (!place) return [];
+      const events = await runEventsSearch(
+        { city: place.city, country: place.country, date_from: date, date_to: date, lang: language },
+        admin,
+        userId,
+      ).catch(() => []);
+      return events.map((e) => {
+        const facts: Fact[] = [
+          { text: `Evento: ${e.title}`, source_url: e.source_url, verified: true },
+          { text: `Fecha: ${e.date}${e.start_time ? ` ${e.start_time}` : ''}`, source_url: e.source_url, verified: true },
+          { text: `Lugar: ${e.venue}`, source_url: e.source_url, verified: true },
+          { text: e.price_text ? `Precio: ${e.price_text}` : `Lugar del evento: ${e.venue}`, source_url: e.source_url, verified: true },
+        ];
+        return {
+          source: 'event' as const,
+          google_place_id: null,
+          osm_id: null,
+          wikidata_id: null,
+          name: e.title,
+          lat: e.lat ?? lat,
+          lng: e.lng ?? lng,
+          interests: ['vida_nocturna', 'musica'] as InterestTag[],
+          notability: 200, // puntual y de hoy: prioridad alta cuando el interés matchea
+          category_hint: 'evento nocturno',
+          facts,
+        };
+      });
+    },
     nearbyPlaceLibrary: async ({ lat, lng, radius_m }) => {
       const { data, error } = await admin.rpc('nearby_place_library', { center_lat: lat, center_lng: lng, radius_m });
       if (error) {
@@ -390,14 +426,14 @@ export async function startGenerateTour(input: ToolInput<'generate_tour'>, ctx: 
     run: () =>
       runGenerateTour(
         { jobId, tourId, tripId, input, participantIds, startAt: input.start_at ?? block?.start_at ?? null, ctx, firstLine },
-        { ...defaultDepsLazy(admin), ...deps },
+        { ...defaultDepsLazy(admin, userId), ...deps },
       ),
   };
 }
 
-function defaultDepsLazy(admin: ToolCtx['admin']): TourDeps {
+function defaultDepsLazy(admin: ToolCtx['admin'], userId: string): TourDeps {
   let d: TourDeps | null = null;
-  const get = () => (d ??= defaultDeps(admin));
+  const get = () => (d ??= defaultDeps(admin, userId));
   return {
     get llm() {
       return get().llm;
@@ -410,6 +446,7 @@ function defaultDepsLazy(admin: ToolCtx['admin']): TourDeps {
     searchGoogleOrOsm: (a) => get().searchGoogleOrOsm(a),
     searchWikipedia: (a) => get().searchWikipedia(a),
     searchOverpass: (a) => get().searchOverpass(a),
+    searchEvents: (a) => get().searchEvents(a),
     computeWalk: (s) => get().computeWalk(s),
   };
 }
@@ -450,9 +487,19 @@ async function pool<T, R>(items: T[], size: number, fn: (t: T, i: number) => Pro
   return out;
 }
 
+/**
+ * Presupuesto de tiempo total del job (Vercel corta a los 300s, PRD 06 "runtime en Vercel"): a partir
+ * de esto dejamos de investigar/verificar lugares nuevos y escribimos lo que ya esté listo, en vez de
+ * que la función se corte a mitad de camino y la fila quede 'running' para siempre (visto en el iPhone,
+ * commit 263f073: la voz esperaba 4 min a que el job terminara solo).
+ */
+const JOB_DEADLINE_MS = 260_000;
+
 export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<void> {
   const { jobId, tourId, tripId, input, ctx } = args;
   const { admin } = ctx;
+  const t0 = Date.now();
+  const timeLeftMs = () => JOB_DEADLINE_MS - (Date.now() - t0);
   const progress = new JobProgress(admin, jobId, [{ at: new Date().toISOString(), text: args.firstLine }]);
   const usage: Usage = emptyUsage();
   const stats = { web_search_calls: 0, places_reused: 0, places_new: 0, facts_verified: 0, facts_rejected: 0 };
@@ -475,15 +522,25 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
 
     // ── Candidatos en paralelo
     const radius = input.radius_m ?? Math.min(1200, input.duration_min * 20);
+    // Si el grupo tiene ganas de salir de noche (interés en vida_nocturna/música), sumamos eventos
+    // reales de esa fecha puntual (events_search, PRD 16) como candidatos más: un recital de esta
+    // noche no es lo mismo que uno de hace un mes, por eso se busca por fecha exacta.
+    const nightlifeWeight = Math.max(weights.vida_nocturna ?? 0, weights.musica ?? 0);
+    const wantsNightlife = nightlifeWeight >= 3;
+    if (wantsNightlife) void progress.push('Che, veo que les gusta salir: buscando qué hay esta noche…');
     void progress.push('Buscando lugares con historia cerca…');
-    const [lib, goog, wiki, osm] = await Promise.all([
+    const [lib, goog, wiki, osm, events] = await Promise.all([
       deps.nearbyPlaceLibrary({ lat: input.start_lat, lng: input.start_lng, radius_m: radius }),
       deps.searchGoogleOrOsm({ lat: input.start_lat, lng: input.start_lng, radius_m: radius }),
       deps.searchWikipedia({ lat: input.start_lat, lng: input.start_lng, radius_m: radius }),
       deps.searchOverpass({ lat: input.start_lat, lng: input.start_lng, radius_m: radius }),
+      wantsNightlife
+        ? deps.searchEvents({ lat: input.start_lat, lng: input.start_lng, date: (args.startAt ?? deps.now().toISOString()).slice(0, 10), language: input.language })
+        : Promise.resolve([]),
     ]);
+    if (events.length) void progress.push(`Encontré ${events.length} ${events.length === 1 ? 'evento' : 'eventos'} para hoy`);
     stats.places_reused = lib.length;
-    const deduped = dedupeCandidates([...lib, ...goog, ...wiki, ...osm]);
+    const deduped = dedupeCandidates([...lib, ...goog, ...wiki, ...osm, ...events]);
     const filtered = filterCandidates(deduped, { avoid, stepFree });
     if (filtered.length < 3) {
       throw new JobError('not_enough_candidates', 'No encontramos suficientes lugares con historia acá (mínimo 3). Probá con más tiempo o moviéndote un poco.');
@@ -517,8 +574,31 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
 
     // ── Investigación + verificación (hasta 4 lugares en paralelo, solo los que no tienen ≥4 facts verificados)
     void progress.push('Investigando y verificando datos…');
-    const enriched = await pool(ordered, 4, async (c) => {
-      let facts = c.facts.filter((f) => f.verified);
+
+    /** Un fact: investigar su fuente original; si no se sostiene, UNA fuente alternativa (en paralelo entre facts). */
+    const verifyOneFact = async (f: { text: string; source_url: string }): Promise<Fact | null> => {
+      const v1 = await deps.llm.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(f), config: deps.config });
+      addUsage(usage, v1.usage as never);
+      if (v1.result?.supported && v1.result.quote.trim())
+        return { text: f.text, source_url: f.source_url, verified: true, quote: v1.result.quote.trim(), verified_at: new Date().toISOString(), origin: 'tour' };
+      if (timeLeftMs() < 20_000) return null; // sin tiempo para una segunda vuelta
+      const alt = await deps.llm.findAlternateSource({ system: ALT_SOURCE_SYSTEM, user: renderAltSourceUser(f), config: deps.config });
+      addUsage(usage, alt.usage as never);
+      stats.web_search_calls += alt.web_search_calls;
+      if (!alt.source_url) return null;
+      const v2 = await deps.llm.verifyFact({
+        system: VERIFY_SYSTEM,
+        user: renderVerifyUser({ text: f.text, source_url: alt.source_url }),
+        config: deps.config,
+      });
+      addUsage(usage, v2.usage as never);
+      return v2.result?.supported && v2.result.quote.trim()
+        ? { text: f.text, source_url: alt.source_url, verified: true, quote: v2.result.quote.trim(), verified_at: new Date().toISOString(), origin: 'tour' }
+        : null;
+    };
+
+    const enrichOnePlace = async (c: RawCandidate): Promise<RawCandidate> => {
+      const facts = c.facts.filter((f) => f.verified);
       if (facts.length >= 4) return { ...c, facts: c.facts };
       const research = await deps.llm.research({
         system: RESEARCH_SYSTEM,
@@ -527,36 +607,32 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
       });
       addUsage(usage, research.usage as never);
       stats.web_search_calls += research.web_search_calls;
-      const verified: Fact[] = [];
-      for (const f of research.facts) {
-        const v1 = await deps.llm.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(f), config: deps.config });
-        addUsage(usage, v1.usage as never);
-        if (v1.result?.supported && v1.result.quote.trim()) {
-          verified.push({ text: f.text, source_url: f.source_url, verified: true });
-          continue;
-        }
-        const alt = await deps.llm.findAlternateSource({ system: ALT_SOURCE_SYSTEM, user: renderAltSourceUser(f), config: deps.config });
-        addUsage(usage, alt.usage as never);
-        stats.web_search_calls += alt.web_search_calls;
-        if (alt.source_url) {
-          const v2 = await deps.llm.verifyFact({
-            system: VERIFY_SYSTEM,
-            user: renderVerifyUser({ text: f.text, source_url: alt.source_url }),
-            config: deps.config,
-          });
-          addUsage(usage, v2.usage as never);
-          if (v2.result?.supported && v2.result.quote.trim()) {
-            verified.push({ text: f.text, source_url: alt.source_url, verified: true });
-            continue;
-          }
-        }
-        stats.facts_rejected++;
-      }
+      // Facts del mismo lugar en paralelo (antes era secuencial: con 6-8 facts por lugar llegaba a pasarse
+      // de los 300s de Vercel — visto en el iPhone, commit 263f073).
+      const results = await Promise.all(research.facts.map(verifyOneFact));
+      const verified = results.filter((f): f is Fact => f !== null);
+      stats.facts_rejected += results.length - verified.length;
       stats.facts_verified += verified.length;
       if (!c.place_library_id) stats.places_new++;
       return { ...c, facts: [...c.facts, ...verified] };
+    };
+
+    // Por lugar completado se guarda enseguida en enrichedByIndex (no se espera a todos): si el tiempo
+    // se agota, seguimos con lo que ya esté listo en vez de que la función se corte sin escribir nada.
+    const enrichedByIndex: RawCandidate[] = [...ordered];
+    let placesEnriched = 0;
+    const enrichAll = pool(ordered, 4, async (c, i) => {
+      const result = await enrichOnePlace(c);
+      enrichedByIndex[i] = result;
+      placesEnriched++;
+      return result;
     });
-    const withFacts = enriched.map((r, i) => (r.status === 'fulfilled' ? r.value : { ...ordered[i], facts: ordered[i].facts }));
+    const deadline = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), Math.max(0, timeLeftMs())));
+    const raced = await Promise.race([enrichAll.then(() => 'done' as const), deadline]);
+    if (raced === 'timeout') {
+      void progress.push(`Sin tiempo para todos: sigo con ${placesEnriched}/${ordered.length} lugares investigados`);
+    }
+    const withFacts = enrichedByIndex;
     void progress.push(`Verifiqué ${stats.facts_verified} datos`);
 
     // ── Generación (una sola llamada, effort high)
@@ -606,7 +682,8 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         if (existing) {
           placeId = existing.id as string;
           if (existing.tier !== 'curated') {
-            await admin.from('place_library').update({ facts: verifiedFacts, updated_at: new Date().toISOString() }).eq('id', placeId);
+            // Sumar, no reemplazar: el lugar puede tener facts de research o de la cámara (memoria de lugares).
+            await appendFacts(admin, placeId, verifiedFacts);
           }
         } else {
           const { data: inserted, error: eIns } = await admin
@@ -665,6 +742,11 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         route: { polyline: null, total_walk_m: Math.round(totalWalkM), est_duration_min: Math.round(estDurationMin) },
       })
       .eq('id', tourId);
+
+    // Bloque "tour" del itinerario → se liga al tour recién armado (si no, "Empezar tour" nunca lo encuentra).
+    if (input.block_id) {
+      await admin.from('blocks').update({ tour_id: tourId }).eq('id', input.block_id);
+    }
 
     if (tripId) {
       await insertFeed(ctx, {

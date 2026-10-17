@@ -4,6 +4,7 @@
 // 3) Relleno por tramo (Tool Runner, hasta 3 en paralelo) con las MISMAS herramientas del backend
 //    (toClaudeTools, ctx.actor='agent' + excepción de plan sobre tramos vacíos).
 // 4) Cierre: result + 1 fila trip_planned con el undo_token que borra todo lo creado.
+import { addTransfers } from './dayTransfers';
 import { randomUUID } from 'node:crypto';
 import { SCOUT, type PlanTripResult, type ToolInput, type ToolName, type ToolResponse, type TransferMode } from '@build101/shared';
 import type { Op } from '../blocks';
@@ -42,12 +43,15 @@ export type PlanDeps = {
   /** Minutos en auto entre dos puntos (para traslados en bus/auto). */
   driveMinutes: (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => Promise<number | null>;
   heartbeatMs?: number;
+  /** Traslados dentro del día después de llenar cada tramo (opcional: los tests que no lo pasan, lo saltean). */
+  transfers?: (ctx: ToolCtx, args: { trip_id: string; leg_id: string }) => Promise<{ added: number }>;
 };
 
 export function defaultDeps(): PlanDeps {
   return {
     llm: anthropicPlanner(),
     config: plannerConfig(),
+    transfers: (ctx, args) => addTransfers(ctx, args),
     today: () => todayIso(),
     resolveCity: async (city, country) => {
       try {
@@ -310,6 +314,7 @@ function defaultDepsLazy(): PlanDeps {
     today: () => get().today(),
     resolveCity: (c, k) => get().resolveCity(c, k),
     driveMinutes: (a, b) => get().driveMinutes(a, b),
+    transfers: (c, a) => get().transfers!(c, a),
   };
 }
 
@@ -602,6 +607,14 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         console.log(`[plan_trip/${jobId}] ${leg.city}: ${added} bloques, ${res.iterations} vueltas, stop=${res.stop_reason}`);
         if (res.stop_reason === 'refusal') throw new JobError('leg_failed', `Claude no quiso armar ${leg.city}.`);
         if (added <= 0) throw new JobError('leg_failed', `Se trancó armando ${leg.city}: no agregó bloques.`);
+        // Traslados dentro de cada día (a pie / transporte público con líneas). Nunca hace fallar el tramo.
+        try {
+          void progress.push(`Calculando cómo moverse en ${leg.city}…`);
+          const tr = deps.transfers ? await deps.transfers(legCtx, { trip_id: tripId, leg_id: leg.id }) : { added: 0 };
+          if (tr.added) void progress.push(`Agregué ${tr.added} traslados en ${leg.city}`);
+        } catch (e) {
+          console.warn(`[plan_trip/${jobId}] traslados ${leg.city}:`, (e as Error).message);
+        }
         void progress.push(`Listo ${leg.city}: ${added} bloques`);
         return added;
       } catch (err) {

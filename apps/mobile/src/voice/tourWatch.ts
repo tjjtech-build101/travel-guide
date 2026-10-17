@@ -1,5 +1,5 @@
-// generate_tour es un job (PRD 06/18): la voz recibe { job_id, tour_id } enseguida y las paradas llegan después.
-// Escuchamos el job por Realtime (canal propio, como features/jobs/queries) y armamos el payload de [EVENTO:tour_ready].
+// Jobs que dispara la voz (generate_tour, research): la herramienta responde { job_id } enseguida y el resultado llega
+// después. Escuchamos el job por Realtime (canal propio, como features/jobs/queries) y armamos el payload de [EVENTO:tour_ready].
 // Sin polling: si el canal falla, una sola lectura (GET de la fila) y el timeout.
 import type { AgentJobRow, GenerateTourResult, TourReadyEvent } from '@build101/shared';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -9,8 +9,6 @@ import { supabase } from '../lib/supabase';
 const TIMEOUT_MS = 6 * 60_000;
 /** El job escribe progreso cada ~10 s (heartbeat). Sin novedades en este tiempo, la función murió (p. ej. límite de Vercel). */
 const STALE_MS = 45_000;
-
-export type TourWatchResult = { ok: true; event: TourReadyEvent } | { ok: false; error: string };
 
 async function readJob(jobId: string): Promise<AgentJobRow | null> {
   const { data } = await supabase.from('agent_jobs').select('*').eq('id', jobId).maybeSingle();
@@ -37,47 +35,45 @@ export async function tourReadyPayload(tourId: string, result: GenerateTourResul
   };
 }
 
-/** Resuelve cuando el job termina (done → payload; failed/timeout → error). */
-export function watchTourJob(jobId: string, tourId: string): Promise<TourWatchResult> {
+export type JobWatchResult = { ok: true; row: AgentJobRow } | { ok: false; error: string };
+
+/**
+ * Resuelve cuando el job termina (done → fila; failed/timeout/sin heartbeat → error). Sirve para cualquier job que
+ * la voz dispara (generate_tour, research).
+ */
+export function watchJob(jobId: string, label = 'El trabajo'): Promise<JobWatchResult> {
   return new Promise((resolve) => {
     let channel: RealtimeChannel | null = null;
     let finished = false;
     let stale: ReturnType<typeof setTimeout> | null = null;
-    const armStale = () => {
-      if (stale) clearTimeout(stale);
-      stale = setTimeout(() => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        if (channel) void supabase.removeChannel(channel);
-        resolve({ ok: false, error: 'El armado del tour se cortó a mitad de camino' });
-      }, STALE_MS);
-    };
-    armStale();
-    const finish = async (row: AgentJobRow | null) => {
-      if (finished || !row) return;
-      if (row.status !== 'done' && row.status !== 'failed') return armStale(); // progreso: sigue vivo
-      if (stale) clearTimeout(stale);
-      finished = true;
-      clearTimeout(timer);
-      if (channel) void supabase.removeChannel(channel);
-      if (row.status === 'failed') return resolve({ ok: false, error: row.error ?? 'No se pudo armar el tour' });
-      resolve({ ok: true, event: await tourReadyPayload(tourId, row.result as GenerateTourResult | null) });
-    };
-    const timer = setTimeout(() => {
+    const end = (r: JobWatchResult) => {
       if (finished) return;
       finished = true;
+      clearTimeout(timer);
+      if (stale) clearTimeout(stale);
       if (channel) void supabase.removeChannel(channel);
-      resolve({ ok: false, error: 'El armado del tour tardó demasiado' });
-    }, TIMEOUT_MS);
+      resolve(r);
+    };
+    const armStale = () => {
+      if (stale) clearTimeout(stale);
+      stale = setTimeout(() => end({ ok: false, error: `${label} se cortó a mitad de camino` }), STALE_MS);
+    };
+    const finish = (row: AgentJobRow | null) => {
+      if (finished || !row) return;
+      if (row.status !== 'done' && row.status !== 'failed') return armStale(); // progreso: sigue vivo
+      if (row.status === 'failed') return end({ ok: false, error: row.error ?? `${label} falló` });
+      end({ ok: true, row });
+    };
+    const timer = setTimeout(() => end({ ok: false, error: `${label} tardó demasiado` }), TIMEOUT_MS);
+    armStale();
 
     void (async () => {
       const { data } = await supabase.auth.getSession();
       await supabase.realtime.setAuth(data.session?.access_token ?? null);
       channel = supabase
-        .channel(`voice-tour-job:${jobId}:${Math.random().toString(36).slice(2, 8)}`)
+        .channel(`voice-job:${jobId}:${Math.random().toString(36).slice(2, 8)}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'agent_jobs', filter: `id=eq.${jobId}` }, (p) =>
-          void finish(p.new as AgentJobRow),
+          finish(p.new as AgentJobRow),
         )
         .subscribe((status) => {
           // Al suscribirse (o si el canal falla): una lectura por si ya terminó antes.
@@ -85,4 +81,13 @@ export function watchTourJob(jobId: string, tourId: string): Promise<TourWatchRe
         });
     })();
   });
+}
+
+export type TourWatchResult = { ok: true; event: TourReadyEvent } | { ok: false; error: string };
+
+/** generate_tour: cuando termina, arma el payload de [EVENTO:tour_ready]. */
+export async function watchTourJob(jobId: string, tourId: string): Promise<TourWatchResult> {
+  const r = await watchJob(jobId, 'El armado del tour');
+  if (!r.ok) return r;
+  return { ok: true, event: await tourReadyPayload(tourId, r.row.result as GenerateTourResult | null) };
 }

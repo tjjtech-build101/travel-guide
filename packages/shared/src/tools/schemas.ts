@@ -13,11 +13,36 @@ export const TimeOfDay = z
 export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato YYYY-MM-DD');
 export const LatLng = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 
+/** Un tramo en transporte público de un traslado (Google Routes TRANSIT). */
+export const TransitLine = z.object({
+  /** "121", "D1", "Línea A" (nameShort o name de la línea). */
+  name: z.string().max(80),
+  vehicle: z.enum(['bus', 'subway', 'train', 'tram', 'ferry', 'other']),
+  from_stop: z.string().max(200).optional(),
+  to_stop: z.string().max(200).optional(),
+  /** HH:MM local de salida / llegada según el horario de Google. */
+  departure: z.string().max(5).optional(),
+  arrival: z.string().max(5).optional(),
+  headsign: z.string().max(200).optional(),
+  stops: z.number().int().nonnegative().optional(),
+});
+export type TransitLine = z.infer<typeof TransitLine>;
+
 export const Transfer = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   mode: z.enum(TRANSFER_MODES),
   duration_min: z.number().int().positive().optional(),
+  // Traslados dentro del día (plan_trip): detalle de transporte público. Todos opcionales (jsonb).
+  lines: z.array(TransitLine).max(6).optional(),
+  /** Minutos caminando en total (hasta la parada, transbordos y desde la parada). */
+  walk_min: z.number().int().nonnegative().optional(),
+  /** "Bus 121 en Ciudadela → Pocitos (sale 18:05)". */
+  summary: z.string().max(300).optional(),
+  /** Link a Google Maps en modo transporte (Cómo llego). */
+  maps_url: z.string().url().optional(),
+  /** true = sin Google: duración estimada por distancia, sin líneas. */
+  estimated: z.boolean().optional(),
 });
 
 export const BlockAlertInput = z.object({
@@ -198,6 +223,19 @@ export const EventsSearchInput = z.object({
   lang: z.string().default('es'),
 });
 
+// ---------- should_generate_tour (decide si un bloque amerita "Generar tour") ----------
+
+export const ShouldGenerateTourInput = z.object({
+  block_title: z.string().min(1),
+  block_type: z.enum(BLOCK_TYPES),
+  place_name: z.string().optional(),
+  description: z.string().max(2000).optional(),
+});
+
+// ---------- delete_trip (irreversible: borra el viaje y todo lo que cuelga de trip_id) ----------
+
+export const DeleteTripInput = z.object({ trip_id: Id });
+
 // ---------- PRD 08 · look_at_photo ----------
 
 /** ~1,5 MB de base64 (la app manda JPEG 1280 px, calidad 0,6 ≈ 150-400 KB). */
@@ -238,3 +276,23 @@ export type LookAtPhotoOutput = LookAtPhotoModelOutput & {
   /** ms por tramo (subida, cercanos, claude) para medir la latencia. */
   timings: Record<string, number>;
 };
+
+// ---------- research (voz: "no lo sé, lo averiguo y te cuento") ----------
+
+export const ResearchInput = z.object({
+  question: z.string().min(3).max(300).describe('La pregunta tal cual la hizo la persona, con el contexto necesario'),
+  place_id: Id.optional().describe('Si es sobre un lugar de place_library: los datos verificados se guardan ahí'),
+  place_name: z.string().max(200).optional().describe('Nombre del lugar, si la pregunta es sobre uno'),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  trip_id: Id.optional(),
+  language: z.string().min(2).max(8).optional(),
+});
+
+// ---------- plan_transfers (traslados dentro del día) ----------
+
+export const PlanTransfersInput = z.object({
+  trip_id: Id,
+  leg_id: Id.optional().describe('Solo ese tramo'),
+  day_id: Id.optional().describe('Solo ese día'),
+});

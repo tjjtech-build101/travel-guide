@@ -13,7 +13,7 @@ export const TOUR_RULES: string[] = [
   '- Para saber dónde está o cuánto falta: tour_status. Si te piden saltear una parada: skip_stop.',
   '- Durante el tour la persona camina: para buscar algo cerca de donde está AHORA, llamá search_places SIN near (el celu completa la posición actual); para route_eta desde acá, dejá la primera parada vacía {}.',
   '- get_stop_content con already_told=true: no la repitas entera; resumila en 1 frase o pasá a otra capa.',
-  '- Si text viene vacío o dice PENDIENTE: decí que de esa parada todavía no tenés la historia verificada y contá solo qué mirar. Nunca inventes datos: solo lo que viene de get_stop_content o sus fuentes; si no sabés, decilo.',
+  '- Si text viene vacío o dice PENDIENTE, o te piden más de lo que trae get_stop_content: contá qué mirar, decí en UNA frase que lo averiguás y llamá research { question: "historia y datos de <parada>" (o lo que preguntaron), place_name: <nombre de la parada> }. Si vuelve con cached, contalo ya; si no, cuando llegue research_ready. Nunca inventes datos: solo lo que viene de get_stop_content, research o sus fuentes.',
 ];
 
 /** Modo chat: qué hacer si el tour arranca en medio de la llamada. */
