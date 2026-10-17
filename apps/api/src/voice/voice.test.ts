@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
 import { topInterests, upcomingLines } from './context';
 import { buildInstructions, nowHHMM, nowText, type InstructionsInput } from './instructions';
-import { buildRealtimeSession, createClientSecret, turnDetection, vadConfig, voiceToolNames } from './openai';
+import { buildRealtimeSession, createCall, createClientSecret, turnDetection, vadConfig, voiceToolNames } from './openai';
 import { runVoiceSummary, transcriptText } from './summary';
 import type { Db } from '../supabase';
 
@@ -60,6 +60,22 @@ describe('instrucciones del scout', () => {
     const d = new Date('2026-10-17T18:42:00Z'); // 15:42 en UY (UTC-3)
     expect(nowText(d)).toBe('sábado 17/10, 15:42');
     expect(nowHHMM(d)).toBe('15:42');
+  });
+});
+
+describe('interfaz unificada (sdp)', () => {
+  it('createCall manda multipart sdp + session con la key del servidor y devuelve el answer', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test';
+    let seen: { auth?: string; sdp?: unknown; session?: unknown } = {};
+    const fake = (async (_url: string, init: RequestInit) => {
+      const fd = init.body as FormData;
+      seen = { auth: (init.headers as Record<string, string>).Authorization, sdp: fd.get('sdp'), session: fd.get('session') };
+      return new Response('v=0\r\nanswer');
+    }) as unknown as typeof fetch;
+    await expect(createCall('v=0 offer', { type: 'realtime' }, {}, fake)).resolves.toBe('v=0\r\nanswer');
+    expect(seen).toEqual({ auth: 'Bearer sk-test', sdp: 'v=0 offer', session: '{"type":"realtime"}' });
+    const bad = (async () => new Response('{"error":{"message":"invalid_offer"}}', { status: 400 })) as typeof fetch;
+    await expect(createCall('x', {}, {}, bad)).rejects.toMatchObject({ status: 502 });
   });
 });
 

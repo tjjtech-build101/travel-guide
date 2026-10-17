@@ -72,7 +72,17 @@ export class RealtimeConnection {
     this.prepareMs = Date.now() - t0;
   }
 
-  /** Manda la oferta con el token temporal y aplica la respuesta. */
+  get offer(): string | null {
+    return this.offerSdp;
+  }
+
+  /** Interfaz unificada: la API ya creó la llamada con la oferta y devolvió la respuesta SDP. */
+  async applyAnswer(sdp: string): Promise<void> {
+    if (!this.pc || this.closed) throw new Error('La conexión no está preparada');
+    await this.pc.setRemoteDescription({ type: 'answer', sdp });
+  }
+
+  /** Fallback: manda la oferta a OpenAI con el token temporal y aplica la respuesta. */
   async answer(clientSecret: string): Promise<ConnectTimings> {
     const pc = this.pc;
     if (!pc || !this.offerSdp || this.closed) throw new Error('La conexión no está preparada');

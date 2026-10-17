@@ -6,11 +6,13 @@ import { dbError, notFound, ToolFailure } from '../errors';
 import { createJob, runInBackground } from '../jobs';
 import { loadVoiceContext, TRIP_TZ } from './context';
 import { buildInstructions, nowText, type InstructionsInput } from './instructions';
-import { buildRealtimeSession, createClientSecret } from './openai';
+import { createHash } from 'node:crypto';
+import { buildRealtimeSession, createCall, createClientSecret } from './openai';
 import { runVoiceSummary, type SummaryLLM } from './summary';
 
 export type VoiceDeps = {
   createClientSecret: typeof createClientSecret;
+  createCall?: typeof createCall;
   summaryLLM?: SummaryLLM;
   /** Reglas extra por modo (PRD 07 registra las del tour). */
   modeRules?: (mode: 'chat' | 'tour', tourId?: string) => Promise<string[]> | string[];
@@ -45,7 +47,7 @@ async function readJson(text: string): Promise<{ ok: true; value: unknown } | { 
   }
 }
 
-export function voiceRoutes(deps: VoiceDeps = { createClientSecret }) {
+export function voiceRoutes(deps: VoiceDeps = { createClientSecret, createCall }) {
   const r = new Hono<{ Variables: AuthVars }>();
   r.use('*', requireAuth);
 
@@ -61,9 +63,14 @@ export function voiceRoutes(deps: VoiceDeps = { createClientSecret }) {
     const ctx = c.get('ctx');
     // El token se pide en paralelo con el contexto (OpenAI tarda ~1 s): se crea con instrucciones estáticas y el celu
     // aplica las completas (session_config) con session.update antes del primer response.create.
-    const secretP = deps.createClientSecret(
-      buildRealtimeSession({ instructions: staticInstructions(input.mode), lang: input.lang ?? 'es' }),
-    );
+    const ctx0 = c.get('ctx');
+    const minimal = buildRealtimeSession({ instructions: staticInstructions(input.mode), lang: input.lang ?? 'es' });
+    // Con sdp (interfaz unificada) la API crea la llamada; sin sdp, devuelve un token temporal.
+    const secretP: Promise<{ value: string | null; expires_at: number | null; answer: string | null }> = input.sdp
+      ? (deps.createCall ?? createCall)(input.sdp, minimal, {
+          safetyId: createHash('sha256').update(ctx0.userId).digest('hex').slice(0, 32),
+        }).then((answer) => ({ value: null, expires_at: null, answer }))
+      : deps.createClientSecret(minimal).then((s) => ({ value: s.value, expires_at: s.expires_at, answer: null }));
     secretP.catch(() => {}); // si falla el contexto antes, que no quede un rechazo sin manejar
     try {
       const tourCheck = async () => {
@@ -101,6 +108,7 @@ export function voiceRoutes(deps: VoiceDeps = { createClientSecret }) {
       console.log(`[voice] session ${inserted.data.id} ctx=${tCtx - t0}ms total=${Date.now() - t0}ms`);
       const data: VoiceSessionStart = {
         client_secret: secret.value,
+        answer_sdp: secret.answer,
         expires_at: secret.expires_at,
         voice_session_id: inserted.data.id as string,
         session_config: session,

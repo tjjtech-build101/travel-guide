@@ -1,23 +1,32 @@
 // Monta la voz global (PRD 05): barra de llamada arriba de todo, tarjetas, vista expandida, resumen y permiso.
 // La barra va en el flujo (empuja el contenido); debajo, el inset de arriba es 0 para que los headers no lo sumen dos veces.
 import { SCOUT } from '@build101/shared';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Modal, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useLocationProvider } from '../location/LocationContext';
 import { Button } from '../ui/Button';
+import { ScoutAvatar } from '../ui/ScoutAvatar';
 import { colors, font, radius, space } from '../ui/theme';
-import { useVoiceStore } from './store';
+import { setLocationSource, useVoiceStore } from './store';
 import { ActionCards } from './ui/ActionCards';
 import { CallBar } from './ui/CallBar';
 import { CallSummary } from './ui/CallSummary';
 import { CallView } from './ui/CallView';
-import { ScoutAvatar } from './ui/ScoutAvatar';
 
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const status = useVoiceStore((s) => s.status);
   const expanded = useVoiceStore((s) => s.expanded);
   const insets = useSafeAreaInsets();
+  const { provider } = useLocationProvider();
+  // El store vive fuera de React: le pasamos de dónde sacar la ubicación (real | simulada).
+  useEffect(() => {
+    setLocationSource(() => {
+      const f = provider.getCurrent();
+      return f ? { lat: f.lat, lng: f.lng, accuracy: f.accuracy } : null;
+    });
+  }, [provider]);
   const inCall = status === 'live' || status === 'reconnecting' || status === 'ending';
 
   return (

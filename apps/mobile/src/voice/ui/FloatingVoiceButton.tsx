@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocationProvider } from '../../location/LocationContext';
 import { useToast, Toast } from '../../ui/Toast';
 import { useVoiceStore } from '../store';
-import { ScoutAvatar } from './ScoutAvatar';
+import { ScoutAvatar } from '../../ui/ScoutAvatar';
 
 const SIZE = 64;
 const EDGE = 16;
@@ -72,7 +72,7 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
             style={[styles.btn, offline && styles.offline]}
             hitSlop={6}
           >
-            <ScoutAvatar size={SIZE} pulse={status === 'connecting' ? 'connecting' : null} />
+            <ScoutAvatar size={SIZE - 12} state={status === 'connecting' ? 'connecting' : 'idle'} />
           </Pressable>
         </Animated.View>
       </GestureDetector>
@@ -84,6 +84,11 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', zIndex: 40 },
   btn: {
+    width: SIZE,
+    height: SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
     borderRadius: SIZE / 2,
     shadowColor: '#000',
     shadowOpacity: 0.25,

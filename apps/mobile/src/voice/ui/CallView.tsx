@@ -10,8 +10,9 @@ import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore, type Line } from '../store';
 import { friendlyToolName } from '../toolBridge';
 import { ActionCards } from './ActionCards';
-import { mmss, useElapsed } from './CallBar';
-import { SCOUT_COLOR, ScoutAvatar } from './ScoutAvatar';
+import { ScoutAvatar } from '../../ui/ScoutAvatar';
+import { scoutStateOf } from '../useScout';
+import { mmss, SCOUT_COLOR, useElapsed } from './CallBar';
 
 const BG = '#14231A';
 
@@ -33,7 +34,7 @@ function ErrorView({ code, message }: { code?: string; message?: string }) {
   const denied = code === 'mic_denied';
   return (
     <View style={styles.center}>
-      <ScoutAvatar size={120} />
+      <ScoutAvatar size={120} state="error" />
       <Text style={styles.title}>{denied ? 'Necesitamos el micrófono' : 'No pudimos conectar'}</Text>
       <Text style={styles.sub}>{denied ? 'Activá el micrófono en Ajustes para hablar con el scout.' : message}</Text>
       <View style={styles.errButtons}>
@@ -56,6 +57,9 @@ function Live() {
   const tools = useVoiceStore((s) => s.toolsRunning);
   const captions = useVoiceStore((s) => s.captions);
   const lines = useVoiceStore((s) => s.lines);
+  const notice = useVoiceStore((s) => s.notice);
+  const ptt = useVoiceStore((s) => s.pushToTalk);
+  const avatarState = useVoiceStore(scoutStateOf);
   const [showAll, setShowAll] = useState(false);
   const connecting = status === 'connecting';
   const elapsed = useElapsed(startedAt);
@@ -70,7 +74,7 @@ function Live() {
       </View>
 
       <View style={styles.hero}>
-        <ScoutAvatar size={132} pulse={connecting ? 'connecting' : speaking} />
+        <ScoutAvatar size={132} state={avatarState} />
         <Text style={styles.title}>{connecting ? `Llamando a ${name || 'Scout'}…` : name}</Text>
         <Text style={styles.sub}>
           {status === 'reconnecting'
@@ -86,6 +90,13 @@ function Live() {
                     : 'Decí lo que necesites'}
         </Text>
       </View>
+
+      {ptt && speaking === 'assistant' ? (
+        <Pressable onPress={() => useVoiceStore.getState().interrupt()} style={styles.interrupt} accessibilityRole="button">
+          <Text style={styles.interruptText}>Interrumpir</Text>
+        </Pressable>
+      ) : null}
+      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
       <ActionCards style={styles.cards} />
 
@@ -206,6 +217,9 @@ const styles = StyleSheet.create({
   sub: { color: 'rgba(255,255,255,0.75)', fontSize: font.body, minHeight: 22, textAlign: 'center' },
   errButtons: { alignSelf: 'stretch', gap: space.sm, marginTop: space.lg },
   cards: { marginHorizontal: space.lg, marginTop: space.lg },
+  interrupt: { alignSelf: 'center', marginTop: space.md, paddingHorizontal: space.xl, minHeight: MIN_TOUCH, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: '#fff' },
+  interruptText: { color: BG, fontWeight: '800', fontSize: font.body },
+  notice: { color: '#FFD98A', fontSize: font.small, textAlign: 'center', marginTop: space.md, marginHorizontal: space.xl },
   captions: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: space.xl, paddingBottom: space.lg },
   caption: { color: '#fff', fontSize: 22, lineHeight: 29, fontWeight: '600' },
   captionUser: { color: '#9CC3FF' },

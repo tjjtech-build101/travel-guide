@@ -29,12 +29,20 @@ export const VoiceSessionInput = z.object({
   target_lang: z.string().min(2).max(8).optional(),
   /** Posición actual del celu (LocationProvider) para que el scout sepa dónde estás. */
   location: z.object({ lat: z.number(), lng: z.number(), accuracy: z.number().nullable().optional() }).optional(),
+  /**
+   * Oferta SDP de WebRTC (interfaz unificada): la API crea la llamada en OpenAI con su key y devuelve answer_sdp.
+   * Ahorra un viaje (~1 s) frente a client_secret + POST /realtime/calls desde el celu.
+   */
+  sdp: z.string().min(10).max(20_000).optional(),
 });
 export type VoiceSessionInput = z.input<typeof VoiceSessionInput>;
 
 /** Respuesta de POST /voice/session (data). `session_config` = el objeto `session` enviado a OpenAI, sin secretos. */
 export type VoiceSessionStart = {
-  client_secret: string;
+  /** Token temporal (solo si no vino `sdp`). */
+  client_secret: string | null;
+  /** Respuesta SDP (si vino `sdp`): el celu la aplica con setRemoteDescription. */
+  answer_sdp: string | null;
   expires_at: number | null;
   voice_session_id: string;
   session_config: Record<string, unknown> & { instructions: string };

@@ -32,7 +32,8 @@ from (values
   ('00000000-0000-0000-0000-000000000002', 'ana@demo.build101.dev',  'Ana'),
   ('00000000-0000-0000-0000-000000000003', 'leo@demo.build101.dev',  'Leo'),
   ('00000000-0000-0000-0000-000000000004', 'sofi@demo.build101.dev', 'Sofi')
-) as u(id, email, full_name);
+) as u(id, email, full_name)
+on conflict (id) do nothing; -- en la nube los usuarios demo ya existían
 
 insert into auth.identities (
   id, user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at
@@ -45,7 +46,16 @@ from auth.users u
 where u.id in (
   '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
   '00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004'
-);
+)
+on conflict (provider_id, provider) do nothing;
+
+-- Usuarios creados antes del trigger on_auth_user_created (nube) no tienen profile.
+insert into public.profiles (id, display_name, avatar_url)
+select id,
+  coalesce(raw_user_meta_data ->> 'full_name', raw_user_meta_data ->> 'name'),
+  coalesce(raw_user_meta_data ->> 'avatar_url', raw_user_meta_data ->> 'picture')
+from auth.users
+on conflict (id) do nothing;
 
 update public.profiles set home_currency = 'UYU', pace = 'balanced', budget_level = 'mid'
 where id in (

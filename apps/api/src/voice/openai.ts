@@ -5,6 +5,7 @@ import { notConfigured, upstream } from '../errors';
 import { handlers } from '../tools/registry';
 
 const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
+const CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const TIMEOUT_MS = 8000;
 
 /** Herramientas que ve la voz: las de Contratos con handler en la API. */
@@ -63,6 +64,34 @@ export function buildRealtimeSession(args: { instructions: string; lang: string;
 }
 
 export type ClientSecret = { value: string; expires_at: number | null };
+
+/** Interfaz unificada: la oferta SDP del celu + la sesión → respuesta SDP. La key nunca sale del servidor. */
+export async function createCall(
+  sdp: string,
+  session: Record<string, unknown>,
+  opts: { safetyId?: string } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const key = env().OPENAI_API_KEY;
+  if (!key) throw notConfigured('OpenAI (OPENAI_API_KEY)');
+  const fd = new FormData();
+  fd.set('sdp', sdp);
+  fd.set('session', JSON.stringify(session));
+  let res: Response;
+  try {
+    res = await fetchImpl(CALLS_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, ...(opts.safetyId ? { 'OpenAI-Safety-Identifier': opts.safetyId } : {}) },
+      body: fd,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw upstream(`OpenAI no respondió: ${(err as Error).message}`);
+  }
+  const text = await res.text();
+  if (!res.ok || !text.startsWith('v=')) throw upstream(`OpenAI ${res.status}: ${text.slice(0, 300)}`);
+  return text;
+}
 
 export async function createClientSecret(session: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<ClientSecret> {
   const key = env().OPENAI_API_KEY;

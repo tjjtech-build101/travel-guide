@@ -6,9 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { font, space } from '../../ui/theme';
 import { useVoiceStore } from '../store';
 import { friendlyToolName } from '../toolBridge';
-import { SCOUT_COLOR } from './ScoutAvatar';
 
 export const CALL_BAR_HEIGHT = 44;
+/** Verde de "en llamada" (barra y botones activos). */
+export const SCOUT_COLOR = '#2F7D4A';
 
 export function mmss(totalS: number): string {
   const m = Math.floor(totalS / 60);

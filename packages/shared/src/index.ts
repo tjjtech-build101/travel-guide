@@ -6,3 +6,5 @@ export * from './jobs';
 export * from './tools';
 export * from './scout';
 export * from './voice';
+export * from './track';
+export * from './profile';

@@ -13,6 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { create } from 'zustand';
 
 import { endVoiceSession, startVoiceSession } from './api';
+import { looksLikeEcho } from './echo';
 import { micPermission, requestMic } from './permissions';
 import { setSpeaker, startCallAudio, stopCallAudio } from './audioRoute';
 import { RealtimeConnection, type ServerEvent } from './realtimeClient';
@@ -25,9 +26,18 @@ export type StartCallArgs = {
   tripId?: string | null;
   tourId?: string | null;
   focus?: VoiceFocus;
-  /** Posición actual (LocationProvider) para que el scout sepa dónde estás. */
+  /** Posición actual; si no viene, se toma del LocationProvider registrado (setLocationSource). */
   location?: { lat: number; lng: number; accuracy?: number | null } | null;
+  /** Contexto de la pantalla (bloque, punto del mapa): va como mensaje de sistema antes del saludo. */
+  context?: Record<string, unknown>;
 };
+
+type Fix = { lat: number; lng: number; accuracy?: number | null } | null;
+let locationSource: () => Fix = () => null;
+/** VoiceProvider registra el LocationProvider actual (real | simulado): el store vive fuera de React. */
+export function setLocationSource(fn: () => Fix) {
+  locationSource = fn;
+}
 
 export type Line = { id: string; role: 'user' | 'assistant'; text: string; at: string; final: boolean };
 export type ActionCard = { id: string; text: string; proposed: boolean; undoToken: string; tripId: string | null; at: number };
@@ -54,6 +64,8 @@ type State = {
   actions: ActionCard[];
   expanded: boolean;
   summary: { jobId: string | null; voiceSessionId: string; durationS: number; tripId: string | null } | null;
+  /** Aviso corto en la llamada ("Activé el modo por turnos…"). */
+  notice: string | null;
   /** Llamada esperando la explicación del permiso de micrófono. */
   askPermission: StartCallArgs | null;
   /** Último evento del data channel (para el menú dev y PRD 07: esperar silencio antes de inyectar). */
@@ -77,6 +89,8 @@ type Actions = {
   dismissAction: (id: string) => void;
   dismissSummary: () => void;
   startTranslator: (from: string, to: string) => void;
+  /** Corta al scout (botón "Interrumpir", sobre todo en modo por turnos). */
+  interrupt: () => void;
 };
 
 export type VoiceStore = State & Actions;
@@ -87,6 +101,7 @@ const MAX_ACTIONS = 3;
 let conn: RealtimeConnection | null = null;
 let reconnecting = false;
 let tapAt = 0;
+let micFallback: ReturnType<typeof setTimeout> | null = null;
 let firstAudioLogged = false;
 
 const now = () => new Date().toISOString();
@@ -117,6 +132,7 @@ const initial: State = {
   actions: [],
   expanded: false,
   summary: null,
+  notice: null,
   askPermission: null,
   lastEventAt: 0,
 };
@@ -137,8 +153,35 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
 
   const applyMic = () => {
     const s = get();
-    // push-to-talk (plan B del eco): mic cerrado mientras el scout habla.
-    conn?.setMicEnabled(!s.muted && !(s.pushToTalk && s.speaking === 'assistant'));
+    // Modo por turnos (plan B del eco): mic cerrado mientras el scout habla.
+    const closedForTurn = s.pushToTalk && s.speaking === 'assistant';
+    conn?.setMicEnabled(!s.muted && !closedForTurn);
+    if (micFallback) clearTimeout(micFallback);
+    micFallback = null;
+    // Si nunca llega output_audio_buffer.stopped, no dejar el mic cerrado para siempre.
+    if (closedForTurn) {
+      micFallback = setTimeout(() => {
+        if (get().speaking === 'assistant') set({ speaking: null });
+        applyMic();
+      }, 30_000);
+    }
+  };
+
+  const showNotice = (notice: string) => {
+    set({ notice });
+    setTimeout(() => {
+      if (get().notice === notice) set({ notice: null });
+    }, 6000);
+  };
+
+  /** El usuario "dijo" casi lo mismo que el scout: es el parlante. Se descarta y se pasa al modo por turnos. */
+  const handleEcho = (itemId: string) => {
+    console.warn('[voice] eco detectado: paso a modo por turnos');
+    conn?.send({ type: 'response.cancel' });
+    conn?.send({ type: 'conversation.item.delete', item_id: itemId });
+    set((s) => ({ pushToTalk: true, lines: s.lines.filter((l) => l.id !== itemId) }));
+    applyMic();
+    showNotice('Había eco: activé el modo por turnos. Tocá Interrumpir para cortarme.');
   };
 
   // ---------- herramientas ----------
@@ -183,9 +226,17 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       case 'conversation.item.input_audio_transcription.delta':
         upsertLine(String(e.item_id), 'user', (l) => ({ text: l.text + String(e.delta ?? '') }));
         break;
-      case 'conversation.item.input_audio_transcription.completed':
-        upsertLine(String(e.item_id), 'user', () => ({ text: String(e.transcript ?? '').trim(), final: true }));
+      case 'conversation.item.input_audio_transcription.completed': {
+        const id = String(e.item_id);
+        const text = String(e.transcript ?? '').trim();
+        const lastScout = [...get().lines].reverse().find((l) => l.role === 'assistant' && l.text.trim());
+        if (!get().pushToTalk && lastScout && looksLikeEcho(text, lastScout.text)) {
+          handleEcho(id);
+          break;
+        }
+        upsertLine(id, 'user', () => ({ text, final: true }));
         break;
+      }
       case 'response.created':
         set({ responding: true });
         break;
@@ -234,29 +285,40 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       onOpen: () => {
         // Instrucciones completas (el token se creó con unas mínimas) y que el scout hable primero.
         if (sessionConfig) c.send({ type: 'session.update', session: sessionConfig });
+        if (args.context) {
+          c.send({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'system',
+              content: [{ type: 'input_text', text: `Contexto de la pantalla desde donde te llamaron: ${JSON.stringify(args.context)}` }],
+            },
+          });
+        }
         if (!isRetry) c.send({ type: 'response.create' });
       },
       onConnectionLost: (state) => void handleLost(state),
     });
     conn = c;
-    // Mic + oferta SDP en paralelo con la API (ahorra ~300-500 ms al toque → primera palabra).
-    const [s] = await Promise.all([
-      startVoiceSession({
-        mode: args.mode ?? 'chat',
-        trip_id: args.tripId ?? undefined,
-        tour_id: args.tourId ?? undefined,
-        focus: args.focus,
-        location: args.location ?? undefined,
-        lang: isRetry ? get().lang : undefined,
-      }).then((r) => {
-        console.log(`[voice] sesión API ${Date.now() - t0} ms`);
-        return r;
-      }),
-      c.prepare(),
-    ]);
+    // Mic + oferta SDP (unos ms) y después UN solo viaje: la API crea la llamada en OpenAI con la oferta
+    // (interfaz unificada) y devuelve la respuesta SDP. Ahorra ~1 s frente a token + SDP desde el celu.
+    await c.prepare();
+    const tPrep = Date.now() - t0;
+    const s = await startVoiceSession({
+      mode: args.mode ?? 'chat',
+      trip_id: args.tripId ?? undefined,
+      tour_id: args.tourId ?? undefined,
+      focus: args.focus,
+      location: (args.location ?? locationSource()) ?? undefined,
+      lang: isRetry ? get().lang : undefined,
+      sdp: c.offer ?? undefined,
+    });
+    const tApi = Date.now() - t0 - tPrep;
     sessionConfig = s.session_config;
-    const timings = await c.answer(s.client_secret);
-    console.log(`[voice] mic+oferta ${timings.prepare} ms · SDP ${timings.sdp} ms · total ${Date.now() - t0} ms`);
+    if (s.answer_sdp) await c.applyAnswer(s.answer_sdp);
+    else if (s.client_secret) await c.answer(s.client_secret);
+    else throw new Error('La API no devolvió ni answer_sdp ni client_secret');
+    console.log(`[voice] mic+oferta ${tPrep} ms · API${s.answer_sdp ? '+SDP' : ''} ${tApi} ms · total ${Date.now() - t0} ms`);
     set({
       session: { voice_session_id: s.voice_session_id, instructions_base: s.instructions_base, session_config: s.session_config },
       scoutName: s.scout.name,
@@ -393,6 +455,15 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     dismissSummary: () => {
       const s = get();
       set({ ...initial, speaker: s.speaker, pushToTalk: s.pushToTalk, captions: s.captions });
+    },
+
+    interrupt: () => {
+      if (!conn) return;
+      conn.send({ type: 'response.cancel' });
+      conn.send({ type: 'output_audio_buffer.clear' });
+      set((s) => ({ speaking: null, lines: s.lines.map((l) => (l.role === 'assistant' && !l.final ? { ...l, final: true } : l)) }));
+      applyMic();
+      Haptics.selectionAsync().catch(() => {});
     },
 
     startTranslator: (from, to) => {

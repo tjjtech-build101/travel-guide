@@ -13,3 +13,4 @@ supabase/.branches/
 coverage/
 .vercel
 .env*
+.claude/worktrees/
