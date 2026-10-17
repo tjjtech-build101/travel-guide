@@ -19,6 +19,9 @@ export type PlaceSummary = {
   types: string[];
 };
 
+/** regularOpeningHours.periods de Places (New). day: 0=domingo. Sin `close` = abierto 24 h. */
+export type OpeningPeriod = { open: { day: number; hour: number; minute: number }; close?: { day: number; hour: number; minute: number } };
+
 export type PlaceDetails = {
   name: string;
   address: string | null;
@@ -44,13 +47,14 @@ type GPlace = {
   userRatingCount?: number;
   priceLevel?: string;
   currentOpeningHours?: { openNow?: boolean; weekdayDescriptions?: string[] };
-  regularOpeningHours?: { openNow?: boolean; weekdayDescriptions?: string[] };
+  regularOpeningHours?: { openNow?: boolean; weekdayDescriptions?: string[]; periods?: OpeningPeriod[] };
   types?: string[];
   websiteUri?: string;
   nationalPhoneNumber?: string;
   internationalPhoneNumber?: string;
   googleMapsUri?: string;
   editorialSummary?: { text?: string };
+  accessibilityOptions?: { wheelchairAccessibleEntrance?: boolean };
 };
 
 const PRICE_LEVELS: Record<string, number> = {
@@ -196,5 +200,54 @@ export async function placeDetails(googlePlaceId: string): Promise<PlaceDetails>
       google_maps_uri: p.googleMapsUri ?? null,
       editorial_summary: p.editorialSummary?.text ?? null,
     };
+  });
+}
+
+// ───────────────────────── Tour director: búsqueda rica (popularidad, horarios, resumen, accesibilidad)
+
+export type RichPlace = PlaceSummary & {
+  user_rating_count: number | null;
+  periods: OpeningPeriod[] | null;
+  editorial_summary: string | null;
+  wheelchair_entrance: boolean | null;
+  weekday_hours: string[];
+};
+
+const RICH_MASK = [
+  SEARCH_MASK,
+  'places.userRatingCount',
+  'places.regularOpeningHours.periods',
+  'places.regularOpeningHours.weekdayDescriptions',
+  'places.editorialSummary',
+  'places.accessibilityOptions.wheelchairAccessibleEntrance',
+].join(',');
+
+/**
+ * searchNearby por tipos (restricción al círculo, por popularidad), con los campos que necesita el tour.
+ * Un tipo inválido hace fallar solo esa llamada: el caller manda grupos chicos y atrapa cada uno.
+ * Sin key de Google: [] (el tour sigue con OSM/Wikipedia/place_library).
+ */
+export async function searchPlacesRich(args: { near: { lat: number; lng: number }; radius_m: number; types: string[]; max_results?: number }): Promise<RichPlace[]> {
+  if (!env().GOOGLE_MAPS_API_KEY) return [];
+  return cached(`rich:${JSON.stringify(args)}`, async () => {
+    const res = await googleFetch<{ places?: GPlace[] }>(`${BASE}/places:searchNearby`, {
+      method: 'POST',
+      fieldMask: RICH_MASK,
+      body: {
+        includedTypes: args.types,
+        maxResultCount: Math.min(args.max_results ?? 20, 20),
+        rankPreference: 'POPULARITY',
+        languageCode: LANG,
+        locationRestriction: { circle: { center: { latitude: args.near.lat, longitude: args.near.lng }, radius: Math.min(args.radius_m, 50_000) } },
+      },
+    });
+    return (res.places ?? []).map((p) => ({
+      ...toSummary(p),
+      user_rating_count: p.userRatingCount ?? null,
+      periods: p.regularOpeningHours?.periods ?? null,
+      editorial_summary: p.editorialSummary?.text ?? null,
+      wheelchair_entrance: p.accessibilityOptions?.wheelchairAccessibleEntrance ?? null,
+      weekday_hours: p.regularOpeningHours?.weekdayDescriptions ?? [],
+    }));
   });
 }

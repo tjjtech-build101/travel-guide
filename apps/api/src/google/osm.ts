@@ -105,21 +105,6 @@ type NominatimPlace = {
   extratags?: Record<string, string>;
 };
 
-type NominatimReverse = { address?: { city?: string; town?: string; village?: string; municipality?: string; country?: string } };
-
-/** lat/lng → ciudad + país (Nominatim reverse, sin key). Usa la misma cola que osmDetails (1 req/s). */
-export async function reverseGeocode(lat: number, lng: number): Promise<{ city: string; country: string } | null> {
-  return cached(`osm-reverse:${lat.toFixed(3)}:${lng.toFixed(3)}`, async () => {
-    const r = await throttled(() =>
-      getJson<NominatimReverse>(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&accept-language=es`),
-    );
-    const a = r.address;
-    const city = a?.city ?? a?.town ?? a?.village ?? a?.municipality;
-    if (!city) return null;
-    return { city, country: a?.country ?? '' };
-  });
-}
-
 export async function osmDetails(id: string): Promise<PlaceDetails> {
   return cached(`osm-details:${id}`, async () => {
     const osmId = id.slice(4);
@@ -144,4 +129,35 @@ export async function osmDetails(id: string): Promise<PlaceDetails> {
       editorial_summary: tags.description ?? null,
     };
   });
+}
+
+// ───────────────────────── Geocodificación inversa (tour director: barrio y ciudad del punto de inicio)
+
+export type ReverseGeo = { neighborhood: string | null; city: string | null; country: string | null; country_code: string | null };
+
+type NominatimReverse = {
+  address?: Record<string, string | undefined>;
+};
+
+/** Barrio / ciudad / país de un punto (Nominatim reverse, zoom barrio). Nunca tira: null si falla. */
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeo | null> {
+  const key = `reverse:${lat.toFixed(3)}:${lng.toFixed(3)}`;
+  try {
+    return await cached(key, () =>
+      throttled(async () => {
+        const r = await getJson<NominatimReverse>(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1&accept-language=es`,
+        );
+        const a = r.address ?? {};
+        return {
+          neighborhood: a.neighbourhood ?? a.suburb ?? a.quarter ?? a.city_district ?? null,
+          city: a.city ?? a.town ?? a.village ?? a.municipality ?? a.state ?? null,
+          country: a.country ?? null,
+          country_code: a.country_code?.toUpperCase() ?? null,
+        };
+      }),
+    );
+  } catch {
+    return null;
+  }
 }

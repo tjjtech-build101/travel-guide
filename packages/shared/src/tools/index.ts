@@ -18,6 +18,7 @@ import {
   RouteEtaInput,
   SearchPlacesInput,
   ShouldGenerateTourInput,
+  TourBriefInput,
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
@@ -94,6 +95,11 @@ export const toolDefs = {
     description:
       'Arma un viaje entero (tramos, días y bloques) a partir de la conversación. Es un trabajo en segundo plano: devuelve { job_id, trip_id } y el progreso se ve en agent_jobs.',
     input: PlanTripInput,
+  },
+  tour_brief: {
+    description:
+      'Antes de generate_tour: mira el contexto del grupo (perfiles, viaje, clima, hora, zona) y devuelve un resumen + 0-3 preguntas que cambian el tour. Cada pregunta tiene como id el campo de generate_tour que completa.',
+    input: TourBriefInput,
   },
   generate_tour: {
     description:

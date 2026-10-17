@@ -89,3 +89,74 @@ export async function fetchForecast(args: { lat: number; lng: number; date_from:
     3 * 60 * 60 * 1000, // 3h, PRD 16: "se reutiliza si tiene menos de 3h"
   );
 }
+
+// ───────────────────────── Tour director: clima en la ventana del tour + puesta del sol + hora local
+
+export type TourWeather = {
+  /** Offset de la zona del punto (para pasar start_at a hora local: horarios de apertura). */
+  utc_offset_s: number;
+  tz: string | null;
+  /** "HH:MM" local. */
+  sunset: string | null;
+  /** Horas locales que toca el tour. */
+  hours: { h: string; t: number; pp: number; code: number }[];
+  max_precip_prob: number;
+  temp_c: number | null;
+};
+
+type TourMeteoResponse = OpenMeteoResponse & {
+  utc_offset_seconds?: number;
+  timezone?: string;
+  daily?: OpenMeteoResponse['daily'] & { sunset?: string[] };
+};
+
+/** Clima de las horas del tour. Nunca tira: null si Open-Meteo no responde. */
+export async function tourWeather(args: { lat: number; lng: number; start: Date; duration_min: number }): Promise<TourWeather | null> {
+  try {
+    const body = await cached(
+      `tour-weather:${args.lat.toFixed(2)}:${args.lng.toFixed(2)}:${args.start.toISOString().slice(0, 13)}`,
+      async () => {
+        const q = new URLSearchParams({
+          latitude: String(args.lat),
+          longitude: String(args.lng),
+          hourly: 'temperature_2m,precipitation_probability,weather_code',
+          daily: 'sunset',
+          timezone: 'auto',
+          past_days: '1',
+          forecast_days: '3',
+        });
+        const res = await fetch(`${BASE}?${q}`, { signal: AbortSignal.timeout(4000) });
+        if (!res.ok) throw new Error(`Open-Meteo ${res.status}`);
+        return (await res.json()) as TourMeteoResponse;
+      },
+      60 * 60 * 1000,
+    );
+    const offset = body.utc_offset_seconds ?? 0;
+    const local = new Date(args.start.getTime() + offset * 1000);
+    const localDate = local.toISOString().slice(0, 10);
+    const startH = local.getUTCHours();
+    const endH = new Date(local.getTime() + args.duration_min * 60_000).getUTCHours();
+    const hours: TourWeather['hours'] = [];
+    const hr = body.hourly;
+    if (hr) {
+      for (let i = 0; i < hr.time.length; i++) {
+        const [date, hh] = hr.time[i].split('T');
+        const h = Number(hh.slice(0, 2));
+        const inWindow = date === localDate && (endH >= startH ? h >= startH && h <= endH : h >= startH);
+        if (inWindow) hours.push({ h: hh, t: hr.temperature_2m[i], pp: hr.precipitation_probability[i] ?? 0, code: hr.weather_code[i] });
+      }
+    }
+    const dIdx = body.daily?.time.indexOf(localDate) ?? -1;
+    const sunsetIso = dIdx >= 0 ? body.daily?.sunset?.[dIdx] : undefined;
+    return {
+      utc_offset_s: offset,
+      tz: body.timezone ?? null,
+      sunset: sunsetIso ? sunsetIso.slice(11, 16) : null,
+      hours,
+      max_precip_prob: hours.reduce((m, x) => Math.max(m, x.pp ?? 0), 0),
+      temp_c: hours[0]?.t ?? null,
+    };
+  } catch {
+    return null;
+  }
+}

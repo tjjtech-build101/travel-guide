@@ -23,13 +23,18 @@ function useTourStops(tourId: string | null, enabled: boolean) {
     enabled: !!tourId && enabled,
     queryFn: async () => {
       const [{ data: tour }, { data: stops }] = await Promise.all([
-        supabase.from('tours').select('title,status').eq('id', tourId!).maybeSingle(),
+        supabase.from('tours').select('*').eq('id', tourId!).maybeSingle(), // '*': thesis puede no existir todavía
         supabase.from('tour_stops').select('sort_order, place_library(name)').eq('tour_id', tourId!).order('sort_order'),
       ]);
       const list = ((stops ?? []) as unknown as { sort_order: number; place_library: { name: string | null } | null }[]).map(
         (s): TourStopName => ({ sort_order: s.sort_order, name: s.place_library?.name ?? `Parada ${s.sort_order}` }),
       );
-      return { title: (tour?.title as string | null) ?? null, status: (tour?.status as string | null) ?? null, stops: list };
+      return {
+        title: (tour?.title as string | null) ?? null,
+        thesis: ((tour as { thesis?: string | null } | null)?.thesis as string | null) ?? null,
+        status: (tour?.status as string | null) ?? null,
+        stops: list,
+      };
     },
   });
 }
@@ -63,7 +68,8 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
   const retry = async () => {
     if (!here) return;
     clear();
-    await startNearbyTour({ lat: here.lat, lng: here.lng, duration_min: job.durationMin, trip_id: job.tripId ?? undefined });
+    // Mismas respuestas de la entrevista, desde donde estás ahora.
+    await startNearbyTour({ ...job.input, lat: here.lat, lng: here.lng, duration_min: job.durationMin, trip_id: job.tripId ?? undefined });
   };
 
   const start = async () => {
@@ -89,6 +95,7 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
       <View style={[styles.card, styles.ready]}>
         <Text style={[styles.kicker, { color: colors.success }]}>TU TOUR ESTÁ LISTO</Text>
         <Text style={styles.title}>{stops.data?.title ?? 'Tour acá, ahora'}</Text>
+        {stops.data?.thesis ? <Text style={styles.thesis}>{stops.data.thesis}</Text> : null}
         {result ? (
           <Text style={styles.body}>
             {result.stop_count} paradas · ~{result.est_duration_min} min · {(Math.round(result.total_walk_m / 100) / 10).toString().replace(".", ",")} km a pie
@@ -129,7 +136,7 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
       ) : (
         <Skeleton height={16} />
       )}
-      <Text style={styles.muted}>Busco lugares cerca y verifico cada dato con fuentes. Tarda menos de un minuto.</Text>
+      <Text style={styles.muted}>Busco lugares, pienso la historia y verifico cada dato con su fuente. Tarda un par de minutos.</Text>
     </View>
   );
 }
@@ -143,6 +150,7 @@ const styles = StyleSheet.create({
   kicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1, color: colors.scout },
   title: { fontSize: font.h2, fontWeight: '800', color: colors.text },
   body: { fontSize: font.body, color: colors.text },
+  thesis: { fontSize: font.small, color: colors.textMuted, fontStyle: 'italic' },
   muted: { fontSize: font.small, color: colors.textMuted, marginTop: space.xs },
   line: { fontSize: font.small, color: colors.textMuted },
   lineLast: { color: colors.text, fontWeight: '700' },

@@ -204,6 +204,21 @@ Recorrido sugerido (≈2,2 km a pie, ≈90 min con permanencias; termina en el M
 - `tours.route jsonb` = `{ polyline, total_walk_m, est_duration_min }` (polilínea a pie codificada). La usan el mapa de PRD 07 y la detección de `left_route`. Alternativa sin cambio: segmentos rectos entre paradas.
 - Archivo de seed nuevo `supabase/seed/ciudad-vieja-stops.json` (fuente del contenido curado, junto a `ciudad-vieja-track.json`).
 
+## v2 · Tour director (en código)
+
+El pipeline de "Notas técnicas" quedó reemplazado por uno que arma **un tour, no una lista de lugares**. Código: `apps/api/src/agents/tour*.ts`. Contratos: `docs/CONTRACTS.md` → "Cambios PRD 06 v2".
+
+1. **Entrevista** (`tour_brief`, `tourBrief.ts`): mira el contexto y devuelve 0-3 preguntas que cambian el tour (lluvia → ¿cubierto?, chicos sin edad, gustos que chocan, cruza el almuerzo, energía, cómo terminar, primera vez, entradas pagas) + "algo que sí o sí". La app lo muestra en la hoja "Tour acá, ahora"; el Scout lo pregunta por voz.
+2. **Brief** (`tourContext.ts`): perfiles completos (intereses, avoid, dieta, ritmo, movilidad, estilo de guía, rasgos confirmados), `trip_prefs`, memorias, `content_told`, tours anteriores del viaje, itinerario (lo que ya vieron y lo que van a ver), lugares guardados, hora local, clima en la ventana del tour, puesta del sol, barrio y ciudad.
+3. **Selección + ruta** (`tourRoute.ts`): tipo de parada, notoriedad en escala común, puntaje para el grupo (ya escuchado, ya en el plan, lluvia, chicos, primera vez vs. conocedores), y un *orienteering problem* con ventanas horarias: inserción golosa por puntaje/minuto, diversidad de tipos, obligatorias, final fijo/libre/vista/comida, tope de caminata y separación mínima de 90 m (lo de al lado se cuenta desde la parada vecina). Después Google Routes confirma el tiempo real y recorta si hace falta.
+4. **Director** (Claude, effort high): tesis, título, hasta 3 cambios de paradas y el papel de cada una en el arco (gancho, giro, clímax, respiro, cierre), ángulo, qué señalar, gancho personal y referencias a paradas anteriores.
+5. **Investigación** (en paralelo con el director): Wikipedia primero (artículo completo → datos con cita textual chequeada en código), web si faltan datos o fuentes; un juez independiente por lugar confirma que cada cita respalda su dato.
+6. **Escritores** (una llamada por parada, en paralelo): cada oración con año, cifra, siglo o nombre propio cita `[fN]`; el chequeo determinístico (`tourCheck.ts`) **borra** las oraciones sin respaldo (antes, al fallar, dejaba pasar el texto). Reintento con las oraciones borradas como corrección.
+7. **Crítico** (rúbrica: gancho, mostrar, historia, voz, grupo, arco, oído, logística) → reescribe las paradas flojas si queda tiempo.
+8. **Escritura**: igual que antes + `dwell_min`, geofence por tipo, polilínea completa, `tours.title/thesis/brief`.
+
+Prueba real sin base: `cd apps/api && npx tsx scripts/try-tour.ts [ana|familia|movilidad] [lat,lng] [min] ['{"food_stop":true}']`.
+
 ## Fuera de alcance
 
 - Modo explorador / radar de historias (PRD 18): acá solo se acepta `mode='explorer'` en el esquema.

@@ -18,6 +18,7 @@ import { remove_block } from './remove_block';
 import { route_eta } from './route_eta';
 import { search_places } from './search_places';
 import { should_generate_tour } from './should_generate_tour';
+import { tour_brief } from './tour_brief';
 import { get_stop_content, next_stop, skip_stop, start_tour, tour_status } from './tour_live';
 import type { Handler, ToolCtx } from './types';
 import { undo } from './undo';
@@ -40,6 +41,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   plan_transfers,
   look_at_photo,
   research,
+  tour_brief,
   generate_tour,
   weather,
   events_search,
