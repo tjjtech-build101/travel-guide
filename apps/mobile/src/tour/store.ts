@@ -7,14 +7,20 @@
 //       si la persona está hablando;
 //   (b) no hay llamada (PLAN B): tarjeta en Ahora (narración corta de get_stop_content + haptic) y botón
 //       "Que me lo cuente el Scout" que abre la llamada en modo tour con foco en la parada.
+//
+// Tour interno (tours.route.positioning 'manual': museo, mercado): el GPS no marca llegadas; las marca la persona con
+// arrive() — botón "Llegué", la voz (herramienta at_stop) o una foto que reconoce la parada — y leave() al seguir.
 import {
   createEngineState,
+  engineArrive,
   engineFinish,
+  engineLeave,
   engineMarkTold,
   engineOnFix,
   engineProgress,
   engineSkip,
   engineTick,
+  isManualTour,
   isVoiceEngineEvent,
   tourStartedPayload,
   type EngineFix,
@@ -24,6 +30,7 @@ import {
   type LeftRoutePayload,
   type StartTourResult,
   type StopLayer,
+  type ArrivedStopPayload,
   type TimeWarningPayload,
   type TourEngineEvent,
   type TourStopView,
@@ -63,6 +70,8 @@ export type LiveTour = {
   tripId: string | null;
   title: string;
   mode: string | null;
+  /** Tour interno: llegadas a mano (tour.positioning === 'manual'). */
+  indoor?: boolean;
   tour: EngineTour;
   stops: TourStopView[];
   engine: EngineState;
@@ -91,6 +100,13 @@ type Actions = {
   tick: (now?: number) => void;
   skip: (stopId: string, opts?: { remote?: boolean }) => void;
   markTold: (stopId: string, layer: StopLayer) => void;
+  /**
+   * Tour interno: la persona llegó a `stopId`. via 'button' avisa al scout con arrived_stop (manual:true); 'voice' y
+   * 'photo' no (el scout ya lo sabe: lo pidió él o le llega en photo_result). Devuelve el payload, o null si no cambió.
+   */
+  arrive: (stopId: string, via: 'button' | 'voice' | 'photo') => ArrivedStopPayload | null;
+  /** Tour interno: sigue a la próxima (sale de la parada actual; en la última, termina). */
+  leave: () => void;
   finish: () => Promise<void>;
   /** Cierra el tour terminado y vuelve a la vista Ahora normal. */
   close: () => void;
@@ -219,7 +235,7 @@ export const useTourStore = create<TourStore>((set, get) => {
     persist();
   };
 
-  const handle = (events: TourEngineEvent[]) => {
+  const handle = (events: TourEngineEvent[], opts: { silentArrival?: boolean } = {}) => {
     for (const e of events) {
       if (isVoiceEngineEvent(e)) {
         log(`${e.type} ${'stop_id' in e.payload ? stopName(get().live!, e.payload.stop_id) : ''}`);
@@ -227,6 +243,8 @@ export const useTourStore = create<TourStore>((set, get) => {
           // Llegada: haptic siempre (con y sin llamada) y progreso al backend.
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           pushProgress();
+          // Llegada marcada por la voz o por una foto en la llamada: el scout ya la tiene, no se le avisa de nuevo.
+          if (opts.silentArrival && voice.isLive()) continue;
         }
         if (voice.isLive()) {
           voiceQueue.push(e);
@@ -288,7 +306,8 @@ export const useTourStore = create<TourStore>((set, get) => {
 
     startFromResult: (r, { tripId = null, participants = [] }) => {
       const stops = r.stops;
-      const tour: EngineTour = { tour_id: r.tour.id, stops: toEngineStops(stops), participants, route: null };
+      const indoor = isManualTour(r.tour.route);
+      const tour: EngineTour = { tour_id: r.tour.id, stops: toEngineStops(stops), participants, route: null, positioning: indoor ? 'manual' : 'gps' };
       const told = Object.fromEntries(stops.map((s) => [s.stop_id, [...s.layers_told]]));
       const startedAt = Date.parse(r.tour.progress.started_at);
       const endsAt = Date.parse(r.tour.progress.ends_at);
@@ -308,17 +327,18 @@ export const useTourStore = create<TourStore>((set, get) => {
           tripId: r.tour.trip_id ?? tripId,
           title: r.tour.title ?? 'Tour',
           mode: r.tour.mode,
+          indoor,
           tour,
           stops,
           engine,
         },
       });
-      log(`tour ${r.tour.title ?? r.tour.id} · ${tour.stops.length} paradas${r.already_active ? ' (retomado)' : ''}`);
+      log(`tour ${r.tour.title ?? r.tour.id} · ${tour.stops.length} paradas${indoor ? ' · interno (llegadas a mano)' : ''}${r.already_active ? ' (retomado)' : ''}`);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       persist();
       // Arrancó en medio de una llamada de chat: el scout recibe las reglas del modo tour.
       if (voice.isLive() && useVoiceStore.getState().args?.mode !== 'tour') {
-        voice.injectEvent('tour_started', tourStartedPayload(r.tour.id, r.tour.title, stops), { respond: false });
+        voice.injectEvent('tour_started', tourStartedPayload(r.tour.id, r.tour.title, stops, { indoor }), { respond: false });
       }
     },
 
@@ -353,6 +373,29 @@ export const useTourStore = create<TourStore>((set, get) => {
       const after = get().live!;
       const pending = after.tour.stops.filter((s) => !after.engine.visited[s.stop_id] && !after.engine.skipped.includes(s.stop_id));
       if (!pending.length && !after.engine.insideStopId) get().tick();
+    },
+
+    arrive: (stopId, via) => {
+      const live = get().live;
+      if (!live || get().phase !== 'live') return null;
+      const r = engineArrive(live.tour, live.engine, stopId, Date.now());
+      if (!r.events.length) return null;
+      setEngine(r.state);
+      log(`llegada a mano (${via}): ${stopName(live, stopId)}`);
+      const card = get().card;
+      if (card && card.kind !== 'done' && 'stopId' in card && card.stopId !== stopId) set({ card: null });
+      handle(r.events, { silentArrival: via !== 'button' });
+      const arrived = r.events.find((e) => e.type === 'arrived_stop');
+      return arrived && arrived.type === 'arrived_stop' ? arrived.payload : null;
+    },
+
+    leave: () => {
+      const live = get().live;
+      if (!live || get().phase !== 'live') return;
+      const r = engineLeave(live.tour, live.engine, Date.now());
+      if (r.state === live.engine) return;
+      setEngine(r.state);
+      handle(r.events);
     },
 
     markTold: (stopId, layer) => {

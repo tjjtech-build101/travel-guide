@@ -1,6 +1,8 @@
 // Ahora con un tour activo (PRD 07 dentro de la vista Ahora, DECISIONES-SABADO): mapa chico con la ruta y el puntito,
 // próxima parada + distancia + minutos, chip de tiempo restante, tarjeta del plan B (sin llamada) y los botones
 // grandes de siempre: Hablar con el Scout, cámara, Saltar parada, Terminar.
+// Tour interno (museo, mercado): sin mapa ni distancias (adentro el GPS no sirve); la próxima parada muestra dónde está
+// y qué mirar, con "Llegué" (o se le avisa al Scout por voz, o se le muestra con la cámara) y "Sigo a la próxima".
 import { engineView, SCOUT, type StopLayer } from '@build101/shared';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useEffect, useState } from 'react';
@@ -76,9 +78,18 @@ export function LiveTourView() {
   // PRD 08: la cámara a pedido (con llamada, el scout narra el resultado; sin llamada, alcanza la tarjeta).
   const onCamera = () => camera.open({ source: 'tour' });
 
+  const indoor = !!live.indoor;
+  const nextView = next ? live.stops.find((s) => s.stop_id === next.stop_id) : undefined;
+
   const statusText = done
     ? 'Tour terminado'
-    : v.status === 'waiting'
+    : indoor
+      ? inside
+        ? `Estás en ${inside.name}`
+        : v.status === 'waiting'
+          ? 'Avisame cuando estés en la primera'
+          : 'Yendo a la próxima'
+      : v.status === 'waiting'
       ? 'Esperando en el punto de inicio'
       : v.status === 'off_route'
         ? 'Te alejaste de la ruta'
@@ -106,7 +117,7 @@ export function LiveTourView() {
           </Text>
         </View>
 
-        {kind === 'real' && background === 'foreground_only' && !done ? (
+        {kind === 'real' && background === 'foreground_only' && !done && !indoor ? (
           <Pressable style={styles.banner} onPress={() => void Linking.openSettings()} accessibilityRole="button">
             <Text style={styles.bannerText}>
               Mantené la app abierta: sin el permiso de ubicación “siempre”, te aviso de las paradas solo con la pantalla prendida.
@@ -115,7 +126,7 @@ export function LiveTourView() {
           </Pressable>
         ) : null}
 
-        <TourMiniMap tour={live.tour} engine={live.engine} fix={fix} nextId={next?.stop_id ?? null} />
+        {indoor ? null : <TourMiniMap tour={live.tour} engine={live.engine} fix={fix} nextId={next?.stop_id ?? null} />}
 
         {card ? <TourCardView card={card} live={live} /> : null}
 
@@ -131,6 +142,21 @@ export function LiveTourView() {
                 {!scout.inCall && card?.kind !== 'narration' ? (
                   <Button label={`Que me lo cuente ${SCOUT.name}`} onPress={() => void store.askScout(inside.stop_id)} style={styles.cardBtn} />
                 ) : null}
+                {indoor ? (
+                  <Button label={next ? 'Sigo a la próxima' : 'Terminé'} variant="secondary" onPress={store.leave} style={styles.cardBtn} />
+                ) : null}
+              </>
+            ) : next && indoor ? (
+              <>
+                <Text style={[styles.kicker, { color: colors.scout }]}>{v.status === 'waiting' ? 'PRIMERA PARADA' : 'PRÓXIMA PARADA'}</Text>
+                <Text style={styles.cardTitle}>
+                  {next.sort_order}. {next.name}
+                </Text>
+                {nextView?.look_at ? <Text style={styles.body}>{nextView.look_at}</Text> : null}
+                <Button label="Llegué" onPress={() => store.arrive(next.stop_id, 'button')} style={styles.cardBtn} />
+                <Text style={styles.muted}>
+                  O decile a {SCOUT.name} «llegué», o mostrásela con la cámara.
+                </Text>
               </>
             ) : next ? (
               <>
@@ -151,7 +177,7 @@ export function LiveTourView() {
           </View>
         ) : null}
 
-        <StopsList live={live} nextId={next?.stop_id ?? null} />
+        <StopsList live={live} nextId={next?.stop_id ?? null} onArrive={indoor && !done ? (id) => store.arrive(id, 'button') : null} />
         {__DEV__ && !done ? <DevClock /> : null}
       </ScrollView>
 
@@ -301,7 +327,8 @@ function TourCardView({ card, live }: { card: TourCard; live: LiveTour }) {
   }
 }
 
-function StopsList({ live, nextId }: { live: LiveTour; nextId: string | null }) {
+/** onArrive (tour interno): tocar una parada = "estoy acá" (orden flexible). */
+function StopsList({ live, nextId, onArrive }: { live: LiveTour; nextId: string | null; onArrive: ((stopId: string) => void) | null }) {
   const eng = live.engine;
   const ordered = [...live.stops].sort((a, b) => a.sort_order - b.sort_order);
   return (
@@ -313,15 +340,22 @@ function StopsList({ live, nextId }: { live: LiveTour; nextId: string | null }) 
         const visited = !!eng.visited[s.stop_id];
         const isNext = s.stop_id === nextId;
         return (
-          <View key={s.stop_id} style={styles.stopRow}>
+          <Pressable
+            key={s.stop_id}
+            style={styles.stopRow}
+            disabled={!onArrive || here}
+            onPress={() => onArrive?.(s.stop_id)}
+            accessibilityRole={onArrive ? 'button' : undefined}
+            accessibilityLabel={onArrive ? `Estoy en ${s.name}` : undefined}
+          >
             <View style={[styles.dot, visited && styles.dotVisited, skipped && styles.dotSkipped, isNext && styles.dotNext, here && styles.dotHere]}>
               <Text style={styles.dotText}>{s.sort_order}</Text>
             </View>
             <Text style={[styles.stopName, (visited || skipped) && !here && styles.stopDone, skipped && styles.stopSkipped]} numberOfLines={1}>
               {s.name}
             </Text>
-            <Text style={styles.muted}>{here ? 'acá' : skipped ? 'salteada' : visited ? '✓' : isNext ? 'próxima' : ''}</Text>
-          </View>
+            <Text style={styles.muted}>{here ? 'acá' : skipped ? 'salteada' : visited ? '✓' : isNext ? 'próxima' : onArrive ? 'estoy acá' : ''}</Text>
+          </Pressable>
         );
       })}
     </View>
@@ -334,7 +368,9 @@ function BackgroundPermissionSheet() {
   const background = useTourStore((s) => s.background);
   const phase = useTourStore((s) => s.phase);
   const [busy, setBusy] = useState(false);
-  const visible = kind === 'real' && phase === 'live' && background == null;
+  // Tour interno: no hace falta (adentro las llegadas no son por GPS).
+  const indoor = useTourStore((s) => !!s.live?.indoor);
+  const visible = kind === 'real' && phase === 'live' && background == null && !indoor;
   const answer = async (allow: boolean) => {
     setBusy(true);
     const ok = allow ? await requestAlwaysLocation() : false;

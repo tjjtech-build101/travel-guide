@@ -122,7 +122,7 @@ describe('sesión de OpenAI Realtime', () => {
     expect(voiceToolNames(['plan_trip'])).not.toContain('plan_trip');
     const s = buildRealtimeSession({ instructions: 'x', lang: 'en' });
     // look_at_photo: la voz ve la versión del celu ({ question? }), no la del backend.
-    expect(s.tools.map((t) => t.name)).toEqual([...visible, 'set_language', 'look_at_photo']);
+    expect(s.tools.map((t) => t.name)).toEqual([...visible, 'set_language', 'look_at_photo', 'at_stop']);
     expect(JSON.stringify(s.tools.find((t) => t.name === 'look_at_photo'))).not.toContain('image_base64');
     expect(s.audio.output.voice).toBe(SCOUT.voice);
     expect(s.audio.input.transcription.language).toBe('en');

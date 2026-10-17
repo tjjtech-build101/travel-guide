@@ -7,6 +7,7 @@ import {
   STOP_LAYERS,
   type StopLayer,
   type TourProgress,
+  type TourRoute,
   type TourStopView,
 } from '@build101/shared';
 import { badInput, dbError, notFound } from './errors';
@@ -21,7 +22,7 @@ export type TourRow = {
   mode: string | null;
   status: string;
   duration_min: number | null;
-  route: { polyline: string | null; total_walk_m?: number; est_duration_min?: number } | null;
+  route: TourRoute | null;
   progress: TourProgress | null;
 };
 

@@ -220,6 +220,20 @@ export const VOICE_CLIENT_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    type: 'function' as const,
+    name: 'at_stop',
+    description:
+      'Tour interno (museo, mercado): la persona dice que llegó o que está frente a una parada ("llegué", "estoy frente al autorretrato"). Marca la llegada en el celu y devuelve la parada; después narrala con get_stop_content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        stop_id: { type: 'string', description: 'stop_id de la parada (de la lista del tour activo)' },
+        name: { type: 'string', description: 'Lo que dijo la persona, si no sabés el stop_id ("la sala de los juguetes")' },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 /**

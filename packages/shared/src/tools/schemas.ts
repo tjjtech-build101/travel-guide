@@ -227,6 +227,18 @@ export const GenerateTourInput = z.object({
   notes: z.string().max(500).optional().describe('Pedido libre de la persona ("algo con fantasmas", "nada de iglesias")'),
 });
 
+// ---------- generate_indoor_tour · tour adentro de un lugar (museo, mercado, iglesia) ----------
+
+export const GenerateIndoorTourInput = z.object({
+  venue_name: z.string().min(2).max(160).describe('El lugar por dentro, tal cual lo dijo la persona ("Museo Torres García")'),
+  lat: z.number().min(-90).max(90).optional().describe('Posición de la persona (para ubicar el lugar correcto)'),
+  lng: z.number().min(-180).max(180).optional(),
+  trip_id: Id.optional(),
+  duration_min: z.number().int().min(15).max(120).default(45),
+  language: z.string().default('es'),
+  notes: z.string().max(500).optional().describe('Pedido libre ("lo más famoso", "para chicos", "solo la planta baja")'),
+});
+
 // ---------- tour_brief · entrevista previa al tour ----------
 
 export const TourBriefInput = z.object({
@@ -308,6 +320,8 @@ export const LookAtPhotoModelOutput = z.object({
 export type LookAtPhotoModelOutput = z.infer<typeof LookAtPhotoModelOutput>;
 
 export type LookAtPhotoOutput = LookAtPhotoModelOutput & {
+  /** Tour interno (positioning manual): la parada del tour que se ve en la foto (confianza ≥ 0,6). */
+  tour_stop?: { stop_id: string; name: string } | null;
   photo_id: string | null;
   storage_path: string | null;
   /** ms por tramo (subida, cercanos, claude) para medir la latencia. */
