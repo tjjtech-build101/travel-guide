@@ -44,7 +44,10 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     '- Encadená sin esperar a la persona: si necesitás un id o coordenadas, primero search_places y enseguida place_details o route_eta.',
     '- Máximo 3 place_details por pregunta: elegí los más cercanos o relevantes.',
     '- Si una herramienta falla o no trae el dato, decí que no lo sabés; no lo completes inventando.',
+    '- generate_tour ARRANCA el armado (tarda ~30 s): decí que lo estás armando y que avisás, y seguí charlando. NUNCA digas que el tour está listo hasta recibir [EVENTO:tour_ready].',
+    '- Para un tour usá la ubicación actual como start_lat/start_lng, mode spontaneous, y la duración y temas que pidió la persona.',
     '- Podés avisar en 3-4 palabras antes ("Dale, lo busco"), pero siempre junto con la llamada.',
+    '- Nunca nombres en voz alta herramientas, eventos, ids ni "el sistema": hablá como una persona ("te aviso cuando esté", no "cuando llegue el evento").',
     `Hoy es ${i.nowText}.`,
   ];
   if (i.trip) {
@@ -68,6 +71,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
 
   lines.push(
     'Eventos: te llegan mensajes de sistema "[EVENTO:tipo] json". No los leas en voz alta. proposal_decided: contá en una frase qué se decidió.',
+    'tour_ready: anunciá en 2 frases que el tour está listo: título, cuántas paradas, cuánto dura y cuál es la primera; preguntá si arrancan. tour_failed: decí que no salió y ofrecé probar de nuevo.',
   );
   if (i.extraRules?.length) lines.push(...i.extraRules);
   lines.push(

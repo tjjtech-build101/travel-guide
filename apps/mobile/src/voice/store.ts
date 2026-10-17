@@ -19,6 +19,7 @@ import { looksLikeEcho } from './echo';
 import { micPermission, requestMic } from './permissions';
 import { setSpeaker, startCallAudio, stopCallAudio } from './audioRoute';
 import { RealtimeConnection, type ServerEvent } from './realtimeClient';
+import { watchTourJob } from './tourWatch';
 import { actionText, registerLocalTool, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
 
 export type CallStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'ending' | 'summary' | 'error';
@@ -293,6 +294,26 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }));
         setTimeout(() => get().dismissAction(id), ACTION_TTL_MS);
       }
+    }
+    // generate_tour es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
+    for (const { call, res } of results) {
+      if (call.name !== 'generate_tour' || !res.ok) continue;
+      const { job_id, tour_id } = (res.data ?? {}) as { job_id?: string; tour_id?: string };
+      if (!job_id || !tour_id) continue;
+      log('🔧', `generate_tour: escuchando el job ${job_id.slice(0, 8)}…`);
+      const sessionId = get().session?.voice_session_id;
+      void watchTourJob(job_id, tour_id).then((r) => {
+        if (get().session?.voice_session_id !== sessionId) return; // la llamada ya terminó
+        if (r.ok) {
+          log('🔧', `tour listo: ${r.event.stop_count} paradas`);
+          get().injectEvent('tour_ready', r.event);
+          hapticResult(true);
+        } else {
+          log('⚠️', `tour falló: ${r.error}`);
+          get().injectEvent('tour_failed', { tour_id, error: r.error });
+          hapticResult(false);
+        }
+      });
     }
     hapticResult(results.every((r) => r.res.ok));
     set((s) => ({ toolsRunning: s.toolsRunning.filter((t) => !calls.some((c) => c.call_id === t.callId)) }));

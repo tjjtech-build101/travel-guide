@@ -98,7 +98,20 @@ export const VOICE_EVENT_TYPES = [
   'proposal_decided',
   'dwell',
   'speaker_changed',
+  // generate_tour es un job: la app escucha agent_jobs y avisa al scout cuando termina (PRD 06/18 → 05).
+  'tour_ready',
+  'tour_failed',
 ] as const;
+
+/** Payload de [EVENTO:tour_ready]. */
+export type TourReadyEvent = {
+  tour_id: string;
+  title: string | null;
+  stop_count: number;
+  est_duration_min: number;
+  total_walk_m: number;
+  stops: { sort_order: number; name: string }[];
+};
 export type VoiceEventType = (typeof VOICE_EVENT_TYPES)[number];
 
 export function formatVoiceEvent(type: VoiceEventType, payload: unknown): string {

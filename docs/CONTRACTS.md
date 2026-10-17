@@ -253,3 +253,15 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - Sin cambios de esquema. Formas de los jsonb/enums de `profiles` en `packages/shared/src/profile.ts`: `INTEREST_TAGS`, `Pace`, `Chronotype`, `BudgetLevel` (`low|mid|high|no_limit`), `TravelStyle`, `Interests` (pesos 1–5), `Mobility`, `InferredTrait`, `QuietHours`, `NotificationPrefs` y `ProfilePreferencesPatch` (lo que escribe el onboarding/Perfil).
 - La app escribe `profiles` directo con Supabase (RLS: cada uno el suyo) y pone `onboarded_at = now()` en la misma actualización. `avoid` guarda etiquetas en español ("multitudes", "caminar mucho", …); `languages` en ISO 639-1.
 - Estrellas de los chips → peso: ★ = 2, ★★ = 4, ★★★ = 5.
+
+---
+
+## Cambios PRD 05 (voz) — en código
+
+- `POST /voice/session` acepta además `lang?`, `location?: {lat, lng, accuracy?}` y `sdp?` (oferta WebRTC, interfaz unificada): con `sdp` la API crea la llamada en OpenAI (`/v1/realtime/calls`) y devuelve `answer_sdp` (y `client_secret: null`); sin `sdp`, `client_secret`. Respuesta: `{ client_secret, answer_sdp, expires_at, voice_session_id, session_config, instructions_base, lang, scout }` (`VoiceSessionStart` en `packages/shared/src/voice.ts`).
+- `POST /voice/session/:id/end` `{ transcript }` → `{ job_id }` del job `voice_summary`; `agent_jobs.result` = `VoiceSummaryResult` (`summary`, `memories`, `duration_s`, `actions[]`).
+- Herramientas del celu (no del backend; controles de la llamada): `set_language { lang }` en `VOICE_CLIENT_TOOLS`. La API las suma a la sesión.
+- Eventos de voz nuevos: `[EVENTO:tour_ready] {tour_id, title, stop_count, est_duration_min, total_walk_m, stops:[{sort_order,name}]}` y `[EVENTO:tour_failed] {tour_id, error}`: la app escucha el job de `generate_tour` por Realtime y avisa al scout.
+- Env de la API: `OPENAI_REALTIME_MODEL` (default `gpt-realtime-2.1`), `VOICE_VAD` (`semantic_vad` default | `server_vad`), `VOICE_VAD_EAGERNESS` (`low`), `VOICE_VAD_THRESHOLD`, `VOICE_VAD_SILENCE_MS`, `API_REGION` (default `gru1`).
+- `activity_feed.payload.summary` de acciones del agente usa `SCOUT.name` (antes "El asistente").
+
