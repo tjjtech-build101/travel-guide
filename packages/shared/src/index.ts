@@ -6,3 +6,4 @@ export * from './jobs';
 export * from './tools';
 export * from './scout';
 export * from './track';
+export * from './profile';
