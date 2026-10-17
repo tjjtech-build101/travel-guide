@@ -11,6 +11,7 @@ import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore, type Line } from '../store';
 import { friendlyToolName } from '../toolBridge';
 import { ActionCards } from './ActionCards';
+import { SourcesButton, SourcesSheet, SourcesToast } from './Sources';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { scoutStateOf } from '../useScout';
 import { mmss, SCOUT_COLOR, useElapsed } from './CallBar';
@@ -61,6 +62,7 @@ function Live() {
   const captions = useVoiceStore((s) => s.captions);
   const lines = useVoiceStore((s) => s.lines);
   const notice = useVoiceStore((s) => s.notice);
+  const sourcesOpen = useVoiceStore((s) => s.sourcesOpen);
   const ptt = useVoiceStore((s) => s.turnTaking);
   const avatarState = useVoiceStore(scoutStateOf);
   const [showAll, setShowAll] = useState(false);
@@ -102,6 +104,8 @@ function Live() {
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
       <ActionCards style={styles.cards} />
+      <SourcesToast style={styles.cards} />
+      <SourcesButton />
 
       {captions ? (
         <Pressable style={styles.captions} onPress={() => setShowAll(true)} accessibilityRole="button" accessibilityHint="Ver todo el transcript">
@@ -114,6 +118,8 @@ function Live() {
 
       <Controls />
       <TranscriptSheet visible={showAll} lines={lines} onClose={() => setShowAll(false)} />
+      {/* Dentro del Modal de la llamada (iOS no presenta dos Modal hermanos a la vez). */}
+      <SourcesSheet visible={sourcesOpen} />
     </View>
   );
 }

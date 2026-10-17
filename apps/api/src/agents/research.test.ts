@@ -49,7 +49,7 @@ describe('research', () => {
     const { ctx, updates } = fakeCtx(CIUDADELA);
     const llm = fakeLlm();
     const r = await runResearch({ jobId: 'j1', input: { question: '¿De qué año es?', place_name: 'Puerta de la Ciudadela' }, ctx, llm });
-    expect(r.facts).toEqual([facts[0]]);
+    expect(r.facts).toEqual([{ ...facts[0], quote: 'cita textual' }]);
     expect(r).toMatchObject({ answer: 'Es de 1746.', rejected: 1, saved_facts: 1, place_id: CIUDADELA.id });
     expect(llm.answered).toEqual([[facts[0].text]]);
     const saved = (updates.find((u) => u.table === 'place_library')!.value as { facts: Record<string, unknown>[] }).facts[0];

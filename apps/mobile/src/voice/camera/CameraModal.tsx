@@ -97,6 +97,13 @@ function CameraScreen() {
     }
     setPhase({ kind: 'result', uri, out });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (out.facts_used.length) {
+      useVoiceStore.getState().addSources({
+        kind: 'photo',
+        topic: out.place && out.place.confidence >= 0.6 ? out.place.name : 'Tu foto',
+        items: out.facts_used.map((f) => ({ text: f.text, url: f.source_url })),
+      });
+    }
     // El scout lo narra (si hay llamada). Sin llamada, la tarjeta alcanza.
     useVoiceStore.getState().injectEvent('photo_result', {
       photo_id: out.photo_id,

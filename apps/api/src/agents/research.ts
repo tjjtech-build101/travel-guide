@@ -117,7 +117,7 @@ async function language(ctx: ToolCtx, input: ToolInput<'research'>): Promise<str
   return (data?.locale as string | undefined) ?? 'es';
 }
 
-export type MemoryHit = { cached: true; answer: string; facts: { text: string; source_url: string }[]; place_id: string };
+export type MemoryHit = { cached: true; answer: string; facts: { text: string; source_url: string; quote?: string }[]; place_id: string };
 
 /** Paso 0: ¿la memoria (place_library) ya responde? null si no (o si falla: se investiga igual). */
 export async function answerFromMemory(input: ToolInput<'research'>, ctx: ToolCtx, llm: ResearchLLM = anthropicResearchLlm()): Promise<MemoryHit | null> {
@@ -129,7 +129,12 @@ export async function answerFromMemory(input: ToolInput<'research'>, ctx: ToolCt
     if (!facts.length) return null;
     const r = await llm.fromMemory({ question: input.question, facts, language: await language(ctx, input) });
     if (!r.answerable || !r.answer.trim()) return null;
-    return { cached: true, answer: r.answer, facts: facts.map((f) => ({ text: f.text, source_url: f.source_url })), place_id: placeId };
+    return {
+      cached: true,
+      answer: r.answer,
+      facts: facts.map((f) => ({ text: f.text, source_url: f.source_url, ...(f.quote ? { quote: f.quote } : {}) })),
+      place_id: placeId,
+    };
   } catch (e) {
     console.warn('[research] memoria:', (e as Error).message);
     return null;
@@ -199,7 +204,7 @@ export async function runResearch(args: {
     const result: ResearchResult = {
       question: input.question,
       answer,
-      facts: verified.map((f) => ({ text: f.text, source_url: f.source_url })),
+      facts: verified.map((f) => ({ text: f.text, source_url: f.source_url, quote: f.quote })),
       rejected,
       place_id: placeId,
       saved_facts: saved,
