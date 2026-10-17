@@ -9,4 +9,5 @@ export * from './scout';
 export * from './voice';
 export * from './weather';
 export * from './track';
+export * from './tourEngine';
 export * from './profile';
