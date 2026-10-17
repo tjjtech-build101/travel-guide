@@ -4,3 +4,4 @@ export * from './demo';
 export * from './db';
 export * from './jobs';
 export * from './tools';
+export * from './scout';
