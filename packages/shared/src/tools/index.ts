@@ -22,6 +22,7 @@ import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, Tour
 
 export * from './schemas';
 export * from './tour';
+export * from './nowTools';
 
 type ToolDef = { description: string; input: z.ZodObject };
 

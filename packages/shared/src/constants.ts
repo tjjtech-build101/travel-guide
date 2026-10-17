@@ -42,6 +42,7 @@ export const FEED_KINDS = [
   'member_role_changed',
   'member_legs_changed',
   'tour_generated', // PRD 06
+  'running_late', // Ahora v2 (report_late)
 ] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 
