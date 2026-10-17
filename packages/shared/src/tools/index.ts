@@ -15,6 +15,7 @@ import {
   RemoveBlockInput,
   RouteEtaInput,
   SearchPlacesInput,
+  ShouldGenerateTourInput,
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
@@ -99,6 +100,11 @@ export const toolDefs = {
   events_search: {
     description: 'Busca eventos (con fecha y fuente) en una ciudad para un rango de fechas.',
     input: EventsSearchInput,
+  },
+  should_generate_tour: {
+    description:
+      'Decide si tiene sentido ofrecer "Generar tour" para un bloque del itinerario (ej. un museo o una zona histórica: sí; una comida puntual, un traslado o un alojamiento: no). Usa OpenAI Decisions API, responde en milisegundos.',
+    input: ShouldGenerateTourInput,
   },
   // PRD 07 · tour en vivo
   start_tour: {

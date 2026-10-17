@@ -198,6 +198,15 @@ export const EventsSearchInput = z.object({
   lang: z.string().default('es'),
 });
 
+// ---------- should_generate_tour (decide si un bloque amerita "Generar tour") ----------
+
+export const ShouldGenerateTourInput = z.object({
+  block_title: z.string().min(1),
+  block_type: z.enum(BLOCK_TYPES),
+  place_name: z.string().optional(),
+  description: z.string().max(2000).optional(),
+});
+
 // ---------- PRD 08 · look_at_photo ----------
 
 /** ~1,5 MB de base64 (la app manda JPEG 1280 px, calidad 0,6 ≈ 150-400 KB). */

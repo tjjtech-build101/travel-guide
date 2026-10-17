@@ -8,6 +8,7 @@ import { AvatarStack, type AvatarPerson } from '../../../ui/Avatar';
 import { Button } from '../../../ui/Button';
 import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
+import { useShouldGenerateTour } from '../../tours/useShouldGenerateTour';
 import { ALERT_COLORS, ALERT_FALLBACK, STATUS_COLORS, STATUS_LABEL, TRANSFER_MODE_LABEL, TYPE_LABEL } from '../labels';
 import { durationLabel, hhmm, timeLabel, type GhostBlock, type PlanBlock } from '../selectors';
 import { AlertIcon, LockIcon, TypeIcon } from './TypeIcon';
@@ -73,6 +74,12 @@ type CardProps = {
 };
 
 export const BlockCard = memo(function BlockCard({ block, me, legColor, people, onPress, onLongPress, onGenerateTour }: CardProps) {
+  // Hooks SIEMPRE antes de cualquier return condicional (incluido el de masked, abajo).
+  // "tour" ya es el tipo pensado para esto: siempre sí. Para el resto (activity, meal, lodging...),
+  // lo decide should_generate_tour (OpenAI Decisions API) — un museo sí, un restaurante puntual no.
+  const askAi = !!onGenerateTour && !block.masked && block.type !== 'tour';
+  const aiDecision = useShouldGenerateTour(askAi ? block : null);
+
   if (block.masked) return <BusyCard block={block} legColor={legColor} />;
   const s = hhmm(block.start_time);
   const e = hhmm(block.end_time);
@@ -82,6 +89,7 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
   const label = `${TYPE_LABEL[block.type]} ${block.title}, ${a11yTime(block)}, ${STATUS_LABEL[block.status].toLowerCase()}${
     privateMine ? ', privado' : ''
   }`;
+  const showGenerateTour = !!onGenerateTour && (block.type === 'tour' || aiDecision.data?.should_tour === true);
   return (
     <Animated.View entering={isFresh(block) ? FadeInDown.duration(200) : undefined}>
       <Pressable
@@ -117,12 +125,12 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
           ) : null}
           {transfer ? <Text style={styles.meta}>{transfer}</Text> : null}
           <AlertChips alerts={block.alerts} />
-          {onGenerateTour ? (
+          {showGenerateTour ? (
             <Button
               label={block.tour_id ? 'Generar de nuevo' : 'Generar tour'}
               variant="secondary"
               style={styles.genTourBtn}
-              onPress={() => onGenerateTour(block)}
+              onPress={() => onGenerateTour!(block)}
             />
           ) : null}
           <View style={styles.footer}>
