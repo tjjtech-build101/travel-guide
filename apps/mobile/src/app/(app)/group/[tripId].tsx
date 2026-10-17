@@ -1,17 +1,17 @@
-// Tab Grupo (placeholder hasta PRD 04): miembros + últimas filas de activity_feed.
+// Grupo (placeholder hasta PRD 04; acceso secundario desde el menú de Planificación, fuera de las tabs): miembros + últimas filas de activity_feed.
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { useTripId } from '../../../../features/trips/TripContext';
-import { errorDetail, useActivityFeed, useTripMembers } from '../../../../features/trips/queries';
-import { timeAgo } from '../../../../lib/format';
-import { Avatar } from '../../../../ui/Avatar';
-import { ErrorState, LoadingList } from '../../../../ui/States';
-import { colors, font, radius, space } from '../../../../ui/theme';
+import { useLocalSearchParams } from 'expo-router';
+import { errorDetail, useActivityFeed, useTripMembers } from '../../../features/trips/queries';
+import { timeAgo } from '../../../lib/format';
+import { Avatar } from '../../../ui/Avatar';
+import { ErrorState, LoadingList } from '../../../ui/States';
+import { colors, font, radius, space } from '../../../ui/theme';
 
 const ROLE_LABEL = { organizer: 'Organiza', traveler: 'Viaja', follower: 'Sigue el viaje' } as const;
 
 export default function GroupTab() {
-  const tripId = useTripId();
+  const { tripId } = useLocalSearchParams<{ tripId: string }>();
   const members = useTripMembers(tripId);
   const feed = useActivityFeed(tripId);
 

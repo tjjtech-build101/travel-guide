@@ -8,7 +8,7 @@ import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
 import { useTripRealtime } from '../../../../realtime/useTripRealtime';
 import { Button } from '../../../../ui/Button';
-import { BackIcon, BookIcon, GroupIcon, MapIcon, MoneyIcon, PlanIcon } from '../../../../ui/icons';
+import { BackIcon, BookIcon, MapIcon, MoneyIcon, NowIcon, PlanIcon } from '../../../../ui/icons';
 import { ErrorState, Skeleton } from '../../../../ui/States';
 import { colors, font, MIN_TOUCH, space } from '../../../../ui/theme';
 import { VoiceSlot } from '../../../../voice/VoiceSlot';
@@ -80,9 +80,11 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
             sceneStyle: { backgroundColor: colors.bg },
           }}
         >
-          <Tabs.Screen name="index" options={{ title: 'Plan', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
+          {/* 3 vistas del viaje (decisiones del sábado): Planificación · Mapa · Ahora. */}
+          <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
-          <Tabs.Screen name="group" options={{ title: 'Grupo', tabBarIcon: ({ color }) => <GroupIcon color={color} /> }} />
+          <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"
             options={{
