@@ -3,6 +3,7 @@
 import type { LocationFix, LocationProvider } from '@build101/shared';
 import * as Location from 'expo-location';
 
+import { backgroundFixes } from './backgroundFixes';
 import { Emitter } from './emitter';
 
 /** Si no hubo fix nuevo en este tiempo, reemitimos el último (quieto, iOS no manda updates por distanceInterval). */
@@ -26,6 +27,7 @@ export class RealLocationProvider implements LocationProvider {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private lastEmit = 0;
   private starting: Promise<void> | null = null;
+  private bgSub: (() => void) | null = null;
 
   start(): Promise<void> {
     if (this.positionSub) return Promise.resolve();
@@ -67,6 +69,11 @@ export class RealLocationProvider implements LocationProvider {
       // Sin brújula (simulador): seguimos con heading del GPS.
     }
 
+    // Muestras de la task de segundo plano (tour en vivo con pantalla bloqueada): mismas que watchPosition.
+    this.bgSub = backgroundFixes.subscribe((fix) => {
+      if (!this.current || fix.t > this.current.t) this.emit({ ...fix, heading: this.heading ?? fix.heading });
+    });
+
     this.heartbeat = setInterval(() => {
       if (this.current && Date.now() - this.lastEmit >= HEARTBEAT_MS) {
         this.emit({ ...this.current, t: Date.now() });
@@ -78,6 +85,8 @@ export class RealLocationProvider implements LocationProvider {
     this.positionSub?.remove();
     this.headingSub?.remove();
     if (this.heartbeat) clearInterval(this.heartbeat);
+    this.bgSub?.();
+    this.bgSub = null;
     this.positionSub = null;
     this.headingSub = null;
     this.heartbeat = null;

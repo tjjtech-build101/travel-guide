@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TOUR_STARTED_RULE } from '@build101/shared';
 import { TOUR_RULES, makeTourModeRules } from './voice/tourRules';
 import { advance, initialProgress, layerText, pendingStops, remainingMin, skip, stopSources, stopView, type StopRow } from './tourLive';
 
@@ -85,9 +86,9 @@ describe('tours.progress (puros)', () => {
 });
 
 describe('reglas del modo tour (voz)', () => {
-  it('chat: nada; tour: reglas + ids del tour', async () => {
+  it('chat: solo tour_started; tour: reglas + ids del tour', async () => {
     const rules = makeTourModeRules(async () => ({ title: 'Ciudad Vieja', stops: S }));
-    expect(await rules('chat', 'x')).toEqual([]);
+    expect(await rules('chat', 'x')).toEqual([TOUR_STARTED_RULE]);
     const r = await rules('tour', 'tour-1');
     expect(r.slice(0, TOUR_RULES.length)).toEqual(TOUR_RULES);
     expect(r.at(-1)).toContain('tour_id=tour-1');

@@ -37,7 +37,9 @@ import { showMenu } from '../../../../features/plan/menu';
 import { openBlock, openProposals } from '../../../../features/plan/nav';
 import { useMe, usePendingProposals, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import type { PlanBlock } from '../../../../features/plan/selectors';
-import { startNearbyTour, useNearbyTourAvailable } from '../../../../features/tours/nearbyTour';
+import { LiveTourView } from '../../../../features/tour/LiveTourView';
+import { NearbyTourCard } from '../../../../features/tours/NearbyTourCard';
+import { NEARBY_DURATIONS, startNearbyTour, useNearbyTourAvailable, useNearbyTourJob } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import { formatDay } from '../../../../lib/format';
@@ -47,6 +49,7 @@ import { Button } from '../../../../ui/Button';
 import { ErrorState, SkeletonCard } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
+import { useTourStore } from '../../../../tour/store';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
 
 const DOCK_HEIGHT = 190;
@@ -64,6 +67,10 @@ export default function NowTab() {
   const scout = useScout();
   const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
   const tourAvailable = useNearbyTourAvailable().data === true;
+  // PRD 07: con un tour activo, Ahora se convierte en el tour.
+  const tourPhase = useTourStore((s) => s.phase);
+  const tourError = useTourStore((s) => s.error);
+  const nearbyJob = useNearbyTourJob((s) => s.job);
 
   // Deep link de pruebas: ?at=2026-10-18T10:30 | real · ?scout=listening
   const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string }>();
@@ -180,9 +187,27 @@ export default function NowTab() {
       ]);
       return;
     }
-    const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId });
-    if (res.ok) Alert.alert('Armando tu tour', `${SCOUT.name} está buscando paradas cerca tuyo. Te aviso cuando esté listo.`);
-    else Alert.alert('No pude armar el tour', res.message);
+    if (nearbyJob) {
+      Alert.alert('Tour acá, ahora', `${SCOUT.name} ya te está armando un tour: mirá la tarjeta de arriba.`);
+      return;
+    }
+    // PRD 18: duración 30 / 60 / 90 (temas y modo explorador: fuera por ahora).
+    const go = async (duration_min: number) => {
+      const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min });
+      if (!res.ok) Alert.alert('No pude armar el tour', res.message);
+    };
+    Alert.alert('Tour acá, ahora', '¿Cuánto tiempo tenés?', [
+      ...NEARBY_DURATIONS.map((m) => ({ text: m === 60 ? '1 hora' : m === 90 ? '1 h 30' : `${m} min`, onPress: () => void go(m) })),
+      { text: 'Cancelar', style: 'cancel' as const },
+    ]);
+  };
+
+  // "Empezar tour" desde el bloque tour del día (actual o próximo) con su tour ya generado.
+  const tourBlock = [plan?.current?.block, next?.block].find((b): b is PlanBlock => !!b && b.type === 'tour' && !!b.tour_id) ?? null;
+  const onStartTour = async (b: PlanBlock) => {
+    const names = b.participant_ids.map((id) => members.get(id)?.display_name).filter((n): n is string => !!n);
+    const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
+    if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
   };
 
   const onCamera = () =>
@@ -214,6 +239,8 @@ export default function NowTab() {
       directionsLabel={directionsTarget ? `Indicaciones a pie hasta ${directionsTarget.place_name ?? directionsTarget.title}` : undefined}
     />
   );
+
+  if (tourPhase === 'live' || tourPhase === 'done') return <LiveTourView />;
 
   if (loading) {
     return (
@@ -258,6 +285,7 @@ export default function NowTab() {
         </View>
 
         <AgentJobProgress tripId={tripId} showSkeleton={false} />
+        <NearbyTourCard here={here} />
         <ProposalBanner count={pendingCount} onPress={() => openProposals(tripId)} />
         {stale ? <StaleBanner /> : null}
 
@@ -285,6 +313,19 @@ export default function NowTab() {
 
         {showSuggestions ? (
           <Suggestions ideas={ideas} onIdea={onPressBlock} onNearbyTour={() => void onNearbyTour()} tourAvailable={tourAvailable} />
+        ) : null}
+        {tourBlock ? (
+          <View style={styles.startTour}>
+            <Text style={styles.startTourKicker}>TOUR DE HOY</Text>
+            <Text style={styles.startTourTitle}>{tourBlock.title}</Text>
+            <Button
+              label="Empezar tour"
+              loading={tourPhase === 'starting'}
+              onPress={() => void onStartTour(tourBlock)}
+              accessibilityHint={`${SCOUT.name} te avisa al llegar a cada parada`}
+            />
+            {tourError && tourPhase === 'idle' ? <Text style={styles.hint}>No pude empezar: {tourError}</Text> : null}
+          </View>
         ) : null}
         {plan?.current ? (
           <CurrentCard current={plan.current} members={members} onPress={onPressBlock} onLongPress={onLongPress} />
@@ -332,4 +373,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hint: { fontSize: font.tiny, color: colors.textMuted, textAlign: 'center' },
+  startTour: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.scout, padding: space.lg, gap: space.sm },
+  startTourKicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1, color: colors.scout },
+  startTourTitle: { fontSize: font.h2, fontWeight: '800', color: colors.text },
 });

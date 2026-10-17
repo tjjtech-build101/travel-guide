@@ -257,6 +257,7 @@ export function ScoutDock({
   onCamera,
   onDirections,
   directionsLabel,
+  tiles,
 }: {
   scoutState: ScoutState;
   onTalk: () => void;
@@ -265,6 +266,8 @@ export function ScoutDock({
   onCamera: () => void;
   onDirections: (() => void) | null;
   directionsLabel?: string;
+  /** Reemplaza las acciones de abajo (PRD 07: durante un tour, cámara / saltar parada / terminar). */
+  tiles?: ReactNode;
 }) {
   const inCall = scoutState !== 'idle' && scoutState !== 'error';
   return (
@@ -282,7 +285,8 @@ export function ScoutDock({
           </Text>
         </Pressable>
       </View>
-      <View style={styles.tiles}>
+      {tiles ? <View style={styles.tiles}>{tiles}</View> : null}
+      <View style={[styles.tiles, tiles ? styles.hidden : null]}>
         <Tile label="Tour acá, ahora" soon={!tourAvailable} onPress={onNearbyTour} icon={<FlagIcon color={colors.text} />} />
         <Tile label="Cámara" soon onPress={onCamera} icon={<CameraIcon color={colors.text} />} />
         {onDirections ? (
@@ -298,7 +302,7 @@ export function ScoutDock({
   );
 }
 
-function Tile({ label, icon, onPress, soon, hint }: { label: string; icon: ReactNode; onPress: () => void; soon?: boolean; hint?: string }) {
+export function Tile({ label, icon, onPress, soon, hint }: { label: string; icon: ReactNode; onPress: () => void; soon?: boolean; hint?: string }) {
   return (
     <Pressable
       onPress={onPress}
@@ -397,6 +401,7 @@ const styles = StyleSheet.create({
   talkActive: { backgroundColor: colors.text },
   talkText: { color: colors.scoutText, fontSize: font.h3, fontWeight: '800' },
   tiles: { flexDirection: 'row', gap: space.sm },
+  hidden: { display: 'none' },
   tile: {
     flex: 1,
     minHeight: OUTDOOR.button + 8,

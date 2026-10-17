@@ -16,6 +16,9 @@ import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { SimPill } from '../features/gps/SimPill';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
+// PRD 07: la task de ubicación en segundo plano se define al cargar el módulo (fuera de cualquier componente).
+import '../tour/backgroundLocation';
+import { TourRunner } from '../tour/TourRunner';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
 import { VoiceProvider } from '../voice/VoiceProvider';
 import { setFontsReady } from '../ui/Text';
@@ -38,6 +41,7 @@ export default function RootLayout() {
           <AuthProvider>
             <LocationContextProvider>
               <StatusBar style="dark" />
+              <TourRunner />
               <VoiceProvider>
                 <RootNavigator />
               </VoiceProvider>

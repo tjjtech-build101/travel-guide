@@ -1,23 +1,28 @@
-// "Tour acá, ahora" (PRD 18). STUB del lado de la app: la generación la implementa el PRD 06/18 (Josefina)
-// como la herramienta `generate_tour` en la API. Mientras la API no la tenga, la UI muestra "pronto".
+// "Tour acá, ahora" (PRD 18, parte cliente). generate_tour (PRD 06/18) arma el tour en la API como job; la app
+// sigue el job por Realtime (agent_jobs) y, cuando está listo, "Empezar" arranca el tour en vivo (PRD 07).
 //
-// Interfaz que usa la app (estable; PRD 18 puede reemplazar el cuerpo):
-//   isNearbyTourAvailable(): Promise<boolean>   ¿la API ya expone generate_tour? (lee GET /health → tools)
+// Interfaz que usa la app (estable):
+//   isNearbyTourAvailable(): Promise<boolean>   ¿la API expone generate_tour? (GET /health → tools)
 //   startNearbyTour({ lat, lng, trip_id?, duration_min?, themes? }): Promise<NearbyTourResult>
-//      → POST /tools/generate_tour { mode:'spontaneous', ... } → { job_id, tour_id }  (PRD 18, Datos)
+//      → POST /tools/generate_tour { mode:'spontaneous', start_lat, start_lng, duration_min, ... } → { job_id, tour_id }
+//   useNearbyTourJob: el job en curso (para la tarjeta de progreso en Ahora), persistido en AsyncStorage.
+import type { GenerateTourStart, ToolInput } from '@build101/shared';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
+import { create } from 'zustand';
 
+import { callTool } from '../../lib/api';
 import { env } from '../../lib/env';
-import { supabase } from '../../lib/supabase';
 
 export const NEARBY_TOUR_TOOL = 'generate_tour';
+export const NEARBY_DURATIONS = [30, 60, 90] as const;
 
 export type StartNearbyTourInput = {
   lat: number;
   lng: number;
   trip_id?: string;
   duration_min?: number;
-  themes?: string[];
+  themes?: ToolInput<'generate_tour'>['themes'];
 };
 
 export type NearbyTourResult =
@@ -46,29 +51,55 @@ export function useNearbyTourAvailable() {
 }
 
 export async function startNearbyTour(input: StartNearbyTourInput): Promise<NearbyTourResult> {
-  if (!(await isNearbyTourAvailable())) {
-    return { ok: false, code: 'not_available', message: 'El "Tour acá, ahora" llega muy pronto.' };
+  const { lat, lng, duration_min = 60, ...rest } = input;
+  const res = await callTool<'generate_tour', GenerateTourStart>('generate_tour', {
+    mode: 'spontaneous',
+    start_lat: lat,
+    start_lng: lng,
+    duration_min,
+    storyline: false,
+    language: 'es',
+    ...rest,
+  });
+  if (res.ok) {
+    useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: input.trip_id ?? null });
+    return { ok: true, job_id: res.data.job_id, tour_id: res.data.tour_id };
   }
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) return { ok: false, code: 'error', message: 'No hay sesión' };
-  try {
-    // generate_tour todavía no está en packages/shared (lo agrega PRD 06): llamada cruda.
-    // generate_tour (PRD 06) espera start_lat/start_lng (coincide con el modo 'planned'): se traduce acá,
-    // la firma pública startNearbyTour({lat, lng, ...}) de este archivo no cambia.
-    const { lat, lng, ...rest } = input;
-    const res = await fetch(`${env.apiUrl}/tools/${NEARBY_TOUR_TOOL}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ mode: 'spontaneous', duration_min: 60, start_lat: lat, start_lng: lng, ...rest }),
-    });
-    const json = (await res.json().catch(() => null)) as
-      | { ok: true; data: { job_id: string; tour_id: string } }
-      | { ok: false; error: { message: string } }
-      | null;
-    if (json && json.ok) return { ok: true, job_id: json.data.job_id, tour_id: json.data.tour_id };
-    return { ok: false, code: 'error', message: json && !json.ok ? json.error.message : `Error ${res.status}` };
-  } catch (e) {
-    return { ok: false, code: 'error', message: e instanceof Error ? e.message : String(e) };
-  }
+  if (res.error.code === 'unknown_tool') return { ok: false, code: 'not_available', message: 'El "Tour acá, ahora" llega muy pronto.' };
+  return { ok: false, code: 'error', message: res.error.message };
 }
+
+// ---------- job en curso ----------
+
+export type NearbyJob = { jobId: string; tourId: string; durationMin: number; tripId: string | null; at: number };
+
+const JOB_KEY = 'tour.nearby.job.v1';
+/** Un armado de hace más de 3 h ya no se muestra. */
+const JOB_TTL_MS = 3 * 3600_000;
+
+export const useNearbyTourJob = create<{
+  job: NearbyJob | null;
+  track: (j: Omit<NearbyJob, 'at'>) => void;
+  clear: () => void;
+  hydrate: () => Promise<void>;
+}>((set) => ({
+  job: null,
+  track: (j) => {
+    const job = { ...j, at: Date.now() };
+    set({ job });
+    AsyncStorage.setItem(JOB_KEY, JSON.stringify(job)).catch(() => {});
+  },
+  clear: () => {
+    set({ job: null });
+    AsyncStorage.removeItem(JOB_KEY).catch(() => {});
+  },
+  hydrate: async () => {
+    try {
+      const raw = await AsyncStorage.getItem(JOB_KEY);
+      const job = raw ? (JSON.parse(raw) as NearbyJob) : null;
+      if (job && Date.now() - job.at < JOB_TTL_MS) set((s) => (s.job ? s : { job }));
+    } catch {
+      // sin caché
+    }
+  },
+}));
