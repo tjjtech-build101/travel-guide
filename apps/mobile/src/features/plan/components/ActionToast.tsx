@@ -1,9 +1,10 @@
 // Tarjeta/toast de acción: "Listo · Deshacer" (5 s) que llama `undo` con el undo_token.
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 
+import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../ui/theme';
 import { undoAction } from '../mutations';
 import { useActionToast } from '../store';

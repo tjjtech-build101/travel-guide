@@ -10,11 +10,12 @@ import {
   type TransferMode,
 } from '@build101/shared';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { callTool } from '../../../lib/api';
 import { formatDay } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
+import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 import { STATUS_LABEL, TIME_FLEX_LABEL, TRANSFER_MODE_LABEL, TYPE_LABEL } from '../labels';
 import { hhmm, toMin, type PlanBlock, type PlanLeg, type PlanMember } from '../selectors';

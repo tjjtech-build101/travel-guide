@@ -150,3 +150,50 @@ export const PlanTripInput = z.object({
   start_date: IsoDate.optional().describe('YYYY-MM-DD si el usuario eligió fecha'),
   end_date: IsoDate.optional(),
 });
+
+// ---------- PRD 06/18 · generate_tour ----------
+
+export const TourMode = z.enum(['planned', 'spontaneous', 'explorer']);
+export const TourTheme = z.enum(['historia', 'arquitectura', 'comida', 'curiosidades', 'para_chicos']);
+
+export const TourEndPoint = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  name: z.string().optional(),
+});
+
+export const GenerateTourInput = z.object({
+  mode: TourMode,
+  trip_id: Id.optional().describe('Si hay trip_id, el tour puede escribir activity_feed (tour_generated)'),
+  block_id: Id.optional().describe('planned: toma lugar, hora y participantes del bloque'),
+  start_lat: z.number().min(-90).max(90),
+  start_lng: z.number().min(-180).max(180),
+  duration_min: z.number().int().min(15).max(240).default(60),
+  end_point: TourEndPoint.nullable().optional().describe('null/ausente = vuelve cerca del inicio (loop)'),
+  participant_ids: z.array(Id).optional().describe('Default: block_participants o el usuario del JWT'),
+  storyline: z.boolean().default(false),
+  start_at: z.string().optional().describe('ISO datetime, para chequear horarios; default: ahora'),
+  language: z.string().default('es'),
+  themes: z.array(TourTheme).optional().describe('Espontáneo/explorador: temas a priorizar'),
+  radius_m: z.number().int().positive().max(2000).optional().describe('Default: min(1200, duration_min*20)'),
+  extend_tour_id: Id.optional().describe('Explorador: agrega paradas nuevas a un tour ya generado, sin duplicar place_id'),
+});
+
+// ---------- PRD 16 · weather / events_search ----------
+
+export const WeatherInput = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  date_from: IsoDate,
+  date_to: IsoDate,
+  day_id: Id.optional().describe('Si viene, persiste el resultado en days.weather'),
+});
+
+export const EventsSearchInput = z.object({
+  city: z.string().min(1),
+  country: z.string().optional(),
+  date_from: IsoDate,
+  date_to: IsoDate,
+  interests: z.array(z.string()).optional(),
+  lang: z.string().default('es'),
+});

@@ -1,8 +1,9 @@
 // Sección del menú dev: fecha/hora simulada (vista Ahora, PRD 19) y vista previa de estados del ScoutAvatar.
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { previewScoutState, useScoutStore, type ScoutState } from '../../voice/useScout';
 import { Chip } from '../plan/components/Controls';

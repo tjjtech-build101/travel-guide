@@ -3,10 +3,11 @@ import { type NamedPoint, parseTrack, SIM_SPEEDS, synthesizeTrack, TrackCursor }
 import { File } from 'expo-file-system';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { SEED_STOPS, SEED_TRACK_LABEL, seedTrack, useSimulator } from '../../location/LocationContext';
 import { Button } from '../../ui/Button';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { formatClock, formatDistance } from './format';
 import { ScrubBar } from './ScrubBar';

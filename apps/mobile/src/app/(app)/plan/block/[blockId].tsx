@@ -2,7 +2,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AlertChips, StatusBadge, transferLabel } from '../../../../features/plan/components/BlockCard';
 import {
@@ -25,6 +25,7 @@ import { durationLabel, timeLabel, type PlanBlock } from '../../../../features/p
 import { formatDay } from '../../../../lib/format';
 import { Avatar } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
+import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { BLOCK_STATUS } from '@build101/shared';
 

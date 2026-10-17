@@ -1,8 +1,9 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 
+import { Text } from './Text';
 import { colors, font } from './theme';
 
-const PALETTE = ['#1F6FEB', '#D9480F', '#2B8A3E', '#862E9C', '#C2255C', '#0B7285'];
+const PALETTE = ['#8A6236', '#3567A0', '#B07A16', '#7B4F2C', '#5F6B35', '#8E4B6E'];
 
 function initials(name: string | null | undefined): string {
   if (!name) return '?';

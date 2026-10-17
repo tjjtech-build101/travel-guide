@@ -1,4 +1,11 @@
+import { Fredoka_500Medium } from '@expo-google-fonts/fredoka/500Medium';
+import { Fredoka_600SemiBold } from '@expo-google-fonts/fredoka/600SemiBold';
+import { NunitoSans_400Regular } from '@expo-google-fonts/nunito-sans/400Regular';
+import { NunitoSans_500Medium } from '@expo-google-fonts/nunito-sans/500Medium';
+import { NunitoSans_600SemiBold } from '@expo-google-fonts/nunito-sans/600SemiBold';
+import { NunitoSans_700Bold } from '@expo-google-fonts/nunito-sans/700Bold';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
@@ -11,7 +18,17 @@ import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
 import { VoiceProvider } from '../voice/VoiceProvider';
-import { colors } from '../ui/theme';
+import { setFontsReady } from '../ui/Text';
+import { colors, fonts } from '../ui/theme';
+
+const FONT_FILES = {
+  [fonts.displayMedium]: Fredoka_500Medium,
+  [fonts.display]: Fredoka_600SemiBold,
+  [fonts.body]: NunitoSans_400Regular,
+  [fonts.bodyMedium]: NunitoSans_500Medium,
+  [fonts.bodySemi]: NunitoSans_600SemiBold,
+  [fonts.bodyBold]: NunitoSans_700Bold,
+};
 
 export default function RootLayout() {
   return (
@@ -36,8 +53,11 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { isLoading } = useAuth();
+  // Si las fuentes fallan seguimos con la del sistema (ui/Text no aplica la familia).
+  const [fontsLoaded, fontError] = useFonts(FONT_FILES);
+  setFontsReady(fontsLoaded);
 
-  if (isLoading) {
+  if (isLoading || (!fontsLoaded && !fontError)) {
     return (
       <View style={[styles.flex, styles.center]}>
         <ActivityIndicator size="large" color={colors.primary} />

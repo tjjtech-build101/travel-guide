@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
@@ -8,9 +8,10 @@ import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
 import { useTripRealtime } from '../../../../realtime/useTripRealtime';
 import { Button } from '../../../../ui/Button';
+import { Text } from '../../../../ui/Text';
 import { BackIcon, BookIcon, MapIcon, MoneyIcon, NowIcon, PlanIcon } from '../../../../ui/icons';
 import { ErrorState, Skeleton } from '../../../../ui/States';
-import { colors, font, MIN_TOUCH, space } from '../../../../ui/theme';
+import { colors, font, fonts, MIN_TOUCH, space } from '../../../../ui/theme';
 import { VoiceSlot } from '../../../../voice/VoiceSlot';
 
 function goBack() {
@@ -76,7 +77,7 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
             ),
             tabBarActiveTintColor: colors.primary,
             tabBarInactiveTintColor: colors.textMuted,
-            tabBarLabelStyle: { fontSize: font.tiny, fontWeight: '600' },
+            tabBarLabelStyle: { fontSize: font.tiny, fontFamily: fonts.bodySemi },
             sceneStyle: { backgroundColor: colors.bg },
           }}
         >

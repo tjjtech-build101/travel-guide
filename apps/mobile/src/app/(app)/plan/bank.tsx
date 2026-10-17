@@ -1,6 +1,6 @@
 // "Traer del banco": elegir una idea del tramo y agendarla en el día (move_block).
 import { useLocalSearchParams } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { cap } from '../../../features/plan/components/BlockForm';
 import { closeSheet, SheetBody, SheetHeader, SheetRoot, SheetMessage } from '../../../features/plan/components/Sheet';
@@ -10,6 +10,7 @@ import { useMoveBlock } from '../../../features/plan/mutations';
 import { usePlanBlocks, usePlanOverview } from '../../../features/plan/queries';
 import { compareBlocks, timeLabel } from '../../../features/plan/selectors';
 import { formatDay } from '../../../lib/format';
+import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../ui/theme';
 import { openNewBlock } from '../../../features/plan/nav';
 import { Button } from '../../../ui/Button';

@@ -4,7 +4,7 @@ import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-lis
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
@@ -50,6 +50,7 @@ import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
 import { EmptyState, ErrorState } from '../../../../ui/States';
+import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 
 export default function PlanningTab() {

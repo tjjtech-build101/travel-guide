@@ -26,3 +26,22 @@ export type PlanTripResult = {
   request?: { conversation: { role: 'user' | 'assistant'; text: string }[]; start_date?: string; end_date?: string };
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
 };
+
+/** Respuesta de POST /tools/generate_tour (data). */
+export type GenerateTourStart = { job_id: string; tour_id: string };
+
+/** agent_jobs.result de un job kind='generate_tour' (PRD 06/18). */
+export type GenerateTourResult = {
+  tour_id: string;
+  stop_count: number;
+  total_walk_m: number;
+  est_duration_min: number;
+  stats: {
+    web_search_calls: number;
+    places_reused: number;
+    places_new: number;
+    facts_verified: number;
+    facts_rejected: number;
+  };
+  usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
+};

@@ -4,7 +4,7 @@
 import { SCOUT } from '@build101/shared';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { completedSections, draftFromProfile, patchFromDraft, TOTAL_SECTIONS, type ProfileDraft } from '../../features/profile/model';
@@ -14,6 +14,7 @@ import { errorDetail } from '../../features/trips/queries';
 import { Button } from '../../ui/Button';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { ErrorState, LoadingList } from '../../ui/States';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 
 function leave() {

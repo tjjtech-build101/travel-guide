@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from './Text';
 import { colors, font, radius, space } from './theme';
 
 export type ToastMessage = { text: string; detail?: string };

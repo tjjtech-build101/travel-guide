@@ -1,11 +1,12 @@
 import { Redirect, router, Stack, useSegments } from 'expo-router';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 
 import { useAuth } from '../../features/auth/AuthProvider';
 import { needsOnboarding } from '../../features/profile/model';
 import { useMyProfile, useOnboardingSkip } from '../../features/profile/queries';
 import { Avatar } from '../../ui/Avatar';
+import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH } from '../../ui/theme';
 
 function openDevMenu() {

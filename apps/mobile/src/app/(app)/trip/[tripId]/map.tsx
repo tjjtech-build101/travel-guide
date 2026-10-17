@@ -1,10 +1,12 @@
 // Tab Mapa (PRD 03, 2D primero): el recorrido que viene (tramos del viaje, bloques del día y paradas de tour).
-// Tocar cualquier elemento → "Hablar con el Scout de esto" → useScout().startScoutCall({ focus }).
+// Mapa a pantalla completa + hoja deslizable con la lista del día como sendero (MapTimeline).
+// Tocar cualquier elemento → el avatar redondo del Scout ("Hablar") → useScout().startScoutCall({ focus }).
 // Sin EXPO_PUBLIC_MAPBOX_TOKEN no se monta Mapbox: aviso + la misma lista de puntos (todo lo demás funciona igual).
 import { SCOUT } from '@build101/shared';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import {
   buildMapModel,
@@ -12,9 +14,11 @@ import {
   defaultDayId,
   focusForCoordinate,
   focusForPoint,
+  timelineStatus,
   type MapPoint,
   type MapScope,
 } from '../../../../features/map/model';
+import { MapTimeline } from '../../../../features/map/MapTimeline';
 import { useMapTours } from '../../../../features/map/queries';
 import { useNow } from '../../../../features/now/clock';
 import { localParts, resolveToday, tzOffsetMin } from '../../../../features/now/selectors';
@@ -25,11 +29,16 @@ import { errorDetail } from '../../../../features/trips/queries';
 import { env } from '../../../../lib/env';
 import { useLocationProvider } from '../../../../location/LocationContext';
 import { Button } from '../../../../ui/Button';
+import { ScoutAvatar } from '../../../../ui/ScoutAvatar';
 import { EmptyState, ErrorState, LoadingList } from '../../../../ui/States';
+import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { useScout } from '../../../../voice/useScout';
 
 const HAS_TOKEN = !!env.mapboxToken;
+// Alturas de la hoja: solo el título, a la mitad y casi completa.
+const SNAP_FRACTIONS = [0.2, 0.5, 0.9] as const;
+const SNAP_POINTS = SNAP_FRACTIONS.map((f) => `${f * 100}%`);
 
 export default function MapTab() {
   const tripId = useTripId();
@@ -82,6 +91,9 @@ export default function MapTab() {
   );
 
   const [selected, setSelected] = useState<MapPoint | null>(null);
+  const sheet = useRef<BottomSheet>(null);
+  const [sheetIndex, setSheetIndex] = useState(1);
+  const [areaHeight, setAreaHeight] = useState(0);
   useEffect(() => setSelected(null), [effectiveScope.kind, effectiveScope.kind === 'day' ? effectiveScope.dayId : '']);
 
   const talk = (focus: ReturnType<typeof focusForPoint>, context?: Record<string, unknown>) => {
@@ -134,6 +146,22 @@ export default function MapTab() {
   }
 
   const busy = scout.state === 'connecting' || scout.state === 'thinking';
+  const isToday = effectiveScope.kind === 'day' && today.kind === 'today' && today.day.id === effectiveScope.dayId;
+  const status = isToday && today.kind === 'today' ? timelineStatus(model.points, today.minutes) : new Map();
+  const dayOption = effectiveScope.kind === 'day' ? options.find((o) => o.dayId === (effectiveScope as { dayId: string }).dayId) : null;
+  const sheetTitle = effectiveScope.kind === 'trip' ? 'Todo el viaje' : `${isToday ? 'Hoy · ' : ''}${dayOption?.label ?? ''}`;
+  const placesCount = model.points.filter((p) => p.kind !== 'stop').length;
+  const sheetCount =
+    effectiveScope.kind === 'trip'
+      ? `${placesCount} ${placesCount === 1 ? 'ciudad' : 'ciudades'}`
+      : `${placesCount} ${placesCount === 1 ? 'lugar' : 'lugares'}`;
+  const bottomInset = areaHeight * SNAP_FRACTIONS[Math.min(sheetIndex, 1)];
+
+  const select = (p: MapPoint) => {
+    setSelected(p);
+    // Que el punto quede a la vista: la hoja a la mitad.
+    if (sheetIndex !== 1) sheet.current?.snapToIndex(1);
+  };
 
   return (
     <View style={styles.flex}>
@@ -144,73 +172,105 @@ export default function MapTab() {
         todayDayId={today.kind === 'today' ? today.day.id : null}
       />
 
-      {HAS_TOKEN ? (
-        <View style={styles.mapBox}>
+      <View style={styles.flex} onLayout={(e) => setAreaHeight(e.nativeEvent.layout.height)}>
+        {HAS_TOKEN ? (
           <LazyMap
             model={model}
             selectedId={selected?.id ?? null}
-            onSelect={setSelected}
+            onSelect={select}
             onLongPress={(lat, lng) => talk(focusForCoordinate(lat, lng), { source: 'map', kind: 'coordinate' })}
+            bottomInset={bottomInset}
           />
-        </View>
-      ) : (
-        <View style={styles.tokenBanner}>
-          <Text style={styles.tokenTitle}>Falta EXPO_PUBLIC_MAPBOX_TOKEN</Text>
-          <Text style={styles.tokenBody}>
-            El mapa aparece cuando se cargue el token en apps/mobile/.env. Mientras tanto, tocá cualquier lugar de la lista
-            para hablar con {SCOUT.name}.
-          </Text>
-        </View>
-      )}
+        ) : (
+          <View style={styles.tokenBanner}>
+            <Text style={styles.tokenTitle}>Falta EXPO_PUBLIC_MAPBOX_TOKEN</Text>
+            <Text style={styles.tokenBody}>
+              El mapa aparece cuando se cargue el token en apps/mobile/.env. Mientras tanto, tocá cualquier lugar de la lista
+              para hablar con {SCOUT.name}.
+            </Text>
+          </View>
+        )}
 
-      <PointList
-        points={model.points}
-        unlocatedCount={model.unlocated.length}
-        selectedId={selected?.id ?? null}
-        onPress={setSelected}
-        toursLoading={tourIds.length > 0 && tours.isPending}
-        toursError={tours.isError}
-        emptyText={effectiveScope.kind === 'day' ? 'Este día no tiene lugares en el mapa' : 'Los tramos no tienen ubicación'}
-      />
+        <BottomSheet
+          ref={sheet}
+          index={1}
+          snapPoints={SNAP_POINTS}
+          onChange={setSheetIndex}
+          backgroundStyle={styles.sheetBg}
+          handleIndicatorStyle={styles.sheetHandle}
+        >
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle} numberOfLines={1}>
+              {sheetTitle}
+            </Text>
+            <Text style={styles.muted}>{sheetCount}</Text>
+          </View>
 
-      {selected ? (
-        <View style={styles.action}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-            <Badge point={selected} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.actionTitle} numberOfLines={2}>
-                {selected.label}
-              </Text>
-              {selected.sublabel ? (
-                <Text style={styles.muted} numberOfLines={2}>
-                  {selected.sublabel}
-                </Text>
+          {selected ? (
+            <View style={styles.action}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
+                <Badge point={selected} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionTitle} numberOfLines={2}>
+                    {selected.label}
+                  </Text>
+                  {selected.sublabel ? (
+                    <Text style={styles.muted} numberOfLines={2}>
+                      {selected.sublabel}
+                    </Text>
+                  ) : null}
+                </View>
+                <Pressable
+                  onPress={() => talkAbout(selected)}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Hablar con ${SCOUT.name} de esto`}
+                  accessibilityState={{ busy }}
+                  hitSlop={8}
+                  style={({ pressed }) => [styles.talk, pressed && styles.pressed]}
+                >
+                  <ScoutAvatar size={44} state={scout.state} />
+                  <Text style={styles.talkText}>Hablar</Text>
+                </Pressable>
+                <Pressable onPress={() => setSelected(null)} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12} style={styles.close}>
+                  <Text style={styles.closeText}>✕</Text>
+                </Pressable>
+              </View>
+              {selected.kind === 'block' && selected.blockId ? (
+                <Button
+                  label="Ver en el plan"
+                  variant="secondary"
+                  onPress={() => openBlock(tripId, selected.blockId!)}
+                />
+              ) : null}
+              {selected.kind === 'leg' && selected.legId ? (
+                <Button
+                  label="Ver sus días"
+                  variant="secondary"
+                  onPress={() => {
+                    const first = options.find((o) => o.legId === selected.legId);
+                    if (first) setScope({ kind: 'day', dayId: first.dayId });
+                  }}
+                />
               ) : null}
             </View>
-            <Pressable onPress={() => setSelected(null)} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12} style={styles.close}>
-              <Text style={styles.closeText}>✕</Text>
-            </Pressable>
-          </View>
-          <Button label={`Hablar con ${SCOUT.name} de esto`} loading={busy} onPress={() => talkAbout(selected)} />
-          {selected.kind === 'block' && selected.blockId ? (
-            <Button
-              label="Ver en el plan"
-              variant="ghost"
-              onPress={() => openBlock(tripId, selected.blockId!)}
-            />
           ) : null}
-          {selected.kind === 'leg' && selected.legId ? (
-            <Button
-              label="Ver sus días"
-              variant="ghost"
-              onPress={() => {
-                const first = options.find((o) => o.legId === selected.legId);
-                if (first) setScope({ kind: 'day', dayId: first.dayId });
-              }}
-            />
-          ) : null}
-        </View>
-      ) : null}
+
+          <BottomSheetScrollView contentContainerStyle={styles.listContent}>
+            {model.unlocated.length ? <Text style={styles.chipInfo}>{model.unlocated.length} sin ubicación</Text> : null}
+            {model.points.length === 0 && !(tourIds.length > 0 && tours.isPending) ? (
+              <EmptyState
+                pose="map"
+                title={effectiveScope.kind === 'day' ? 'Este día no tiene lugares en el mapa' : 'Los tramos no tienen ubicación'}
+                subtitle={`Pedile a ${SCOUT.name} un tour y te armo el recorrido.`}
+              />
+            ) : null}
+            <MapTimeline points={model.points} selectedId={selected?.id ?? null} status={status} onPress={select} />
+            {tourIds.length > 0 && tours.isPending ? <Text style={styles.muted}>Cargando las paradas del tour…</Text> : null}
+            {tours.isError ? <Text style={styles.error}>No pudimos cargar las paradas del tour.</Text> : null}
+          </BottomSheetScrollView>
+        </BottomSheet>
+      </View>
     </View>
   );
 }
@@ -301,68 +361,9 @@ function Badge({ point }: { point: MapPoint }) {
   );
 }
 
-function PointList({
-  points,
-  unlocatedCount,
-  selectedId,
-  onPress,
-  toursLoading,
-  toursError,
-  emptyText,
-}: {
-  points: MapPoint[];
-  unlocatedCount: number;
-  selectedId: string | null;
-  onPress: (p: MapPoint) => void;
-  toursLoading: boolean;
-  toursError: boolean;
-  emptyText: string;
-}) {
-  const main = points.filter((p) => p.kind !== 'stop');
-  const stops = points.filter((p) => p.kind === 'stop');
-  return (
-    <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-      {unlocatedCount ? <Text style={styles.chipInfo}>{unlocatedCount} sin ubicación</Text> : null}
-      {points.length === 0 && !toursLoading ? <Text style={styles.empty}>{emptyText}</Text> : null}
-      {main.map((p) => (
-        <Row key={p.id} point={p} selected={p.id === selectedId} onPress={() => onPress(p)} />
-      ))}
-      {stops.length ? <Text style={styles.sectionTitle}>Paradas del tour</Text> : null}
-      {stops.map((p) => (
-        <Row key={p.id} point={p} selected={p.id === selectedId} onPress={() => onPress(p)} />
-      ))}
-      {toursLoading ? <Text style={styles.muted}>Cargando las paradas del tour…</Text> : null}
-      {toursError ? <Text style={styles.error}>No pudimos cargar las paradas del tour.</Text> : null}
-    </ScrollView>
-  );
-}
-
-function Row({ point, selected, onPress }: { point: MapPoint; selected: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityHint={`Abre la opción de hablar con ${SCOUT.name} de este lugar`}
-      style={({ pressed }) => [styles.row, (selected || pressed) && styles.rowOn]}
-    >
-      <Badge point={point} />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {point.label}
-        </Text>
-        {point.sublabel ? (
-          <Text style={styles.muted} numberOfLines={1}>
-            {point.sublabel}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  scopeWrap: { flexGrow: 0 },
+  scopeWrap: { flexGrow: 0, backgroundColor: colors.bg },
   scopeBar: { paddingHorizontal: space.lg, paddingVertical: space.sm, gap: space.sm },
   chip: {
     flexDirection: 'row',
@@ -375,14 +376,12 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },
-  chipOn: { backgroundColor: colors.text, borderColor: colors.text },
-  chipText: { fontSize: font.small, color: colors.text, fontWeight: '600' },
-  chipTextOn: { color: colors.surface },
+  chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: font.small, color: colors.text, fontWeight: '700' },
+  chipTextOn: { color: colors.primaryText },
   dot: { width: 10, height: 10, borderRadius: 5 },
-  mapBox: { flex: 1.3, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   tokenBanner: {
-    marginHorizontal: space.lg,
-    marginBottom: space.sm,
+    margin: space.lg,
     padding: space.md,
     borderRadius: radius.md,
     backgroundColor: colors.warningBg,
@@ -390,47 +389,49 @@ const styles = StyleSheet.create({
   },
   tokenTitle: { color: colors.warningText, fontWeight: '700', fontSize: font.small, fontFamily: 'Menlo' },
   tokenBody: { color: colors.warningText, fontSize: font.small },
-  list: { flex: 1 },
-  listContent: { paddingHorizontal: space.lg, paddingBottom: 200, gap: 2 },
-  sectionTitle: { fontSize: font.small, fontWeight: '700', color: colors.textMuted, marginTop: space.md, marginBottom: space.xs },
+  sheetBg: { backgroundColor: colors.bg, borderRadius: 24 },
+  sheetHandle: { backgroundColor: colors.khaki, width: 40 },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
+  },
+  sheetTitle: { flex: 1, fontSize: font.h2, fontWeight: '600', color: colors.text },
+  listContent: { paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xxl * 3 },
   chipInfo: {
     alignSelf: 'flex-start',
     fontSize: font.tiny,
-    color: colors.textMuted,
-    backgroundColor: colors.surfaceMuted,
+    color: colors.khakiText,
+    backgroundColor: colors.khakiLight,
     paddingHorizontal: space.sm,
     paddingVertical: 4,
     borderRadius: radius.pill,
     overflow: 'hidden',
-    marginVertical: space.xs,
+    marginBottom: space.sm,
+    marginLeft: space.xs,
   },
-  empty: { fontSize: font.body, color: colors.textMuted, textAlign: 'center', marginTop: space.xl },
-  row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 56, paddingHorizontal: space.sm, borderRadius: radius.md },
-  rowOn: { backgroundColor: colors.surfaceMuted },
-  rowTitle: { fontSize: font.body, fontWeight: '600', color: colors.text },
   muted: { fontSize: font.small, color: colors.textMuted },
   error: { fontSize: font.small, color: colors.danger },
   badge: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   badgeStop: { width: 24, height: 24, borderRadius: 12 },
-  badgeText: { color: '#FFFFFF', fontWeight: '700', fontSize: font.tiny },
+  badgeText: { color: '#FFFFFF', fontWeight: '800', fontSize: font.tiny },
   action: {
-    position: 'absolute',
-    left: space.md,
-    right: space.md,
-    bottom: space.md,
+    marginHorizontal: space.md,
+    marginBottom: space.md,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: space.lg,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    padding: space.md,
     gap: space.sm,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
   },
-  actionTitle: { fontSize: font.h3, fontWeight: '700', color: colors.text },
+  actionTitle: { fontSize: font.h3, fontWeight: '600', color: colors.text },
   close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  talk: { alignItems: 'center' },
+  talkText: { fontSize: font.tiny, fontWeight: '800', color: colors.scout },
+  pressed: { opacity: 0.7 },
   closeText: { fontSize: 18, color: colors.textMuted },
 });

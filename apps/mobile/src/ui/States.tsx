@@ -1,8 +1,11 @@
 // Estados obligatorios de toda pantalla: vacío, cargando y error. Nunca pantalla vacía.
+// Vacío y error muestran al Scout en una pose (mapa / pensando); `pose={null}` lo oculta.
 import { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, Image, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
 
 import { Button } from './Button';
+import { SCOUT_POSES, type ScoutPose } from './ScoutImage';
+import { Text } from './Text';
 import { colors, font, radius, space } from './theme';
 
 export function Skeleton({ width = '100%', height = 16, style }: { width?: DimensionValue; height?: number; style?: StyleProp<ViewStyle> }) {
@@ -35,9 +38,25 @@ export function SkeletonCard() {
   );
 }
 
-export function ErrorState({ message, detail, onRetry }: { message: string; detail?: string; onRetry?: () => void }) {
+function ScoutPoseImage({ pose }: { pose: ScoutPose | null }) {
+  if (!pose) return null;
+  return <Image source={SCOUT_POSES[pose]} style={styles.scout} resizeMode="contain" accessibilityIgnoresInvertColors />;
+}
+
+export function ErrorState({
+  message,
+  detail,
+  onRetry,
+  pose = 'think',
+}: {
+  message: string;
+  detail?: string;
+  onRetry?: () => void;
+  pose?: ScoutPose | null;
+}) {
   return (
     <View style={styles.center}>
+      <ScoutPoseImage pose={pose} />
       <Text style={styles.title}>{message}</Text>
       {__DEV__ && detail ? <Text style={styles.detail}>{detail}</Text> : null}
       {onRetry ? <Button label="Reintentar" onPress={onRetry} style={{ marginTop: space.lg, alignSelf: 'stretch' }} /> : null}
@@ -45,9 +64,20 @@ export function ErrorState({ message, detail, onRetry }: { message: string; deta
   );
 }
 
-export function EmptyState({ title, subtitle, children }: { title: string; subtitle?: string; children?: React.ReactNode }) {
+export function EmptyState({
+  title,
+  subtitle,
+  children,
+  pose = 'map',
+}: {
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+  pose?: ScoutPose | null;
+}) {
   return (
     <View style={styles.center}>
+      <ScoutPoseImage pose={pose} />
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       {children ? <View style={{ marginTop: space.lg, alignSelf: 'stretch', gap: space.sm }}>{children}</View> : null}
@@ -74,6 +104,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  scout: { width: 120, height: 148, marginBottom: space.md },
   title: { fontSize: font.h3, fontWeight: '600', color: colors.text, textAlign: 'center' },
   subtitle: { fontSize: font.body, color: colors.textMuted, textAlign: 'center', marginTop: space.sm },
   detail: { fontSize: font.tiny, color: colors.danger, textAlign: 'center', marginTop: space.sm, fontFamily: 'Menlo' },

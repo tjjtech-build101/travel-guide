@@ -2,7 +2,7 @@
 import type { DayRow } from '@build101/shared';
 
 import type { PlanBlock, PlanLeg } from '../plan/selectors';
-import { boundsOf, buildMapModel, dayOptions, defaultDayId, focusForCoordinate, focusForPoint, type MapTour } from './model';
+import { boundsOf, buildMapModel, dayOptions, defaultDayId, focusForCoordinate, focusForPoint, timelineStatus, type MapPoint, type MapTour } from './model';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -129,6 +129,14 @@ test('focus para el Scout (Contratos v1.1)', () => {
 test('bounds', () => {
   eq(boundsOf([]), null);
   eq(boundsOf([{ lat: 1, lng: 2 }, { lat: -1, lng: 5 }]), { ne: [5, 1], sw: [2, -1] });
+});
+
+test('estado del sendero: terminado, ahora y próximo', () => {
+  const pt = (id: string, start: string | null, end: string | null = null) => ({ id, kind: 'block', start, end }) as MapPoint;
+  const pts = [pt('a', '09:00', '10:00'), pt('b', '10:30'), pt('c', '12:30', '14:00'), pt('d', '15:00'), pt('e', null)];
+  eq([...timelineStatus(pts, 11 * 60)], [['a', 'done'], ['b', 'now'], ['c', 'next']]);
+  eq([...timelineStatus(pts, 8 * 60)], [['a', 'next']]);
+  eq([...timelineStatus(pts, 13 * 60)], [['a', 'done'], ['b', 'done'], ['c', 'now'], ['d', 'next']]);
 });
 
 if (failures) throw new Error(`${failures} test(s) fallaron`);

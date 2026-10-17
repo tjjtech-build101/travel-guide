@@ -1,9 +1,10 @@
 // Estructura común de los sheets del Plan (formSheet nativo): encabezado con acciones + contenido scrolleable.
 import { router } from 'expo-router';
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, space } from '../../../ui/theme';
 
 export function closeSheet() {

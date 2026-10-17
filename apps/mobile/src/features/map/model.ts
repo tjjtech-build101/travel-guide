@@ -3,7 +3,7 @@
 import type { DayRow } from '@build101/shared';
 
 import type { ScoutFocus } from '../../voice/useScout';
-import { legColorMap } from '../plan/labels';
+import { LEG_COLORS, legColorMap, TYPE_LABEL } from '../plan/labels';
 import { compareBlocks, hhmm, shortDay, type PlanBlock, type PlanLeg } from '../plan/selectors';
 
 export type LngLat = [number, number];
@@ -23,6 +23,11 @@ export type MapPoint = {
   legId?: string;
   tourId?: string;
   googlePlaceId?: string | null;
+  /** Bloques: hora de inicio/fin ('HH:MM' o null), lugar y tipo legible (para la lista tipo sendero). */
+  start?: string | null;
+  end?: string | null;
+  place?: string | null;
+  typeLabel?: string | null;
 };
 
 export type MapLine = { id: string; color: string; coords: LngLat[]; dashed: boolean };
@@ -41,7 +46,8 @@ export type MapModel = {
 
 export type DayOption = { dayId: string; legId: string; date: string; label: string; color: string };
 
-const STOP_COLOR = '#0F766E';
+// Paradas de tour: rojo del pañuelo (los tours los arma el Scout).
+const STOP_COLOR = '#D33B2D';
 
 function sortLegs(legs: PlanLeg[]): PlanLeg[] {
   return [...legs].sort(
@@ -55,7 +61,7 @@ export function dayOptions(legs: PlanLeg[]): DayOption[] {
   const out: DayOption[] = [];
   for (const leg of sortLegs(legs)) {
     for (const d of [...leg.days].sort((a: DayRow, b: DayRow) => a.date.localeCompare(b.date))) {
-      out.push({ dayId: d.id, legId: leg.id, date: d.date, label: `${shortDay(d.date)} · ${leg.city}`, color: colors.get(leg.id) ?? '#1F6FEB' });
+      out.push({ dayId: d.id, legId: leg.id, date: d.date, label: `${shortDay(d.date)} · ${leg.city}`, color: colors.get(leg.id) ?? LEG_COLORS[0] });
     }
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));
@@ -125,14 +131,14 @@ export function buildMapModel({
       sublabel: `${shortDay(l.start_date)} → ${shortDay(l.end_date)}`,
       lat: l.lat,
       lng: l.lng,
-      color: colors.get(l.id) ?? '#1F6FEB',
+      color: colors.get(l.id) ?? LEG_COLORS[0],
       order: i + 1,
       legId: l.id,
       googlePlaceId: l.google_place_id,
     }));
     const lines: MapLine[] = legEdges(located).map(([a, b]) => ({
       id: `leg:${a.id}->${b.id}`,
-      color: colors.get(b.id) ?? '#1F6FEB',
+      color: colors.get(b.id) ?? LEG_COLORS[0],
       coords: [
         [a.lng!, a.lat!],
         [b.lng!, b.lat!],
@@ -143,7 +149,7 @@ export function buildMapModel({
   }
 
   const leg = legs.find((l) => l.days.some((d) => d.id === scope.dayId));
-  const color = (leg && colors.get(leg.id)) ?? '#1F6FEB';
+  const color = (leg && colors.get(leg.id)) ?? LEG_COLORS[0];
   const dayBlocks = blocks
     .filter((b) => b.day_id === scope.dayId && (!b.plan_variant || b.plan_variant === 'main'))
     .sort(compareBlocks);
@@ -164,6 +170,10 @@ export function buildMapModel({
     legId: b.leg_id ?? undefined,
     tourId: b.tour_id ?? undefined,
     googlePlaceId: b.google_place_id,
+    start: hhmm(b.start_time) || null,
+    end: hhmm(b.end_time) || null,
+    place: b.place_name,
+    typeLabel: TYPE_LABEL[b.type] ?? null,
   }));
   const lines: MapLine[] =
     located.length > 1
@@ -194,6 +204,33 @@ export function buildMapModel({
   }
 
   return { points, lines, unlocated, bounds: boundsOf(points) };
+}
+
+export type PointStatus = 'done' | 'now' | 'next';
+
+const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+/**
+ * Estado de cada bloque del día de hoy según la hora (`nowMin`, minutos desde las 00:00):
+ * terminado, en curso ("Ahora") o el próximo que arranca ("Próximo"). Sin hora: sin estado.
+ * Sin fin, un bloque dura hasta que empieza el siguiente.
+ */
+export function timelineStatus(points: MapPoint[], nowMin: number): Map<string, PointStatus> {
+  const out = new Map<string, PointStatus>();
+  const timed = points.filter((p) => p.kind === 'block' && p.start);
+  let nextSet = false;
+  timed.forEach((p, i) => {
+    const start = toMin(p.start!);
+    const following = timed[i + 1]?.start;
+    const end = p.end ? toMin(p.end) : following ? toMin(following) : start + 60;
+    if (end <= nowMin) out.set(p.id, 'done');
+    else if (start <= nowMin) out.set(p.id, 'now');
+    else if (!nextSet) {
+      out.set(p.id, 'next');
+      nextSet = true;
+    }
+  });
+  return out;
 }
 
 /** `focus` de POST /voice/session (Contratos v1.1) para un elemento del mapa. */
