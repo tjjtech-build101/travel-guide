@@ -86,6 +86,8 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* "Cómo llego" embebido: pantalla completa sin tab ni header (se abre con features/route/nav.openRoute). */}
+          <Tabs.Screen name="route" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
           {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"

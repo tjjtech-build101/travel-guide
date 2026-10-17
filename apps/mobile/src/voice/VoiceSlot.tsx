@@ -6,6 +6,8 @@ import { FloatingVoiceButton } from './ui/FloatingVoiceButton';
 
 export function VoiceSlot({ tripId }: { tripId: string }) {
   const segments = useSegments() as string[];
-  if (segments[segments.length - 1] === 'now') return null;
+  const last = segments[segments.length - 1];
+  // En "Cómo llego" tampoco: pantalla completa con el mapa y la indicación, sin nada encima.
+  if (last === 'now' || last === 'route') return null;
   return <FloatingVoiceButton tripId={tripId} />;
 }
