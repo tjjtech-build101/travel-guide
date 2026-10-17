@@ -64,7 +64,8 @@
     "test:map": "tsx src/features/map/model.test.ts",
     "test:fresh": "tsx src/location/freshPositionTools.test.ts",
     "lint": "expo lint",
-    "test:schedule": "tsx src/schedule/delivery.test.ts"
+    "test:schedule": "tsx src/schedule/delivery.test.ts",
+    "test:nowdata": "tsx src/features/now/v2/hooks/pure.test.ts"
   },
   "private": true,
   "expo": {
