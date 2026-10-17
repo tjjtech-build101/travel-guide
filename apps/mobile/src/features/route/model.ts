@@ -333,3 +333,47 @@ export function externalApps(platform: string, mode: RouteMode): ExternalApp[] {
 export function announceKey(next: NextInstruction): string {
   return `${next.distanceM <= 15 ? 'now' : 'soon'}|${next.kind}|${next.text.replace(/^En [^,]+, /, '')}`;
 }
+
+// ───────── De dónde se abre y a dónde ir
+
+/** Tab visible del viaje desde la que se abrió la ruta: "Volver" vuelve ahí (la ruta es una tab oculta). */
+export type RouteOrigin = 'index' | 'map' | 'now';
+const ORIGINS: readonly string[] = ['index', 'map', 'now'];
+
+/** Valida el param `from` (o el nombre de una tab). Sin dato o raro (deep link, la propia ruta) → Ahora. */
+export function routeOrigin(v: unknown): RouteOrigin {
+  return typeof v === 'string' && ORIGINS.includes(v) ? (v as RouteOrigin) : 'now';
+}
+
+/** Pathname de expo-router de la tab de origen. */
+export function originPath(o: RouteOrigin): '/trip/[tripId]' | '/trip/[tripId]/map' | '/trip/[tripId]/now' {
+  return o === 'index' ? '/trip/[tripId]' : o === 'map' ? '/trip/[tripId]/map' : '/trip/[tripId]/now';
+}
+
+export type PlaceTarget = { lat: number; lng: number; name: string };
+
+const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+
+/** Sugerencia de Ahora (hueco libre) → destino de la ruta; sin coordenadas, null (la fila no abre nada). */
+export function suggestionTarget(s: { title: string; place_name?: string | null; lat: number | null; lng: number | null }): PlaceTarget | null {
+  if (!finite(s.lat) || !finite(s.lng)) return null;
+  return { lat: s.lat, lng: s.lng, name: s.place_name || s.title };
+}
+
+/** Pin del Mapa → destino. Bloques y paradas de tour sí; un tramo (una ciudad entera) no es "a dónde ir". */
+export function mapPointTarget(p: {
+  kind: 'leg' | 'block' | 'stop';
+  label: string;
+  place?: string | null;
+  lat: number;
+  lng: number;
+  blockId?: string;
+}): (PlaceTarget & { block_id?: string }) | null {
+  if (p.kind === 'leg' || !finite(p.lat) || !finite(p.lng)) return null;
+  return {
+    lat: p.lat,
+    lng: p.lng,
+    name: (p.kind === 'block' && p.place) || p.label,
+    ...(p.kind === 'block' && p.blockId ? { block_id: p.blockId } : {}),
+  };
+}

@@ -6,6 +6,7 @@ import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { BookIcon, MapIcon, PlanIcon } from '../../../../ui/icons';
 import { colors, font, radius, space } from '../../../../ui/theme';
+import { suggestionTarget } from '../../../route/model';
 import { formatMinutes } from '../../selectors';
 import type { GapSuggestion } from '../types';
 import { HeroActions, HeroCard, heroText, Kicker } from './HeroState';
@@ -22,6 +23,7 @@ type Props = {
   /** Estado de "Agregar" por id de sugerencia. */
   addState?: Record<string, AddState | undefined>;
   onAdd: (s: GapSuggestion) => void;
+  /** Tocar la fila (no "Agregar") → "Cómo llego" a ese lugar. Solo filas con coordenadas; sin botón extra. */
   onSuggestionPress?: (s: GapSuggestion) => void;
   onPlanDay: () => void;
   planning?: boolean;
@@ -65,6 +67,7 @@ function Row({
         disabled={!onPress}
         accessibilityRole={onPress ? 'button' : undefined}
         accessibilityLabel={`${SOURCE_LABEL[s.source]}: ${s.title}. ${s.why}`}
+        accessibilityHint={onPress ? 'Ver cómo llegar' : undefined}
         style={({ pressed }) => [styles.rowMain, pressed && styles.pressed]}
       >
         <View style={styles.icon}>
@@ -144,7 +147,7 @@ export function HeroFree({
               s={s}
               state={addState?.[s.id]}
               onAdd={() => onAdd(s)}
-              onPress={onSuggestionPress ? () => onSuggestionPress(s) : undefined}
+              onPress={onSuggestionPress && suggestionTarget(s) ? () => onSuggestionPress(s) : undefined}
             />
           ))}
         </View>

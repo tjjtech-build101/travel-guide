@@ -10,7 +10,11 @@ import {
   hasTransitTimes,
   headline,
   maneuverKind,
+  mapPointTarget,
   nextInstruction,
+  originPath,
+  routeOrigin,
+  suggestionTarget,
   rideDetail,
   rideTitle,
   toRouteDetail,
@@ -195,6 +199,40 @@ test('externalUrls: esquema + fallback web por modo; Waze siempre maneja', () =>
   // Waze siempre arma ruta en auto: a pie o en transporte no aparece.
   eq(externalApps('ios', 'walk'), ['apple', 'google']);
   eq(externalApps('android', 'transit'), ['google']);
+});
+
+test('routeOrigin: tabs visibles; sin dato, raro o la propia ruta → Ahora', () => {
+  eq(routeOrigin('index'), 'index');
+  eq(routeOrigin('map'), 'map');
+  eq(routeOrigin('now'), 'now');
+  eq(routeOrigin(undefined), 'now');
+  eq(routeOrigin('route'), 'now');
+  eq(routeOrigin(['map']), 'now');
+});
+
+test('originPath: Planificación es la raíz del viaje', () => {
+  eq(originPath('index'), '/trip/[tripId]');
+  eq(originPath('map'), '/trip/[tripId]/map');
+  eq(originPath('now'), '/trip/[tripId]/now');
+});
+
+test('suggestionTarget: con coordenadas abre la ruta (nombre del lugar o el título); sin, null', () => {
+  eq(suggestionTarget({ title: 'Café', place_name: 'Café Brasilero', lat: -34.9, lng: -56.2 }), { lat: -34.9, lng: -56.2, name: 'Café Brasilero' });
+  eq(suggestionTarget({ title: 'Feria', place_name: null, lat: -34.9, lng: -56.2 }), { lat: -34.9, lng: -56.2, name: 'Feria' });
+  eq(suggestionTarget({ title: 'Evento', lat: null, lng: -56.2 }), null);
+  eq(suggestionTarget({ title: 'Evento', lat: Number.NaN, lng: -56.2 }), null);
+});
+
+test('mapPointTarget: bloque (con block_id y lugar) y parada sí; tramo no', () => {
+  eq(mapPointTarget({ kind: 'block', label: 'Almuerzo', place: 'Mercado', lat: 1, lng: 2, blockId: 'b1' }), {
+    lat: 1,
+    lng: 2,
+    name: 'Mercado',
+    block_id: 'b1',
+  });
+  eq(mapPointTarget({ kind: 'block', label: 'Almuerzo', place: null, lat: 1, lng: 2, blockId: 'b1' })?.name, 'Almuerzo');
+  eq(mapPointTarget({ kind: 'stop', label: 'Cabildo', place: 'x', lat: 1, lng: 2 }), { lat: 1, lng: 2, name: 'Cabildo' });
+  eq(mapPointTarget({ kind: 'leg', label: 'Montevideo', lat: 1, lng: 2 }), null);
 });
 
 if (failures) {

@@ -62,6 +62,7 @@ import { WeatherChip } from '../../../../features/now/v2/ui/WeatherChip';
 import { ActionToast } from '../../../../features/plan/components/ActionToast';
 import { useMoveBlock } from '../../../../features/plan/mutations';
 import { openBlock, openProposals } from '../../../../features/plan/nav';
+import { suggestionTarget } from '../../../../features/route/model';
 import { openRoute } from '../../../../features/route/nav';
 import { useMe, usePendingProposals, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import type { PlanBlock } from '../../../../features/plan/selectors';
@@ -332,6 +333,11 @@ export default function NowTab() {
   };
   const directionsTarget = [next?.block, plan?.current?.block].find((b): b is PlanBlock => !!b && hasCoords(b)) ?? null;
   const onDirections = directionsTarget ? () => goRoute(directionsTarget) : null;
+  // Hueco libre: tocar una sugerencia con lugar abre la ruta hasta ahí (no es un bloque: solo "Llegás HH:MM").
+  const onSuggestionRoute = (s: GapSuggestion) => {
+    const target = suggestionTarget(s);
+    if (target) openRoute(router, tripId, target);
+  };
 
   // ───────── Voy tarde
   const [lateOpen, setLateOpen] = useState(false);
@@ -669,6 +675,7 @@ export default function NowTab() {
         loading={gap.isLoading}
         addState={addState}
         onAdd={onAddSuggestion}
+        onSuggestionPress={onSuggestionRoute}
         onPlanDay={onPlanDay}
         planning={planDay.isPending}
         nowMin={nowMin}

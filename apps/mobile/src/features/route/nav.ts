@@ -3,10 +3,10 @@ import type { RouteMode } from '@build101/shared';
 import { router as appRouter } from 'expo-router';
 import { Linking } from 'react-native';
 
-import { externalUrls, type ExternalApp } from './model';
+import { externalUrls, routeOrigin, type ExternalApp, type RouteOrigin } from './model';
 
 export type RouteTarget = {
-  /** Si el destino es un bloque: el encabezado muestra "Salí en X" / "Vas X tarde" como Ahora. */
+  /** Si el destino es un bloque: el encabezado muestra "Salí en X" / "Vas X tarde" como Ahora. Sin bloque: solo "Llegás". */
   block_id?: string | null;
   lat: number;
   lng: number;
@@ -14,8 +14,18 @@ export type RouteTarget = {
 };
 
 /**
- * Abre la pantalla de ruta (`/trip/[tripId]/route`). Reemplaza a `openDirections` de Ahora:
- *   onDirections={() => openRoute(router, tripId, { block_id: b.id, lat: b.lat, lng: b.lng, name: b.place_name ?? b.title })}
+ * Última tab visible del viaje (Planificación · Mapa · Ahora), la anota el _layout del viaje con `screenListeners`.
+ * La ruta es una tab oculta y el "atrás" de las tabs iría siempre a la primera: "Volver" usa esto (param `from`).
+ * Sirve también desde los sheets del Plan (detalle de bloque), que se abren encima de la tab de origen.
+ */
+let lastTab: RouteOrigin = 'now';
+export function noteTripTab(name: string) {
+  if (name === 'index' || name === 'map' || name === 'now') lastTab = routeOrigin(name);
+}
+
+/**
+ * Abre la pantalla de ruta (`/trip/[tripId]/route`) desde Ahora, el Mapa o el detalle de un bloque:
+ *   openRoute(router, tripId, { block_id: b.id, lat: b.lat, lng: b.lng, name: b.place_name ?? b.title })
  */
 export function openRoute(router: Pick<typeof appRouter, 'push'>, tripId: string, target: RouteTarget) {
   router.push({
@@ -24,6 +34,7 @@ export function openRoute(router: Pick<typeof appRouter, 'push'>, tripId: string
       tripId,
       lat: String(target.lat),
       lng: String(target.lng),
+      from: lastTab,
       ...(target.block_id ? { block_id: target.block_id } : {}),
       ...(target.name ? { name: target.name } : {}),
     },

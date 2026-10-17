@@ -1,8 +1,14 @@
 // "Cómo llego" embebido (docs/AHORA-V2.md): la ruta adentro de la app con Google Routes (route_eta { detail: true }).
 // Arriba el mapa (ruta, yo en vivo vía LocationProvider, destino); abajo modo (A pie · Transporte · Auto), "Llegás 15:52",
 // la próxima indicación (o la línea de tiempo del transporte) y "Abrir en" Apple Maps · Google Maps · Waze (CarPlay).
-// Params: block_id (destino = bloque; muestra "Salí en X" como Ahora) o lat/lng/name. Se abre con features/route/nav.openRoute.
-// Deep link dev (solo __DEV__): build101://trip/<id>/route?lat=..&lng=..&sim=walk[&x=5] → el GPS simulado recorre la ruta a pie.
+// Params: block_id (destino = bloque de hoy con hora; muestra "Salí en X" como Ahora) o lat/lng/name (cualquier lugar:
+// solo "Llegás HH:MM"), y from = index | map | now (la tab de origen: "Volver" y el atrás de Android vuelven ahí).
+// Se abre con features/route/nav.openRoute desde Ahora (próximo bloque o una sugerencia del hueco libre), el Mapa
+// (tarjeta del pin elegido) y el detalle de bloque del Plan; `from` lo completa solo con la última tab visible.
+// Deep links para probar sin plan (scheme build101, ver app.config.ts):
+//   build101://trip/<tripId>/route?lat=-34.9065&lng=-56.1990&name=Plaza%20Independencia  → ruta a ese punto (sin
+//     bloque: "Llegás HH:MM"; sin from, "Volver" va a Ahora). Desde la terminal: `xcrun simctl openurl booted '<url>'`.
+//   …&sim=walk[&x=5] (solo __DEV__) → además el GPS simulado recorre la ruta a pie (x = velocidad 1|2|5|10).
 import { leaveInMin, synthesizeTrack, zonedParts, type RouteMode, type SimSpeed } from '@build101/shared';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
@@ -20,6 +26,8 @@ import {
   hasTransitTimes,
   headline,
   nextInstruction,
+  originPath,
+  routeOrigin,
   transitTimeline,
 } from '../../../../features/route/model';
 import { openInApp } from '../../../../features/route/nav';
@@ -45,7 +53,7 @@ import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../../ui/theme';
 
-type Params = { block_id?: string; lat?: string; lng?: string; name?: string; sim?: string; x?: string };
+type Params = { block_id?: string; lat?: string; lng?: string; name?: string; from?: string; sim?: string; x?: string };
 type LatLng = { lat: number; lng: number };
 
 /** Mientras no hay destino (los hooks corren igual). */
@@ -81,9 +89,12 @@ export default function RouteScreen() {
 
 function RouteView() {
   const tripId = useTripId();
-  // Volver siempre a Ahora: la ruta es una tab oculta y el "atrás" de las tabs iría a Planificación.
-  const goBack = () => router.navigate({ pathname: '/trip/[tripId]/now', params: { tripId } });
-  // El atrás de Android también vuelve a Ahora (el de las tabs iría a Planificación).
+  const params = useLocalSearchParams<Params>();
+  // Volver a la tab de origen (`from`: Planificación, Mapa o Ahora; sin dato → Ahora). La ruta es una tab oculta y el
+  // "atrás" de las tabs (backBehavior firstRoute) iría siempre a Planificación, así que navegamos explícito.
+  const backTo = routeOrigin(params.from);
+  const goBack = () => router.navigate({ pathname: originPath(backTo), params: { tripId } });
+  // El atrás de Android también vuelve al origen.
   const goBackRef = useRef(goBack);
   goBackRef.current = goBack;
   useEffect(() => {
@@ -93,7 +104,6 @@ function RouteView() {
     });
     return () => sub.remove();
   }, []);
-  const params = useLocalSearchParams<Params>();
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
   const me = useMe();

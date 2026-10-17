@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { noteTripTab } from '../../../../features/route/nav';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
@@ -54,6 +55,8 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
     <TripIdProvider tripId={tripId}>
       <View style={styles.flex}>
         <Tabs
+          // Anota la tab visible: "Volver" de la ruta (tab oculta) vuelve ahí (features/route/nav).
+          screenListeners={({ route }) => ({ focus: () => noteTripTab(route.name) })}
           screenOptions={{
             headerShown: true,
             headerStyle: { backgroundColor: colors.bg },

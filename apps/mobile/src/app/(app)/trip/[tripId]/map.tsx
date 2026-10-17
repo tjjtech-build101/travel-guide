@@ -1,9 +1,10 @@
 // Tab Mapa (PRD 03, 2D primero): el recorrido que viene (tramos del viaje, bloques del día y paradas de tour).
 // Mapa a pantalla completa + hoja deslizable con la lista del día como sendero (MapTimeline).
 // Tocar cualquier elemento → el avatar redondo del Scout ("Hablar") → useScout().startScoutCall({ focus }).
+// Bloques y paradas: además "Cómo llego" (ruta embebida, features/route) en la tarjeta del elegido.
 // Sin EXPO_PUBLIC_MAPBOX_TOKEN no se monta Mapbox: aviso + la misma lista de puntos (todo lo demás funciona igual).
 import { SCOUT } from '@build101/shared';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -24,6 +25,8 @@ import { useNow } from '../../../../features/now/clock';
 import { localParts, resolveToday, tzOffsetMin } from '../../../../features/now/selectors';
 import { openBlock } from '../../../../features/plan/nav';
 import { useMe, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
+import { mapPointTarget } from '../../../../features/route/model';
+import { openRoute } from '../../../../features/route/nav';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail } from '../../../../features/trips/queries';
 import { env } from '../../../../lib/env';
@@ -157,6 +160,9 @@ export default function MapTab() {
       : `${placesCount} ${placesCount === 1 ? 'lugar' : 'lugares'}`;
   const bottomInset = areaHeight * SNAP_FRACTIONS[Math.min(sheetIndex, 1)];
 
+  // "Cómo llego" al pin elegido (bloque o parada de tour; un tramo es una ciudad entera, no).
+  const selectedTarget = selected ? mapPointTarget(selected) : null;
+
   const select = (p: MapPoint) => {
     setSelected(p);
     // Que el punto quede a la vista: la hoja a la mitad.
@@ -236,12 +242,26 @@ export default function MapTab() {
                   <Text style={styles.closeText}>✕</Text>
                 </Pressable>
               </View>
-              {selected.kind === 'block' && selected.blockId ? (
-                <Button
-                  label="Ver en el plan"
-                  variant="secondary"
-                  onPress={() => openBlock(tripId, selected.blockId!)}
-                />
+              {selectedTarget || (selected.kind === 'block' && selected.blockId) ? (
+                <View style={styles.actionRow}>
+                  {selected.kind === 'block' && selected.blockId ? (
+                    <Button
+                      label="Ver en el plan"
+                      variant="secondary"
+                      style={styles.actionBtn}
+                      onPress={() => openBlock(tripId, selected.blockId!)}
+                    />
+                  ) : null}
+                  {selectedTarget ? (
+                    <Button
+                      label="Cómo llego"
+                      variant="secondary"
+                      style={styles.actionBtn}
+                      accessibilityHint="Ver la ruta hasta acá"
+                      onPress={() => openRoute(router, tripId, selectedTarget)}
+                    />
+                  ) : null}
+                </View>
               ) : null}
               {selected.kind === 'leg' && selected.legId ? (
                 <Button
@@ -428,6 +448,8 @@ const styles = StyleSheet.create({
     padding: space.md,
     gap: space.sm,
   },
+  actionRow: { flexDirection: 'row', gap: space.sm },
+  actionBtn: { flex: 1 },
   actionTitle: { fontSize: font.h3, fontWeight: '600', color: colors.text },
   close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   talk: { alignItems: 'center' },
