@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
-import { BookIcon, MapIcon, PlanIcon } from '../../../../ui/icons';
+import { BookIcon, MapIcon, PlanIcon, RouteIcon } from '../../../../ui/icons';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { suggestionTarget } from '../../../route/model';
 import { formatMinutes } from '../../selectors';
@@ -81,6 +81,12 @@ function Row({
             {s.why}
           </Text>
         </View>
+        {/* Pista visual de que la fila abre "Cómo llego"; las filas sin coordenadas no la llevan. */}
+        {onPress ? (
+          <View testID="suggestion-route-hint" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+            <RouteIcon color={colors.textMuted} size={18} />
+          </View>
+        ) : null}
       </Pressable>
       <Pressable
         onPress={onAdd}
