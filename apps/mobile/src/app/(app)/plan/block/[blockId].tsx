@@ -2,7 +2,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AlertChips, StatusBadge, transferLabel } from '../../../../features/plan/components/BlockCard';
 import {
@@ -177,6 +177,22 @@ function ViewMode({
           </View>
         ) : null}
 
+        {block.transfer?.summary ? (
+          <View style={{ gap: space.xs }}>
+            <FieldLabel>Cómo llegar</FieldLabel>
+            <Text>{block.transfer.summary}</Text>
+            {block.transfer.lines?.map((l, i) => (
+              <Text key={i} style={{ color: colors.textMuted, fontSize: font.small }}>
+                {[l.name, l.from_stop && `de ${l.from_stop}`, l.to_stop && `a ${l.to_stop}`, l.headsign && `(hacia ${l.headsign})`, l.stops != null && `${l.stops} paradas`]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+        {block.transfer?.maps_url ? (
+          <Button label="Cómo llego (Google Maps)" variant="secondary" onPress={() => void Linking.openURL(block.transfer!.maps_url!)} />
+        ) : null}
         {block.booking_url ? (
           <Button label="Abrir reserva" variant="secondary" onPress={() => WebBrowser.openBrowserAsync(block.booking_url!)} />
         ) : null}

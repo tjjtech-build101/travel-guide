@@ -1,5 +1,6 @@
 // Vista Planificación (decisiones del sábado): pestañas internas Itinerario · Eventos · Tours · Gastos.
 // Itinerario = Plan del PRD 02: línea de tiempo por tramo y día, filtros, tramos paralelos, ideas, propuestas y alertas.
+import { useQueryClient } from '@tanstack/react-query';
 import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -26,6 +27,7 @@ import {
 import { DotsIcon, PlusIcon } from '../../../../features/plan/components/TypeIcon';
 import { legColorMap } from '../../../../features/plan/labels';
 import { showMenu } from '../../../../features/plan/menu';
+import { calculateTransfers } from '../../../../features/plan/transfers';
 import { openBank, openBlock, openNewBlock, openProposals } from '../../../../features/plan/nav';
 import {
   useMe,
@@ -85,6 +87,7 @@ function openGroup(tripId: string) {
 
 function ItineraryView() {
   const tripId = useTripId();
+  const qc = useQueryClient();
   const me = useMe();
   const trip = useTrip(tripId);
   const overview = usePlanOverview(tripId);
@@ -223,6 +226,7 @@ function ItineraryView() {
   const tripMenu = () =>
     showMenu(trip.data?.title, [
       { label: 'Grupo y actividad', onPress: () => openGroup(tripId) },
+      { label: 'Calcular traslados (bus, a pie)', onPress: () => void calculateTransfers(qc, tripId) },
       { label: 'Tu perfil', onPress: () => router.push('/profile') },
       {
         label: 'Exportar viaje a calendario',
@@ -241,6 +245,7 @@ function ItineraryView() {
   const dayMenu = (row: Extract<PlanRow, { kind: 'day' }>) =>
     showMenu(undefined, [
       { label: 'Compartir este día', onPress: () => shareDay(row.leg, row.day, blocksByDay.get(row.day.id) ?? []) },
+      { label: 'Calcular traslados de este día', onPress: () => void calculateTransfers(qc, tripId, row.day.id) },
       {
         label: 'Exportar este día a calendario',
         onPress: () => exportIcs(`${trip.data?.title ?? 'Viaje'} ${row.day.date}`, blocksByDay.get(row.day.id) ?? [], [row.day]),
