@@ -59,6 +59,7 @@
     "test:plan": "tsx src/features/plan/selectors.test.ts",
     "test:voice": "tsx src/voice/echo.test.ts",
     "test:now": "tsx src/features/now/selectors.test.ts",
+    "test:nowv2": "tsx src/features/now/v2/model.test.ts",
     "test:profile": "tsx src/features/profile/model.test.ts",
     "test:map": "tsx src/features/map/model.test.ts",
     "test:fresh": "tsx src/location/freshPositionTools.test.ts",

@@ -6,9 +6,11 @@ import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { previewScoutState, useScoutStore, type ScoutState } from '../../voice/useScout';
+import { zonedParts } from '@build101/shared';
+
 import { Chip } from '../plan/components/Controls';
-import { useClockStore, useNow } from './clock';
-import { localParts } from './selectors';
+import { DEMO_TIME_ZONE, useClockStore, useNow } from './clock';
+import { clock } from './selectors';
 
 const PRESETS: { label: string; at: string }[] = [
   { label: 'Día 1 · 12:30', at: '2026-10-17T12:30' },
@@ -26,20 +28,19 @@ const STATES: { value: ScoutState; label: string }[] = [
 ];
 
 export function ClockDevSection() {
-  const { now, simulated } = useNow(10_000);
+  const { now, simulated, preview } = useNow(10_000);
   const simulate = useClockStore((s) => s.simulate);
   const reset = useClockStore((s) => s.reset);
   const scoutState = useScoutStore((s) => s.state);
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const local = localParts(now, -180);
+  const local = zonedParts(now, DEMO_TIME_ZONE);
 
   return (
     <View style={styles.section}>
       <Text style={styles.title}>Fecha y hora (Ahora)</Text>
       <Text style={styles.muted}>
-        {simulated ? 'Simulada' : 'Real'} · {local.date} {String(Math.floor(local.minutes / 60)).padStart(2, '0')}:
-        {String(local.minutes % 60).padStart(2, '0')} (Montevideo)
+        {preview ? 'Vista previa del día 1' : simulated ? 'Simulada' : 'Real'} · {local.date} {clock(local.minutes)} (Montevideo)
       </Text>
       <View style={styles.chips}>
         <Chip label="Real" selected={!simulated} onPress={reset} />
