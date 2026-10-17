@@ -116,6 +116,7 @@ describe.skipIf(!up)('plan_trip (integración, Supabase local + Claude mock)', a
     if (created.length) await admin.from('trips').delete().in('id', created);
   });
 
+  // Supabase en la nube (vs local): más latencia por round-trip que el default de 5s de vitest.
   it('viaje nuevo: crea viaje, tramos, días, traslado y bloques; job done; trip_planned deshace todo', async () => {
     const calls: Calls = { skeleton: 0, legs: [] };
     const t0 = Date.now();
@@ -184,7 +185,7 @@ describe.skipIf(!up)('plan_trip (integración, Supabase local + Claude mock)', a
       admin.from('blocks').select('id', { count: 'exact', head: true }).eq('trip_id', start.trip_id),
     ]);
     expect([nLegs, nBlocks]).toEqual([0, 0]);
-  });
+  }, 15_000);
 
   it('falla en un tramo: job failed con error legible, lo escrito queda, Reintentar completa solo el vacío', async () => {
     const calls: Calls = { skeleton: 0, legs: [] };
@@ -213,7 +214,7 @@ describe.skipIf(!up)('plan_trip (integración, Supabase local + Claude mock)', a
     expect((job2!.result as PlanTripResult).participants_hint).toEqual(r1.participants_hint); // se conservan los del viaje
     const { count } = await admin.from('blocks').select('id', { count: 'exact', head: true }).eq('leg_id', bsas.id);
     expect(count).toBe(7);
-  });
+  }, 15_000);
 
   it('permisos: un viajero no organizer no puede planificar el viaje de demo', async () => {
     const anaCtx: ToolCtx = { ...ctx, userId: DEMO_USERS.ana };

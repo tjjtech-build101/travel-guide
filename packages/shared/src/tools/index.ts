@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AddBlockInput,
   AddIdeaInput,
+  GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
   MoveBlockInput,
@@ -69,6 +70,11 @@ export const toolDefs = {
     description:
       'Arma un viaje entero (tramos, días y bloques) a partir de la conversación. Es un trabajo en segundo plano: devuelve { job_id, trip_id } y el progreso se ve en agent_jobs.',
     input: PlanTripInput,
+  },
+  generate_tour: {
+    description:
+      'Arma un tour con paradas verificadas (planificado, espontáneo o explorador). Trabajo en segundo plano: devuelve { job_id, tour_id } y el progreso (y las paradas) se ven por Realtime en agent_jobs / tour_stops.',
+    input: GenerateTourInput,
   },
 } as const satisfies Record<string, ToolDef>;
 

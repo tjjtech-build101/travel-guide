@@ -3,6 +3,7 @@ import { isToolName, toolDefs, type ToolName, type ToolResponse } from '@build10
 import { ToolFailure } from '../errors';
 import { add_block } from './add_block';
 import { add_idea } from './add_idea';
+import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
 import { get_trip_overview } from './get_trip_overview';
 import { move_block } from './move_block';
@@ -28,6 +29,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   route_eta,
   undo,
   plan_trip,
+  generate_tour,
 };
 
 export type ToolRun = { status: number; body: ToolResponse };
