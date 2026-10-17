@@ -15,6 +15,7 @@ import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Skeleton } from '../../ui/States';
 import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
+import { camera } from '../../voice/camera/cameraStore';
 import { useScout } from '../../voice/useScout';
 import { openDirections, OUTDOOR, ScoutDock, Tile } from '../now/components';
 import { TourMiniMap } from './TourMiniMap';
@@ -72,8 +73,8 @@ export function LiveTourView() {
       { text: 'Terminar', style: 'destructive', onPress: () => void store.finish() },
     ]);
 
-  const onCamera = () =>
-    Alert.alert('Cámara', `Muy pronto: le vas a poder mostrar a ${SCOUT.name} lo que estás mirando y te cuenta qué es.`);
+  // PRD 08: la cámara a pedido (con llamada, el scout narra el resultado; sin llamada, alcanza la tarjeta).
+  const onCamera = () => camera.open({ source: 'tour' });
 
   const statusText = done
     ? 'Tour terminado'
@@ -166,7 +167,7 @@ export function LiveTourView() {
             <Tile label="Cerrar tour" onPress={() => store.close()} icon={<FlagIcon color={colors.text} />} />
           ) : (
             <>
-              <Tile label="Cámara" soon onPress={onCamera} icon={<CameraIcon color={colors.text} />} />
+              <Tile label="Cámara" onPress={onCamera} icon={<CameraIcon color={colors.text} />} />
               <Tile label="Saltar parada" onPress={onSkip} icon={<RouteIcon color={colors.text} />} hint="Saltea la parada actual o la próxima" />
               <Tile label="Terminar" onPress={onFinish} icon={<FlagIcon color={colors.text} />} />
             </>
