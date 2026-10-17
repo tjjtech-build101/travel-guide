@@ -70,7 +70,7 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
               <Pressable
                 onPress={goBack}
                 accessibilityRole="button"
-                accessibilityLabel="Volver a Mis viajes"
+                accessibilityLabel="Volver al inicio"
                 style={styles.headerBtn}
               >
                 <BackIcon color={colors.text} />
