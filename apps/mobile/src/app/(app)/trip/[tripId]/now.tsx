@@ -6,7 +6,7 @@
 // y simulador `?sim=play|pause|x1|x10|stop<N>|t<segundos>` (stop: salta a ~15 s de la parada N; t: a ese segundo del
 // track). `&n=<algo>` para repetir el mismo.
 // Vigilante de horarios (solo dev): `?watch=run` (una pasada ya), `reset` (olvidar los avisos de hoy),
-// `notif-reset` (volver a pedir permiso de notificaciones).
+// `later` (olvidar y pasar en 8 s, para ver el aviso desde otra pantalla), `notif-reset` (volver a pedir permiso).
 import { SCOUT, scheduleAlertText } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -131,6 +131,14 @@ export default function NowTab() {
   useEffect(() => {
     if (!__DEV__ || !link.watch) return;
     const w = useScheduleStore.getState();
+    if (link.watch === 'later') {
+      // Probar la notificación con la app en otra pantalla: olvida y corre de nuevo en 8 s.
+      setTimeout(() => {
+        useScheduleStore.getState().reset();
+        void useScheduleStore.getState().run({ source: 'deep link (8 s)' });
+      }, 8000);
+      return;
+    }
     if (link.watch === 'reset') w.reset();
     else if (link.watch === 'notif-reset') void resetNotificationAsk();
     // Un respiro para que el simulador / el reloj del mismo link se apliquen antes de la pasada.

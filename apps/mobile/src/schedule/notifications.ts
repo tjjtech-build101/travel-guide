@@ -99,6 +99,7 @@ export function useNotificationTapRouter(enabled: boolean) {
     if (!enabled) return;
     const go = (n: Notifications.Notification) => {
       const url = n.request.content.data?.url;
+      if (__DEV__) console.log('[schedule] tocaron la notificación →', url);
       if (typeof url === 'string' && url.startsWith('/')) {
         router.push(url as never);
         Notifications.clearLastNotificationResponse();

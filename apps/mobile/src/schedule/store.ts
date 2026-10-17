@@ -72,6 +72,8 @@ const initial: State = { date: null, sent: [], last: {}, eta: null, lastRun: nul
 
 let ctx: WatchContext | null = null;
 let running = false;
+/** Pedido de pasada mientras otra corría (p. ej. cambió la hora simulada): se repite al terminar. */
+let rerun: { here?: LatLng | null; source?: string } | null = null;
 let lastUserSpeechAt = 0;
 
 useVoiceStore.subscribe((v, prev) => {
@@ -140,7 +142,11 @@ export const useScheduleStore = create<State & Actions>((set, get) => {
     },
 
     run: async ({ here: hereArg, source = 'timer' } = {}) => {
-      if (!ctx || running) return;
+      if (!ctx) return;
+      if (running) {
+        rerun = { here: hereArg, source };
+        return;
+      }
       running = true;
       try {
         if (!get().hydrated) await get().hydrate();
@@ -174,7 +180,10 @@ export const useScheduleStore = create<State & Actions>((set, get) => {
           sent: get().sent,
         });
         set({ lastRun: { at: nowMs, result: { skipped: r.skipped, target: r.target, alerts: r.alerts.length } } });
-        if (!r.markSent.length) return;
+        if (!r.markSent.length) {
+          if (source.startsWith('deep link')) log(`${source}: sin aviso (${r.skipped ?? 'nada que avisar'}, eta ${r.target?.eta_min ?? '—'}, ${today.minutes} min)`);
+          return;
+        }
         set((s) => ({ sent: [...s.sent, ...r.markSent] }));
         for (const a of r.alerts) {
           log(`${source}: ${a.payload.kind} ${a.payload.title} (salí en ${a.payload.leave_in_min ?? '—'}, tarde ${a.payload.late_by_min ?? '—'})`);
@@ -186,6 +195,9 @@ export const useScheduleStore = create<State & Actions>((set, get) => {
         log(`falló: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         running = false;
+        const again = rerun;
+        rerun = null;
+        if (again) void get().run(again);
       }
     },
 
