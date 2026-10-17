@@ -34,7 +34,7 @@ export function DayRail({ items, onPress }: Props) {
     if (!anchor || !width) return;
     const l = layouts.current.get(anchor.id);
     if (!l) return;
-    const key = `${anchor.id}:${width}`;
+    const key = `${anchor.id}:${anchor.status}:${width}:${Math.round(l.x)}`;
     if (centered.current === key) return;
     centered.current = key;
     scroll.current?.scrollTo({ x: Math.max(0, l.x + l.w / 2 - width / 2), animated: false });
@@ -56,13 +56,17 @@ export function DayRail({ items, onPress }: Props) {
       accessibilityLabel="Tu día"
     >
       {items.map((it) => (
-        <View key={it.id} style={styles.slot}>
+        <View
+          key={it.id}
+          style={styles.slot}
+          // x del slot = posición dentro del contenido del riel (la del chip sería relativa al slot).
+          onLayout={(e) => {
+            layouts.current.set(it.id, { x: e.nativeEvent.layout.x, w: e.nativeEvent.layout.width });
+            if (it.id === anchor?.id) center();
+          }}
+        >
           {markerBefore === it.id ? <NowMarker /> : null}
           <Pressable
-            onLayout={(e) => {
-              layouts.current.set(it.id, { x: e.nativeEvent.layout.x, w: e.nativeEvent.layout.width });
-              if (it.id === anchor?.id) center();
-            }}
             onPress={() => onPress(it.id)}
             accessibilityRole="button"
             accessibilityLabel={`${it.start !== null ? `${clock(it.start)}, ` : ''}${it.title}, ${STATUS_LABEL[it.status]}`}

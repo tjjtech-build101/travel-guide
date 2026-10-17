@@ -43,7 +43,7 @@ describe('rankSuggestions', () => {
     expect(items.map((i) => i.source).sort()).toEqual(['event', 'idea', 'place']);
     const i = items.find((x) => x.source === 'idea')!;
     expect(i.block_id).toBe('i1');
-    expect(i.why).toMatch(/banco de ideas · \d+ min a pie/);
+    expect(i.why).toMatch(/Tu idea · \d+ min a pie/);
     expect(items.find((x) => x.source === 'place')!.why).toMatch(/^Abierto ahora · /);
     expect(items.find((x) => x.source === 'event')!.why).toBe('Hoy a las 16:00 · Barrio Sur');
   });

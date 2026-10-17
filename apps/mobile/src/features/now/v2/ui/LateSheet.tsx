@@ -50,7 +50,7 @@ export function LateSheet({ visible, blockTitle, lateByMin, onNotify, onShift, o
             />
             <Action
               icon={<PlanIcon color={colors.text} />}
-              label={`Mover ${blockTitle} ${SHIFT_MIN} min`}
+              label={`Pasarlo ${SHIFT_MIN} min más tarde`}
               onPress={() => onShift(SHIFT_MIN)}
             />
             <Action icon={<RouteIcon color={colors.text} />} label="Llevarme" onPress={onDirections} />

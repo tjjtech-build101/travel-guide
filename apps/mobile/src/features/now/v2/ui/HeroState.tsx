@@ -51,17 +51,17 @@ export function Kicker({ children, color = colors.primary }: { children: string;
 
 export type HeroAction = { label: string; onPress: () => void; loading?: boolean; disabled?: boolean; hint?: string };
 
-/** Primario arriba, secundario abajo (una mano: los dos a lo ancho). */
+/** Primario a la izquierda y secundario a la derecha, en una fila (a la altura del pulgar). */
 export function HeroActions({ primary, secondary }: { primary: HeroAction; secondary?: HeroAction | null }) {
   return (
-    <View style={styles.actions}>
+    <View style={[styles.actions, secondary && styles.actionsRow]}>
       <Button
         label={primary.label}
         onPress={primary.onPress}
         loading={primary.loading}
         disabled={primary.disabled}
         accessibilityHint={primary.hint}
-        style={styles.btn}
+        style={[styles.btn, secondary && styles.btnHalf]}
       />
       {secondary ? (
         <Button
@@ -71,7 +71,7 @@ export function HeroActions({ primary, secondary }: { primary: HeroAction; secon
           loading={secondary.loading}
           disabled={secondary.disabled}
           accessibilityHint={secondary.hint}
-          style={styles.btn}
+          style={[styles.btn, styles.btnHalf]}
         />
       ) : null}
     </View>
@@ -170,14 +170,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: space.xl,
+    padding: space.lg,
     gap: space.sm,
   },
   cardOutdoor: { borderWidth: 2, borderColor: colors.text },
   pressed: { opacity: 0.85 },
   kicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1.2 },
   actions: { gap: space.sm, marginTop: space.md },
+  actionsRow: { flexDirection: 'row' },
   btn: { minHeight: HERO_BUTTON, borderRadius: radius.lg },
+  btnHalf: { flex: 1, paddingHorizontal: space.sm },
   chip: {
     alignSelf: 'center',
     minHeight: 36,

@@ -6,8 +6,9 @@
 //   ?scout=listening|speaking|thinking|idle · estado del avatar
 //   ?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30|nearby:<min>|nearby-start (solo __DEV__)
 //   ?sim=play|pause|x1|x10|stop<N>|t<seg> (simulador de GPS, solo __DEV__)
-//   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · &n=<algo> repite el mismo link
-import { SCOUT, scheduleAlertText, zonedParts } from '@build101/shared';
+//   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · ?do=late|planday|offline|outdoor-on|outdoor-off (solo __DEV__)
+//   &n=<algo> repite el mismo link
+import { SCOUT, zonedParts } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -98,6 +99,7 @@ type Link = {
   tour?: string;
   sim?: string;
   watch?: string;
+  do?: string;
   n?: string;
 };
 
@@ -109,7 +111,7 @@ export default function NowTab() {
   const blocks = usePlanBlocks(tripId);
   const proposals = usePendingProposals(tripId);
   const scout = useScout();
-  const { outdoor } = useOutdoorMode();
+  const { outdoor, setOutdoor } = useOutdoorMode();
   const tourAvailable = useNearbyTourAvailable().data === true;
   const tourPhase = useTourStore((s) => s.phase);
   const tourError = useTourStore((s) => s.error);
@@ -120,6 +122,8 @@ export default function NowTab() {
   const moveBlock = useMoveBlock(tripId);
   const planDay = usePlanDay();
   const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
+
+  const link = useLocalSearchParams<Link>();
 
   // Reloj: cada 30 s; con la cuenta regresiva en segundos, cada 1 s.
   const [tickMs, setTickMs] = useState<number>(30_000);
@@ -233,7 +237,7 @@ export default function NowTab() {
   // Último aviso del vigilante de horarios para el próximo bloque (va chiquito dentro de "Salí para").
   const lastAlert = useScheduleStore((s) => (next ? s.last[next.block.id] : undefined));
   const alertNote = lastAlert
-    ? `Te avisé a las ${clock(zonedParts(lastAlert.at, tz).minutes)} · ${scheduleAlertText(lastAlert.payload, next?.block.place_name).title}`
+    ? `${SCOUT.name} te avisó a las ${clock(zonedParts(lastAlert.at, tz).minutes)}${lastAlert.channel === 'voice' ? ' en la llamada' : ''}`
     : null;
 
   // ───────── Acciones del Scout
@@ -374,13 +378,24 @@ export default function NowTab() {
       },
     );
   };
+  // ?do=late|planday (solo dev): abre "Voy tarde" o corre "Armame la tarde" sin tocar la pantalla.
+  useEffect(() => {
+    if (!__DEV__ || !link.do) return;
+    const t = setTimeout(() => {
+      if (link.do === 'late') setLateOpen(true);
+      else if (link.do === 'planday') onPlanDay();
+      else if (link.do === 'outdoor-on' || link.do === 'outdoor-off') setOutdoor(link.do === 'outdoor-on');
+    }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link.do, link.n]);
+
   const onAddSuggestion = (s: GapSuggestion) => {
     setAddingId(s.id);
     gap.add(s);
   };
 
   // ───────── Deep links de prueba
-  const link = useLocalSearchParams<Link>();
   useEffect(() => {
     if (!link.at) return;
     if (link.at === 'real') useClockStore.getState().reset();
@@ -535,7 +550,8 @@ export default function NowTab() {
 
   // Un solo aviso (sin conexión > lluvia > propuestas).
   const notice = pickNotice({
-    offlineMinutesAgo: cache.offline ? cache.minutesAgo : null,
+    // ?do=offline (solo dev): muestra el aviso como si se hubiera caído la red.
+    offlineMinutesAgo: cache.offline || (__DEV__ && link.do === 'offline') ? cache.minutesAgo : null,
     rain,
     proposalsCount: proposals.data?.length ?? 0,
   });
@@ -562,17 +578,17 @@ export default function NowTab() {
           <Countdown
             text={cd?.text ?? ''}
             urgency={hero.urgency}
-            sub={`${formatMinutes(hero.eta.minutes)} ${hero.eta.mode === 'walk' ? 'a pie' : 'en transporte'}`}
+            sub={`${cd && /^\d+:\d\d$/.test(cd.text) ? 'Para salir · ' : ''}${formatMinutes(hero.eta.minutes)} ${hero.eta.mode === 'walk' ? 'a pie' : 'en transporte'}`}
           />
         }
-        map={hasCoords(b) ? <MiniRoute from={here} to={{ lat: b.lat, lng: b.lng }} /> : null}
+        map={hasCoords(b) ? <MiniRoute from={here} to={{ lat: b.lat, lng: b.lng }} height={110} /> : null}
         faces={faces(b)}
         title={b.title}
         placeName={b.place_name}
         startLabel={clock(hero.next.start)}
         onDirections={() => (hasCoords(b) ? openDirections(b) : undefined)}
         onLate={hero.urgency !== 'ok' ? () => setLateOpen(true) : undefined}
-        note={alertNote}
+        note={hero.urgency === 'late' ? null : alertNote}
         onPress={() => openBlock(tripId, b.id)}
         onLongPress={talkShortcut(b)}
       />
@@ -672,8 +688,10 @@ export default function NowTab() {
           </View>
 
           {preview ? <PreviewChip onExit={() => useClockStore.getState().reset()} /> : null}
+          {/* Sin conexión va arriba (cambia cómo leer todo lo demás); lluvia y propuestas, abajo. */}
+          {notice?.kind === 'offline' ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
 
-          {line.text || line.loading ? <ScoutLine text={line.text ?? ''} loading={line.loading} onPress={onScoutLine} /> : null}
+          {hero.kind !== 'state' && (line.text || line.loading) ? <ScoutLine text={line.text ?? ''} loading={line.loading} onPress={onScoutLine} /> : null}
 
           {rail.length ? (
             <View style={styles.rail}>
@@ -685,7 +703,7 @@ export default function NowTab() {
 
           {protagonist}
           {nextRow}
-          {notice ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
+          {notice && notice.kind !== 'offline' ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
         </ScrollView>
         <ActionToast bottom={DOCK_SPACE + space.sm} />
         {dock}

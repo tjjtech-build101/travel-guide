@@ -34,7 +34,7 @@ export function Countdown({ text, urgency, sub }: Props) {
 }
 
 const styles = StyleSheet.create({
-  box: { borderRadius: radius.lg, paddingVertical: space.lg, paddingHorizontal: space.xl, alignItems: 'flex-start' },
-  big: { fontSize: 48, lineHeight: 56, fontWeight: '700', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
-  sub: { marginTop: space.xs, fontSize: font.body, fontWeight: '600', opacity: 0.85 },
+  box: { borderRadius: radius.lg, paddingVertical: space.md, paddingHorizontal: space.lg, alignItems: 'flex-start' },
+  big: { fontSize: 44, lineHeight: 52, fontWeight: '700', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
+  sub: { marginTop: 0, fontSize: font.body, fontWeight: '600', opacity: 0.85 },
 });

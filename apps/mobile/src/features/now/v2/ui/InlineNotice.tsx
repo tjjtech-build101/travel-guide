@@ -50,7 +50,8 @@ export function InlineNotice({ notice, onPress, onDismiss }: Props) {
         <s.Icon color={s.fg} size={20} />
         <Text style={[styles.text, { color: s.fg }]} numberOfLines={1}>
           {main}
-          {action ? <Text style={styles.action}> · {action}</Text> : null}
+          {action ? ' · ' : null}
+          {action ? <Text style={styles.action}>{action}</Text> : null}
         </Text>
       </Pressable>
       {onDismiss ? (

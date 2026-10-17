@@ -1,11 +1,11 @@
-// Protagonista "salí para": cuenta regresiva grande, destino, minirruta y quién va.
+// Protagonista "salí para": cuenta regresiva grande (sin kicker: el número ya lo dice), destino, quién va y minirruta.
 // Countdown, mapa y caras llegan como slots (los arma otro carril).
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '../../../../ui/Text';
 import { colors, font, space } from '../../../../ui/theme';
-import { HeroActions, HeroCard, heroText, Kicker } from './HeroState';
+import { HeroActions, HeroCard, heroText } from './HeroState';
 
 type Props = {
   countdown: ReactNode;
@@ -28,7 +28,6 @@ export function HeroLeave({ countdown, map, faces, title, placeName, startLabel,
   const where = [placeName, startLabel].filter(Boolean).join(' · ');
   return (
     <HeroCard onPress={onPress} onLongPress={onLongPress} accessibilityLabel={`Salí para ${title}${where ? `, ${where}` : ''}`}>
-      <Kicker>SALÍ PARA</Kicker>
       {countdown}
       <View style={styles.text}>
         <Text style={heroText.title} numberOfLines={2}>
@@ -40,7 +39,6 @@ export function HeroLeave({ countdown, map, faces, title, placeName, startLabel,
           </Text>
         ) : null}
       </View>
-      {map ? <View style={styles.slot}>{map}</View> : null}
       {faces ? <View>{faces}</View> : null}
       {note ? (
         <Text style={styles.note} numberOfLines={1}>
@@ -51,12 +49,13 @@ export function HeroLeave({ countdown, map, faces, title, placeName, startLabel,
         primary={{ label: 'Cómo llego', onPress: onDirections, hint: 'Abre el mapa con indicaciones' }}
         secondary={onLate ? { label: 'Voy tarde', onPress: onLate, hint: 'Avisá al grupo o mové el bloque' } : null}
       />
+      {map ? <View style={styles.slot}>{map}</View> : null}
     </HeroCard>
   );
 }
 
 const styles = StyleSheet.create({
   text: { gap: 2 },
-  slot: { marginTop: space.xs },
+  slot: { marginTop: space.sm },
   note: { fontSize: font.tiny, color: colors.textMuted },
 });

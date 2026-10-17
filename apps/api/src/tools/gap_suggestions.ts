@@ -128,7 +128,7 @@ export function rankSuggestions(args: {
       lat: i.lat,
       lng: i.lng,
       walk_min: w,
-      why: ['De tu banco de ideas', walkText(w)].filter(Boolean).join(' · '),
+      why: ['Tu idea', walkText(w)].filter(Boolean).join(' · '),
       block_id: i.id,
       google_place_id: i.google_place_id,
       // Las ideas que eligió el grupo valen más que un lugar cualquiera.
