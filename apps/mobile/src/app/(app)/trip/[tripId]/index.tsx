@@ -42,9 +42,9 @@ import {
   ExpensesPlaceholder,
   parseSection,
   PlanningSectionBar,
-  ToursPlaceholder,
   type PlanningSection,
 } from '../../../../features/planning/sections';
+import { ToursTab } from '../../../../features/planning/ToursTab';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
@@ -55,6 +55,7 @@ import { colors, font, radius, space } from '../../../../ui/theme';
 
 export default function PlanningTab() {
   // Deep link: /trip/<id>?section=itinerary|events|tours|expenses
+  const tripId = useTripId();
   const { section: linkSection } = useLocalSearchParams<{ section?: string }>();
   const [section, setSection] = useState<PlanningSection>(() => parseSection(linkSection));
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function PlanningTab() {
       />
       {section === 'itinerary' ? <ItineraryView /> : null}
       {section === 'events' ? <EventsPlaceholder /> : null}
-      {section === 'tours' ? <ToursPlaceholder /> : null}
+      {section === 'tours' ? <ToursTab tripId={tripId} /> : null}
       {section === 'expenses' ? <ExpensesPlaceholder /> : null}
     </View>
   );
