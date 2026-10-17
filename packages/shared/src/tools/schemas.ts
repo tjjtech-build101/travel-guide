@@ -238,3 +238,15 @@ export type LookAtPhotoOutput = LookAtPhotoModelOutput & {
   /** ms por tramo (subida, cercanos, claude) para medir la latencia. */
   timings: Record<string, number>;
 };
+
+// ---------- research (voz: "no lo sé, lo averiguo y te cuento") ----------
+
+export const ResearchInput = z.object({
+  question: z.string().min(3).max(300).describe('La pregunta tal cual la hizo la persona, con el contexto necesario'),
+  place_id: Id.optional().describe('Si es sobre un lugar de place_library: los datos verificados se guardan ahí'),
+  place_name: z.string().max(200).optional().describe('Nombre del lugar, si la pregunta es sobre uno'),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  trip_id: Id.optional(),
+  language: z.string().min(2).max(8).optional(),
+});

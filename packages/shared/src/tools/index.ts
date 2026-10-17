@@ -8,6 +8,7 @@ import {
   GetDayPlanInput,
   GetTripOverviewInput,
   LookAtPhotoInput,
+  ResearchInput,
   MoveBlockInput,
   PlaceDetailsInput,
   PlanTripInput,
@@ -70,6 +71,11 @@ export const toolDefs = {
   undo: {
     description: 'Deshace una acción anterior a partir de su undo_token.',
     input: UndoInput,
+  },
+  research: {
+    description:
+      'Investiga en la web una pregunta que no podés responder con lo que tenés (año, origen, quién, curiosidad) y verifica cada dato contra su fuente. Trabajo en segundo plano (~30-60 s): devuelve { job_id }; la respuesta llega después. Nunca inventes mientras tanto.',
+    input: ResearchInput,
   },
   look_at_photo: {
     description:

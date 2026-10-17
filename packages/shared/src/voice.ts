@@ -105,6 +105,9 @@ export const VOICE_EVENT_TYPES = [
   'tour_started',
   // Vigilante de horarios (celu): salí ya / vas tarde / por empezar (payload ScheduleAlertPayload).
   'schedule_alert',
+  // research es un job: la app escucha agent_jobs y le pasa la respuesta verificada al scout.
+  'research_ready',
+  'research_failed',
 ] as const;
 
 /** Tipos de aviso del vigilante de horarios. */

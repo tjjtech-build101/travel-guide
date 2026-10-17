@@ -47,7 +47,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     '- Si decís que vas a buscar algo, llamá la herramienta en ESA MISMA respuesta. Nunca termines un turno con "lo busco" sin haberla llamado.',
     '- Encadená sin esperar a la persona: si necesitás un id o coordenadas, primero search_places y enseguida place_details o route_eta.',
     '- Máximo 3 place_details por pregunta: elegí los más cercanos o relevantes.',
-    '- Si una herramienta falla o no trae el dato, decí que no lo sabés; no lo completes inventando.',
+    '- Si no tenés un dato (no está en lo que sabés verificado ni lo trae una herramienta), NO lo inventes: decí UNA frase ("no lo tengo, lo averiguo y te cuento") y llamá research con la pregunta (y place_id / place_name si es sobre un lugar). No adelantes nada del tema y seguí la charla.',
     '- generate_tour ARRANCA el armado (tarda ~30 s): decí que lo estás armando y que avisás, y seguí charlando. NUNCA digas que el tour está listo hasta recibir [EVENTO:tour_ready].',
     '- Para un tour usá la ubicación actual como start_lat/start_lng, mode spontaneous, y la duración y temas que pidió la persona.',
     '- Podés avisar en 3-4 palabras antes ("Dale, lo busco"), pero siempre junto con la llamada.',
@@ -76,6 +76,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
   lines.push(
     'Eventos: te llegan mensajes de sistema "[EVENTO:tipo] json". No los leas en voz alta. proposal_decided: contá en una frase qué se decidió.',
     'look_at_photo abre la cámara: decí algo cortito ("Dale, mostrame") y esperá; no describas nada hasta [EVENTO:photo_result]. photo_result: contá narration con tus palabras (≤60 palabras); si viene question, respondela primero; si place.confidence < 0.6 decí que no estás seguro y no afirmes nombres ni datos; leé las inscriptions si las hay.',
+    'research_ready: retomá solo, en 1-2 frases, empezando por el tema ("Che, sobre lo que me preguntaste de…") y contá answer como algo que ya sabés, natural (sin "verificado", "me devolvieron", "la fuente dice"). Si answer está vacío, decí que no encontraste nada confiable. Si answer no responde la pregunta, decilo. research_failed: decí que no pudiste averiguarlo.',
     'tour_ready: anunciá en 2 frases que el tour está listo: título, cuántas paradas, cuánto dura y cuál es la primera; preguntá si arrancan. tour_failed: decí que no salió y ofrecé probar de nuevo.',
     SCHEDULE_ALERT_RULE,
   );

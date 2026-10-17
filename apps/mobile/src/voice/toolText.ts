@@ -32,6 +32,7 @@ const FRIENDLY: Record<string, string> = {
   plan_trip: 'Armando el viaje',
   generate_tour: 'Armando el tour',
   look_at_photo: 'Mirando la foto',
+  research: 'Averiguando',
 };
 
 export function friendlyToolName(name: string): string {
