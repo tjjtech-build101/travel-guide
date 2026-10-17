@@ -23,13 +23,13 @@ Regla: **no se arranca un P1 hasta que el P0 corra punta a punta.**
 | 00 | [Columna](prd/00-columna.md) | Columna / voz / nativo | — |
 | 01 | [Crear viaje conversacional](prd/01-crear-viaje-conversacional.md) | Cerebro y contenido | 00 |
 | 02 | [Pestaña Plan](prd/02-pestana-plan.md) | App y producto | 00 |
-| 03 | [Mapa 3D](prd/03-mapa-3d.md) | App y producto | 00 |
+| 03 | [Mapa 3D](prd/03-mapa-3d.md) 🟡 2D | App y producto | 00 |
 | 04 | [Multiplayer básico](prd/04-multiplayer-basico.md) | App y producto | 00 |
 | 05 | [Guía 1 a 1 por voz](prd/05-guia-1a1-por-voz.md) | Columna / voz / nativo | 00 |
 | 06 | [Generador de tours + contenido](prd/06-generador-de-tours-y-contenido.md) | Cerebro y contenido | 00 |
 | 07 | [Tour en vivo](prd/07-tour-en-vivo.md) | Columna / voz / nativo | 00, 05, 06 |
 | 08 | [Cámara a pedido](prd/08-camara-a-pedido.md) | Columna / voz / nativo | 00, 05 |
-| 09 | [Simulador de GPS / replay](prd/09-simulador-gps-replay.md) | Cerebro y contenido | 00 |
+| 09 | [Simulador de GPS / replay](prd/09-simulador-gps-replay.md) ✅ | Cerebro y contenido | 00 |
 | 10 | [Onboarding por voz + perfil](prd/10-onboarding-por-voz-y-perfil.md) | App y producto | 00, 05 |
 
 ### P1 — lo que hace que impresione

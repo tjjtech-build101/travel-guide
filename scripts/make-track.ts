@@ -9,25 +9,14 @@
  *   - heading: rumbo en grados (0 = norte); null mientras está parado en una parada
  *   - accuracy: metros (determinística, 4–8 m)
  *
- * Las coordenadas son las mismas que supabase/seed.sql (place_library). Si cambian allá, cambiarlas acá.
+ * Las coordenadas son CIUDAD_VIEJA_STOPS de packages/shared/src/demo.ts (= supabase/seed.sql, place_library).
  * Se reemplaza por el track grabado cuando exista.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const CIUDAD_VIEJA_STOPS = [
-  { name: 'Puerta de la Ciudadela', lat: -34.90674, lng: -56.20125 },
-  { name: 'Plaza Independencia', lat: -34.90661, lng: -56.1995 },
-  { name: 'Palacio Salvo', lat: -34.90598, lng: -56.1987 },
-  { name: 'Teatro Solís', lat: -34.90722, lng: -56.20056 },
-  { name: 'Peatonal Sarandí', lat: -34.9069, lng: -56.2025 },
-  { name: 'Plaza Matriz', lat: -34.9069, lng: -56.2052 },
-  { name: 'Catedral Metropolitana', lat: -34.9066, lng: -56.206 },
-  { name: 'Cabildo', lat: -34.90745, lng: -56.20525 },
-  { name: 'Museo Torres García', lat: -34.90697, lng: -56.2033 },
-  { name: 'Mercado del Puerto', lat: -34.9067, lng: -56.2128 },
-] as const;
+import { CIUDAD_VIEJA_STOPS } from '../packages/shared/src/demo';
 
 const SPEED_MPS = 1.3;
 /** Segundos parado en cada parada (para probar geofence + dwell). */

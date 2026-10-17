@@ -2,6 +2,8 @@ import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { appNow } from '../../features/now/clock';
+import { isTripInProgress } from '../../features/now/selectors';
 import { errorDetail, useMyTrips, type TripCard } from '../../features/trips/queries';
 import { formatDateRange } from '../../lib/format';
 import { AvatarStack } from '../../ui/Avatar';
@@ -51,7 +53,12 @@ function TripCardView({ trip }: { trip: TripCard }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Abrir ${trip.title}`}
-      onPress={() => router.push({ pathname: '/trip/[tripId]', params: { tripId: trip.id } })}
+      // Viaje en curso → abre en Ahora (PRD 19); si no, en Planificación.
+      onPress={() =>
+        isTripInProgress(trip, appNow())
+          ? router.push({ pathname: '/trip/[tripId]/now', params: { tripId: trip.id } })
+          : router.push({ pathname: '/trip/[tripId]', params: { tripId: trip.id } })
+      }
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
     >
       <Text style={styles.title}>{trip.title}</Text>

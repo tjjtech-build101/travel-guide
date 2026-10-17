@@ -1,9 +1,12 @@
-// Menú dev oculto (long-press en el título del header): usuario, LocationProvider, último fix, Realtime, salir.
+// Menú dev oculto (long-press en el título del header): usuario, LocationProvider + simulador de GPS (PRD 09),
+// último fix, Realtime, salir.
 import Constants from 'expo-constants';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../features/auth/AuthProvider';
+import { SimulatorPanel } from '../../features/gps/SimulatorPanel';
+import { ClockDevSection } from '../../features/now/ClockDevSection';
 import { env } from '../../lib/env';
 import { useLocationFix, useLocationProvider } from '../../location/LocationContext';
 import { useConnectionStore } from '../../realtime/connectionStore';
@@ -12,7 +15,7 @@ import { colors, font, radius, space } from '../../ui/theme';
 
 export default function DevMenu() {
   const { session, signOut } = useAuth();
-  const { kind, setKind, start, active } = useLocationProvider();
+  const { start, active } = useLocationProvider();
   const fix = useLocationFix();
   const realtime = useConnectionStore((s) => s.realtime);
   const realtimeError = useConnectionStore((s) => s.realtimeError);
@@ -30,17 +33,7 @@ export default function DevMenu() {
       </Section>
 
       <Section title="Ubicación">
-        <View style={styles.switchRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Ubicación simulada</Text>
-            <Text style={styles.muted}>{kind === 'simulated' ? 'Plaza Independencia (punto fijo)' : 'GPS real (expo-location)'}</Text>
-          </View>
-          <Switch
-            value={kind === 'simulated'}
-            onValueChange={(v) => setKind(v ? 'simulated' : 'real')}
-            accessibilityLabel="Usar ubicación simulada"
-          />
-        </View>
+        <SimulatorPanel />
         {!active ? (
           <Button
             label="Arrancar ubicación"
@@ -57,6 +50,8 @@ export default function DevMenu() {
           {fix ? JSON.stringify({ ...fix, t: new Date(fix.t).toISOString() }, null, 2) : 'Sin LocationFix todavía'}
         </Text>
       </Section>
+
+      <ClockDevSection />
 
       <Section title="Conexión">
         <Row label="Realtime" value={realtime + (realtimeError ? ` (${realtimeError})` : '')} />

@@ -2,7 +2,7 @@
 nro: 3
 prd: "03 · Mapa 3D"
 prioridad: P0
-estado: "Por hacer"
+estado: "En curso (2D mínimo hecho)"
 carril: "App y producto"
 tamano: "L (2-4h)"
 depende_de: "00"
@@ -11,6 +11,13 @@ notion_url: https://app.notion.com/p/3fc81924a5c681d28607d7e28a54447f
 ---
 
 # 🗺️ 03 · Mapa 3D
+
+> **Estado (sáb 17/10, decisión del sábado: 2D primero):** hecho el mínimo 2D.
+> - Pestaña Mapa: selector "Todo el viaje" / días (hoy por defecto, `?day=YYYY-MM-DD|trip` por deep link). Nivel viaje: un punto por tramo + líneas a los tramos siguientes (ramas paralelas). Nivel día: bloques numerados en orden (línea punteada "ruta aproximada", sin `route_eta`), chip "N sin ubicación" y paradas de los tours del día.
+> - **Tocar cualquier elemento** (pin o fila) → tarjeta con **"Hablar con Scout de esto"** → `useScout().startScoutCall({ focus, tripId, context })` (stub de `src/voice/useScout.ts`, lo implementa el PRD 05). `focus` = Contratos v1.1 (`block_id` / `google_place_id` / `lat`,`lng` / `label`). Mantener apretado el mapa → focus en esa coordenada.
+> - Mapbox (`@rnmapbox/maps`, ya en el dev build) **solo si hay `EXPO_PUBLIC_MAPBOX_TOKEN`**; sin token: aviso "Falta EXPO_PUBLIC_MAPBOX_TOKEN" + la lista de puntos (mismas acciones). Puck propio desde el `LocationProvider` (anda con el simulado).
+> - Lógica pura en `apps/mobile/src/features/map/model.ts` (`pnpm --filter mobile test:map`).
+> - Pendiente: probar el render de Mapbox con token real, 3D, capas, ficha de lugar, arrastrar, "Ver el día", vista dividida, `route_eta`.
 
 > 📌 Fuentes: [Producto](../PRODUCT.md) · [Arquitectura](../ARCHITECTURE.md) · [Contratos](../CONTRACTS.md). Requiere PRD 00 (y comparte estado con 02).
 

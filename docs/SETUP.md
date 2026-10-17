@@ -33,7 +33,7 @@ Para que la app use tu API local, en `apps/mobile/.env` poné `EXPO_PUBLIC_API_U
 ## 5. Reglas de trabajo
 - **Antes de programar:** leé `CLAUDE.md`, `docs/CONTRACTS.md` y tu PRD en `docs/prd/`. Tu Claude también.
 - **Una rama por PRD** (`prd-05-voz`, …), PRs chicos y merge a `main` seguido. Marcá el PRD en Notion: En curso → Hecho.
-- **Migraciones:** la red de FIUM bloquea Postgres, así que `supabase db push` no anda. Una migración nueva se crea en `supabase/migrations/`, se avisa al equipo y se pega en el SQL Editor (https://supabase.com/dashboard/project/veavkvhxmzzkgxhkqrub/sql/new). Una sola persona la aplica.
+- **Migraciones:** la red de FIUM bloquea Postgres, así que `supabase db push` no anda. Una migración nueva se crea en `supabase/migrations/`, se avisa al equipo y una sola persona la aplica: `pnpm db:bundle --since <version>` arma `supabase/.temp/bundle.sql` (una transacción que además la registra en `schema_migrations`), `pbcopy < supabase/.temp/bundle.sql` y se pega y corre en el SQL Editor (https://supabase.com/dashboard/project/veavkvhxmzzkgxhkqrub/sql/new). Para ver qué hay aplicado: `select version, name from supabase_migrations.schema_migrations order by 1;`.
 - **Deploy de la API:** `npx vercel deploy --prod --scope tjj-tech` desde la raíz (o pedíselo a Juan).
 - **Claude (Anthropic):** saldo muy chico en la key actual. Usá la cuenta del evento en cuanto esté. Probá con mocks y hacé pocas corridas reales.
 - **Ningún P1 hasta que el P0 corra de punta a punta.** Primer recorrido de punta a punta: 18:00.

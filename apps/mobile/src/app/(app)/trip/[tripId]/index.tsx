@@ -213,6 +213,7 @@ function ItineraryView() {
   const tripMenu = () =>
     showMenu(trip.data?.title, [
       { label: 'Grupo y actividad', onPress: () => openGroup(tripId) },
+      { label: 'Tu perfil', onPress: () => router.push('/profile') },
       {
         label: 'Exportar viaje a calendario',
         onPress: () =>

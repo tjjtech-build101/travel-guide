@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
+import { SimPill } from '../features/gps/SimPill';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
@@ -21,6 +22,7 @@ export default function RootLayout() {
               <StatusBar style="dark" />
               <RootNavigator />
               <ConnectionBanner />
+              <SimPill />
             </LocationContextProvider>
           </AuthProvider>
         </QueryClientProvider>
