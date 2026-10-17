@@ -7,6 +7,7 @@ import {
   GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
+  LookAtPhotoInput,
   MoveBlockInput,
   PlaceDetailsInput,
   PlanTripInput,
@@ -69,6 +70,11 @@ export const toolDefs = {
   undo: {
     description: 'Deshace una acción anterior a partir de su undo_token.',
     input: UndoInput,
+  },
+  look_at_photo: {
+    description:
+      'Mira una foto (Claude visión + GPS + orientación + lugares cercanos con datos verificados): qué lugar es, inscripciones y su traducción, y una narración corta. Guarda la foto en photos.',
+    input: LookAtPhotoInput,
   },
   plan_trip: {
     description:

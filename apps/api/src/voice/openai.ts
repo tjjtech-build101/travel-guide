@@ -8,9 +8,15 @@ const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
 const CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
 const TIMEOUT_MS = 8000;
 
+/**
+ * Herramientas del backend que la voz NO ve con su esquema completo: look_at_photo necesita la foto, así que la voz
+ * usa la versión reducida { question? } de VOICE_CLIENT_TOOLS (la app abre la cámara y llama al backend).
+ */
+export const VOICE_HIDDEN_TOOLS: readonly ToolName[] = ['look_at_photo'];
+
 /** Herramientas que ve la voz: las de Contratos con handler en la API. */
 export function voiceToolNames(exclude: readonly string[] = []): ToolName[] {
-  return TOOL_NAMES.filter((n) => typeof handlers[n] === 'function' && !exclude.includes(n));
+  return TOOL_NAMES.filter((n) => typeof handlers[n] === 'function' && !VOICE_HIDDEN_TOOLS.includes(n) && !exclude.includes(n));
 }
 
 export type VadConfig = {

@@ -197,3 +197,44 @@ export const EventsSearchInput = z.object({
   interests: z.array(z.string()).optional(),
   lang: z.string().default('es'),
 });
+
+// ---------- PRD 08 · look_at_photo ----------
+
+/** ~1,5 MB de base64 (la app manda JPEG 1280 px, calidad 0,6 ≈ 150-400 KB). */
+const MAX_IMAGE_BASE64 = 2_000_000;
+
+export const LookAtPhotoInput = z
+  .object({
+    /** La foto en el mismo pedido (JPEG base64, sin "data:"): la API la sube a Storage en paralelo con Claude. */
+    image_base64: z.string().min(100).max(MAX_IMAGE_BASE64).optional(),
+    /** Alternativa de Contratos: la foto ya subida a Storage (bucket photos). */
+    storage_path: z.string().min(3).optional(),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+    heading: z.number().min(0).max(360).nullable().optional().describe('Grados, norte verdadero; null si no hay brújula'),
+    accuracy: z.number().nullable().optional(),
+    question: z.string().max(300).optional().describe('"¿qué dice esa placa?"'),
+    trip_id: Id.optional(),
+    tour_id: Id.optional(),
+    taken_at: z.string().optional(),
+    language: z.string().min(2).max(8).optional().describe('Idioma de la narración (default: perfil)'),
+  })
+  .refine((v) => !!v.image_base64 !== !!v.storage_path, { message: 'Mandá image_base64 o storage_path (uno de los dos)' });
+
+export const LookAtPhotoModelOutput = z.object({
+  narration: z.string().describe('≤60 palabras, para decir en voz alta'),
+  place: z
+    .object({ place_id: z.string().nullable(), name: z.string(), confidence: z.number().min(0).max(1) })
+    .nullable(),
+  inscriptions: z.array(z.object({ original: z.string(), language: z.string(), translation: z.string().nullable() })),
+  facts_used: z.array(z.object({ text: z.string(), source_url: z.string() })),
+  quality: z.enum(['ok', 'blurry', 'dark']),
+});
+export type LookAtPhotoModelOutput = z.infer<typeof LookAtPhotoModelOutput>;
+
+export type LookAtPhotoOutput = LookAtPhotoModelOutput & {
+  photo_id: string | null;
+  storage_path: string | null;
+  /** ms por tramo (subida, cercanos, claude) para medir la latencia. */
+  timings: Record<string, number>;
+};

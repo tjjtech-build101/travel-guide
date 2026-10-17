@@ -50,7 +50,8 @@ export function useAgentJob(jobId: string | undefined) {
       await supabase.realtime.setAuth(data.session?.access_token ?? null);
       if (cancelled) return;
       channel = supabase
-        .channel(`job:${jobId}`)
+        // Nombre único: dos componentes mirando el mismo job (o un remount) reusarían un canal ya suscripto.
+        .channel(`job:${jobId}:${Math.random().toString(36).slice(2, 8)}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'agent_jobs', filter: `id=eq.${jobId}` }, (payload) => {
           qc.setQueryData(key, payload.new as AgentJobRow);
         })

@@ -5,7 +5,8 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'r
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../../ui/Button';
-import { CaptionsIcon, HandIcon, HangUpIcon, MicIcon, SpeakerIcon } from '../../ui/icons';
+import { CameraIcon, CaptionsIcon, HandIcon, HangUpIcon, MicIcon, SpeakerIcon } from '../../ui/icons';
+import { camera } from '../camera/cameraStore';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore, type Line } from '../store';
 import { friendlyToolName } from '../toolBridge';
@@ -162,6 +163,9 @@ function Controls() {
         </Round>
         <Round label={ptt ? 'Por turnos (anti eco). Tocá para micrófono abierto' : 'Micrófono abierto. Tocá para hablar por turnos'} on={ptt} onPress={() => st.setTurnTaking(!ptt)}>
           <HandIcon color="#fff" />
+        </Round>
+        <Round label="Mostrarle algo con la cámara" on={false} onPress={() => camera.open({ source: 'button' })}>
+          <CameraIcon color="#fff" />
         </Round>
         <Round label={captions ? 'Ocultar subtítulos' : 'Mostrar subtítulos'} on={captions} onPress={() => st.setCaptions(!captions)}>
           <CaptionsIcon color="#fff" />
