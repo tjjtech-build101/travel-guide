@@ -31,6 +31,8 @@ type LocationContextValue = {
   simStops: NamedPoint[];
   /** Carga un track en el simulador y lo recuerda entre reinicios. */
   loadSimTrack: (track: TrackPoint[], label: string, stops?: NamedPoint[]) => void;
+  /** Modo demo (`?loc=near`): pasa al simulado y lo deja quieto en ese punto (no se recuerda entre reinicios). */
+  placeSimulatedAt: (lat: number, lng: number, label?: string) => void;
 };
 
 const STORAGE_KEY = 'location.provider.kind';
@@ -55,6 +57,8 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
   const [kind, setKindState] = useState<Kind>('real');
   const [active, setActive] = useState(false);
   const [simStops, setSimStops] = useState<NamedPoint[]>(SEED_STOPS);
+  // Si el modo demo ya ubicó el simulador, el track guardado (que carga async) no lo pisa.
+  const placed = useRef(false);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
@@ -65,6 +69,7 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
     // Track del simulador: el último cargado o, si no hay, el del seed (pausado en t=0).
     AsyncStorage.getItem(SIM_KEY)
       .then((raw) => {
+        if (placed.current) return;
         const stored = raw ? (JSON.parse(raw) as SimStored) : null;
         const parsed = stored ? parseTrack(stored.track) : null;
         if (stored && parsed?.ok) {
@@ -75,7 +80,9 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
           simulator.load(seedTrack(), SEED_TRACK_LABEL);
         }
       })
-      .catch(() => simulator.load(seedTrack(), SEED_TRACK_LABEL));
+      .catch(() => {
+        if (!placed.current) simulator.load(seedTrack(), SEED_TRACK_LABEL);
+      });
   }, [simulator]);
 
   // Recordar la velocidad elegida.
@@ -102,6 +109,23 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
       AsyncStorage.setItem(SIM_KEY, JSON.stringify(stored)).catch(() => {});
     },
     [simulator],
+  );
+
+  const placeSimulatedAt = useCallback(
+    (lat: number, lng: number, label?: string) => {
+      placed.current = true;
+      simulator.placeAt(lat, lng, label);
+      if (kind !== 'simulated') {
+        providers[kind].stop();
+        setKindState('simulated');
+        AsyncStorage.setItem(STORAGE_KEY, 'simulated').catch(() => {});
+      }
+      simulator
+        .start()
+        .then(() => setActive(true))
+        .catch(() => {});
+    },
+    [simulator, kind, providers],
   );
 
   const start = useCallback(async (which?: Kind): Promise<Error | null> => {
@@ -131,8 +155,8 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => Object.values(providers).forEach((p) => p.stop()), [providers]);
 
   const value = useMemo(
-    () => ({ provider: providers[kind], kind, setKind, start, active, simulator, simStops, loadSimTrack }),
-    [providers, kind, setKind, start, active, simulator, simStops, loadSimTrack],
+    () => ({ provider: providers[kind], kind, setKind, start, active, simulator, simStops, loadSimTrack, placeSimulatedAt }),
+    [providers, kind, setKind, start, active, simulator, simStops, loadSimTrack, placeSimulatedAt],
   );
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
 }
