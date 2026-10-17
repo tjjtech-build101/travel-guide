@@ -22,6 +22,16 @@ export function MapIcon({ color, size = 24 }: IconProps) {
   );
 }
 
+/** Vista Ahora: brújula (lo del scout en la calle). */
+export function NowIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Circle cx={12} cy={12} r={9} />
+      <Path d="M15.5 8.5l-2 5-5 2 2-5z" />
+    </Svg>
+  );
+}
+
 export function GroupIcon({ color, size = 24 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

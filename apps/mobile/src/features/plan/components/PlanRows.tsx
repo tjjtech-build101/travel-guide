@@ -1,5 +1,5 @@
 // Filas y piezas del encabezado del Plan.
-import type { DayRow } from '@build101/shared';
+import { SCOUT, type DayRow } from '@build101/shared';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { formatDateRange, formatDay } from '../../../lib/format';
@@ -95,7 +95,7 @@ export function ProposalBanner({ count, onPress }: { count: number; onPress: () 
     >
       <SparkIcon color={colors.ghost} />
       <Text style={styles.bannerText}>
-        El compañero propone {count} {count === 1 ? 'cambio' : 'cambios'}
+        {SCOUT.name} propone {count} {count === 1 ? 'cambio' : 'cambios'}
       </Text>
       <Text style={styles.bannerLink}>Ver</Text>
     </Pressable>

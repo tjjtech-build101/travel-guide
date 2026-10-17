@@ -1,8 +1,9 @@
-// Tab Plan (PRD 02): línea de tiempo por tramo y día, filtros, tramos paralelos, ideas, propuestas y alertas.
+// Vista Planificación (decisiones del sábado): pestañas internas Itinerario · Eventos · Tours · Gastos.
+// Itinerario = Plan del PRD 02: línea de tiempo por tramo y día, filtros, tramos paralelos, ideas, propuestas y alertas.
 import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
@@ -36,6 +37,14 @@ import {
 import { buildPlanSections, selectBranch, type PlanBlock, type PlanRow } from '../../../../features/plan/selectors';
 import { exportIcs, shareDay } from '../../../../features/plan/share';
 import { usePlanMapStore } from '../../../../features/plan/store';
+import {
+  EventsPlaceholder,
+  ExpensesPlaceholder,
+  parseSection,
+  PlanningSectionBar,
+  ToursPlaceholder,
+  type PlanningSection,
+} from '../../../../features/planning/sections';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
@@ -43,7 +52,37 @@ import { Button } from '../../../../ui/Button';
 import { EmptyState, ErrorState } from '../../../../ui/States';
 import { colors, font, radius, space } from '../../../../ui/theme';
 
-export default function PlanTab() {
+export default function PlanningTab() {
+  // Deep link: /trip/<id>?section=itinerary|events|tours|expenses
+  const { section: linkSection } = useLocalSearchParams<{ section?: string }>();
+  const [section, setSection] = useState<PlanningSection>(() => parseSection(linkSection));
+  useEffect(() => {
+    if (linkSection) setSection(parseSection(linkSection));
+  }, [linkSection]);
+
+  return (
+    <View style={styles.flex}>
+      <PlanningSectionBar
+        value={section}
+        onChange={(s) => {
+          void Haptics.selectionAsync().catch(() => {});
+          setSection(s);
+        }}
+      />
+      {section === 'itinerary' ? <ItineraryView /> : null}
+      {section === 'events' ? <EventsPlaceholder /> : null}
+      {section === 'tours' ? <ToursPlaceholder /> : null}
+      {section === 'expenses' ? <ExpensesPlaceholder /> : null}
+    </View>
+  );
+}
+
+/** Grupo salió de las tabs principales (multiplayer fuera del MVP): queda como acceso secundario. */
+function openGroup(tripId: string) {
+  router.push({ pathname: '/group/[tripId]', params: { tripId } });
+}
+
+function ItineraryView() {
   const tripId = useTripId();
   const me = useMe();
   const trip = useTrip(tripId);
@@ -173,6 +212,7 @@ export default function PlanTab() {
 
   const tripMenu = () =>
     showMenu(trip.data?.title, [
+      { label: 'Grupo y actividad', onPress: () => openGroup(tripId) },
       {
         label: 'Exportar viaje a calendario',
         onPress: () =>

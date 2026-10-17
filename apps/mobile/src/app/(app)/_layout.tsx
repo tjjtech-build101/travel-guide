@@ -37,6 +37,8 @@ export default function AppLayout() {
       {/* El shell del viaje dibuja su propio header (título del viaje) desde las tabs. */}
       <Stack.Screen name="trip/[tripId]" options={{ headerShown: false }} />
       <Stack.Screen name="dev" options={{ presentation: 'modal', title: 'Menú dev' }} />
+      {/* Grupo: acceso secundario desde el "⋯" de Planificación (multiplayer fuera del MVP). */}
+      <Stack.Screen name="group/[tripId]" options={{ title: 'Grupo y actividad', headerBackTitle: 'Viaje' }} />
       {/* PRD 02 · sheets del Plan (detalle/edición, crear, propuestas, traer del banco). */}
       <Stack.Screen name="plan/block/[blockId]" options={PLAN_SHEET} />
       <Stack.Screen name="plan/new" options={PLAN_SHEET} />
