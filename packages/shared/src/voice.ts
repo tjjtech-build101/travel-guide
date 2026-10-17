@@ -172,6 +172,17 @@ export const VOICE_CLIENT_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    type: 'function' as const,
+    name: 'look_at_photo',
+    description:
+      'Abre la cámara para que la persona te muestre algo ("mirá esto", "¿qué es eso?", "¿qué dice esa placa?"). Devuelve enseguida {status:"capturing"}: NO narres nada todavía; el resultado te llega después como [EVENTO:photo_result].',
+    parameters: {
+      type: 'object',
+      properties: { question: { type: 'string', description: 'Lo que preguntó la persona, si preguntó algo concreto' } },
+      additionalProperties: false,
+    },
+  },
 ];
 
 /**
