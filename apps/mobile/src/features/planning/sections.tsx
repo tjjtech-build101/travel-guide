@@ -1,6 +1,6 @@
-// Vista Planificación (decisiones del sábado): pestañas internas Itinerario · Eventos · Tours · Gastos.
-// Itinerario es el Plan del PRD 02. Eventos (PRD 16) y Tours (PRD 06/18) son placeholders con estado vacío
-// claro hasta que lleguen sus PRDs. Gastos (PRD 23) queda oculto detrás de FEATURES.expenses.
+// Vista Planificación (decisiones del sábado): pestañas internas Itinerario · Tours · Gastos.
+// Itinerario es el Plan del PRD 02. Tours (PRD 06/18) ya lista datos reales (ver ToursTab.tsx).
+// Gastos (PRD 23) queda oculto detrás de FEATURES.expenses.
 import { SCOUT } from '@build101/shared';
 import { StyleSheet, View } from 'react-native';
 
@@ -9,12 +9,11 @@ import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { Segmented } from '../plan/components/Controls';
 
-export type PlanningSection = 'itinerary' | 'events' | 'tours' | 'expenses';
+export type PlanningSection = 'itinerary' | 'tours' | 'expenses';
 
 export function planningSections(features: { expenses: boolean } = FEATURES): { value: PlanningSection; label: string }[] {
   return [
     { value: 'itinerary', label: 'Itinerario' },
-    { value: 'events', label: 'Eventos' },
     { value: 'tours', label: 'Tours' },
     ...(features.expenses ? [{ value: 'expenses' as const, label: 'Gastos' }] : []),
   ];
@@ -44,16 +43,6 @@ function Placeholder({ title, body, foot }: { title: string; body: string; foot:
         <Text style={styles.foot}>{foot}</Text>
       </View>
     </View>
-  );
-}
-
-export function EventsPlaceholder() {
-  return (
-    <Placeholder
-      title="Eventos para tu viaje"
-      body={`${SCOUT.name} va a buscar recitales, ferias y muestras de las fechas y ciudades del viaje, según lo que te gusta.`}
-      foot="Todavía no hay eventos recomendados."
-    />
   );
 }
 

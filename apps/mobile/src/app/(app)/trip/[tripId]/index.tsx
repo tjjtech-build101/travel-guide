@@ -38,7 +38,6 @@ import { buildPlanSections, selectBranch, type PlanBlock, type PlanRow } from '.
 import { exportIcs, shareDay } from '../../../../features/plan/share';
 import { usePlanMapStore } from '../../../../features/plan/store';
 import {
-  EventsPlaceholder,
   ExpensesPlaceholder,
   parseSection,
   PlanningSectionBar,
@@ -72,7 +71,6 @@ export default function PlanningTab() {
         }}
       />
       {section === 'itinerary' ? <ItineraryView /> : null}
-      {section === 'events' ? <EventsPlaceholder /> : null}
       {section === 'tours' ? <ToursTab tripId={tripId} /> : null}
       {section === 'expenses' ? <ExpensesPlaceholder /> : null}
     </View>
