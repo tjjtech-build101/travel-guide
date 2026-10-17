@@ -1,6 +1,6 @@
 // Function calls del modelo → POST /tools/:name con x-actor: agent (PRD 05). En paralelo, timeout 12 s por herramienta;
 // el store manda todos los function_call_output y UN solo response.create al final.
-import { isToolName, type ToolResponse } from '@build101/shared';
+import type { ToolName, ToolResponse } from '@build101/shared';
 
 import { callTool } from '../lib/api';
 import { parseArgs } from './toolText';
@@ -34,13 +34,12 @@ async function runOne(call: FunctionCall): Promise<CallResult> {
       return { call, input, res: { ok: false, error: { code: 'local_error', message: e instanceof Error ? e.message : String(e) } } };
     }
   }
-  if (!isToolName(call.name)) {
-    return { call, input, res: { ok: false, error: { code: 'unknown_tool', message: `No existe la herramienta ${call.name}.` } } };
-  }
+  // Sin filtro local: las herramientas de la sesión las define el servidor y él valida (si el bundle de la app quedó
+  // viejo, una herramienta nueva como research se rechazaba acá sin llegar nunca a la API).
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TOOL_TIMEOUT_MS);
   try {
-    const res = await callTool(call.name, input as never, { actor: 'agent', signal: ctrl.signal });
+    const res = await callTool(call.name as ToolName, input as never, { actor: 'agent', signal: ctrl.signal });
     if (!res.ok && ctrl.signal.aborted) {
       return { call, input, res: { ok: false, error: { code: 'timeout', message: 'La herramienta tardó demasiado.' } } };
     }
