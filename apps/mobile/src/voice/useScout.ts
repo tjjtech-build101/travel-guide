@@ -1,31 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // useScout(): interfaz única de la app para hablar con el Scout (voz 1 a 1, PRD 05).
+// La usan la vista Ahora (PRD 19), el Plan ("Hablar de esto") y el Mapa (PRD 03). Firmas estables.
 //
-// ESTADO: STUB. La implementación real (OpenAI Realtime por WebRTC) la hace el PRD 05 (Tomás).
-// La vista Ahora (PRD 19), el Plan ("Hablar de esto") y el Mapa ya llaman a esta interfaz:
-// para conectar la voz alcanza con reemplazar el cuerpo de `startScoutCall` / `endScoutCall` y
-// mover `state` según los eventos de la sesión, SIN cambiar las firmas.
-//
-// Contrato esperado de la implementación real:
-//  - startScoutCall({ focus, tripId, mode, tourId, context })
-//      1. state = 'connecting'
-//      2. POST /voice/session { mode, trip_id: tripId, tour_id: tourId, focus }  (Contratos v1.1)
-//         → { client_secret, session_config, voice_session_id }
-//      3. Conecta WebRTC. Si viene `context` (p. ej. el bloque de "Hablar de esto"), después de
-//         conectar manda un conversation.item.create de sistema con el JSON y pide response.create
-//         (PRD 19, notas técnicas).
-//      4. Mientras dura: 'listening' (mic abierto, el usuario habla) · 'thinking' (esperando
-//         respuesta o corriendo una herramienta) · 'speaking' (el Scout está hablando).
-//      5. Si falla: state = 'error' y `error` con un texto para mostrar (voseo).
-//  - endScoutCall(): corta, POST /voice/session/:id/end { transcript } y state = 'idle'.
-//  - `available`: true cuando la voz está implementada y configurada (la UI muestra "pronto" si es false).
-//
-// El estado vive en un store global (zustand): cualquier pantalla que muestre el ScoutAvatar ve
-// el mismo estado de la llamada en curso.
+// Implementación: delega en el store de la llamada (voice/store.ts: OpenAI Realtime por WebRTC) y
+// traduce su estado a ScoutState para el avatar:
+//   connecting/reconnecting → 'connecting' · el scout suena → 'speaking'
+//   herramienta corriendo o respuesta en curso → 'thinking' · resto de la llamada → 'listening'
+//  - startScoutCall({ focus, tripId, mode, tourId, context }): pide el micrófono si hace falta,
+//    POST /voice/session { mode, trip_id, tour_id, focus, location }, conecta y, si viene `context`,
+//    lo manda como mensaje de sistema antes del saludo (la primera frase ya habla de eso).
+//  - endScoutCall(): corta, POST /voice/session/:id/end { transcript } y muestra el resumen.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-import { SCOUT } from '@build101/shared';
-import { Alert } from 'react-native';
 import { create } from 'zustand';
+
+import { env } from '../lib/env';
+import { useVoiceStore, type VoiceStore } from './store';
 
 /** Estado de la llamada con el Scout. ScoutAvatar dibuja 'listening' | 'speaking' | 'thinking'. */
 export type ScoutState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error';
@@ -71,7 +60,7 @@ type ScoutStore = {
 };
 
 export const useScoutStore = create<ScoutStore>(() => ({
-  available: false,
+  available: !!env.apiUrl,
   state: 'idle',
   error: null,
   focus: null,
@@ -82,30 +71,47 @@ export function previewScoutState(state: ScoutState) {
   useScoutStore.setState({ state });
 }
 
-// ───────── STUB (reemplazar en PRD 05)
-
-let stubTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function startScoutCallStub(opts: StartScoutCallOptions = {}): Promise<void> {
-  if (stubTimer) clearTimeout(stubTimer);
-  useScoutStore.setState({ state: 'thinking', error: null, focus: opts.focus ?? null });
-  stubTimer = setTimeout(() => {
-    useScoutStore.setState({ state: 'idle' });
-    Alert.alert(
-      `La voz de ${SCOUT.name} llega muy pronto`,
-      opts.focus?.label
-        ? `Cuando esté lista, ${SCOUT.name} va a arrancar hablando de "${opts.focus.label}".`
-        : `Cuando esté lista, vas a poder hablar con ${SCOUT.name} desde acá.`,
-    );
-  }, 1200);
+/** Estado de la llamada (voice/store) → estado del avatar. */
+export function scoutStateOf(v: Pick<VoiceStore, 'status' | 'speaking' | 'responding' | 'toolsRunning'>): ScoutState {
+  switch (v.status) {
+    case 'connecting':
+    case 'reconnecting':
+      return 'connecting';
+    case 'error':
+      return 'error';
+    case 'live':
+      if (v.speaking === 'assistant') return 'speaking';
+      if (v.toolsRunning.length || (v.responding && v.speaking !== 'user')) return 'thinking';
+      return 'listening';
+    default:
+      return 'idle';
+  }
 }
 
-async function endScoutCallStub(): Promise<void> {
-  if (stubTimer) clearTimeout(stubTimer);
-  useScoutStore.setState({ state: 'idle', focus: null });
+// Sincroniza useScoutStore con la llamada (lo leen el avatar de Ahora y el menú dev).
+useVoiceStore.subscribe((v) => {
+  const next = {
+    state: scoutStateOf(v),
+    error: v.status === 'error' ? (v.error?.message ?? 'No pude conectar') : null,
+    focus: v.status === 'idle' ? null : ((v.args?.focus as ScoutFocus | undefined) ?? null),
+  };
+  const cur = useScoutStore.getState();
+  if (cur.state !== next.state || cur.error !== next.error || cur.focus !== next.focus) useScoutStore.setState(next);
+});
+
+async function startScoutCall(opts: StartScoutCallOptions = {}): Promise<void> {
+  await useVoiceStore.getState().requestCall({
+    mode: opts.mode ?? 'chat',
+    tripId: opts.tripId ?? null,
+    tourId: opts.tourId ?? null,
+    focus: opts.focus,
+    context: opts.context,
+  });
 }
 
-// ─────────
+async function endScoutCall(): Promise<void> {
+  await useVoiceStore.getState().endCall();
+}
 
 export function useScout(): UseScout {
   const available = useScoutStore((s) => s.available);
@@ -118,7 +124,7 @@ export function useScout(): UseScout {
     error,
     focus,
     inCall: state === 'connecting' || state === 'listening' || state === 'thinking' || state === 'speaking',
-    startScoutCall: startScoutCallStub,
-    endScoutCall: endScoutCallStub,
+    startScoutCall,
+    endScoutCall,
   };
 }

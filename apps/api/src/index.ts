@@ -6,6 +6,8 @@ import { requireAuth, type AuthVars } from './auth';
 import { env, missingSupabaseEnv } from './env';
 import { dbError } from './errors';
 import { runTool } from './tools/registry';
+import { realtimeModel } from './voice/openai';
+import { voiceRoutes } from './voice/routes';
 
 const app = new Hono<{ Variables: AuthVars }>();
 
@@ -22,6 +24,7 @@ app.get('/health', (c) => {
     google: !!e.GOOGLE_MAPS_API_KEY,
     anthropic: !!e.ANTHROPIC_API_KEY,
     openai: !!e.OPENAI_API_KEY,
+    realtime_model: realtimeModel(),
     tools: TOOL_NAMES,
   });
 });
@@ -48,6 +51,9 @@ app.post('/tools/:name', requireAuth, async (c) => {
   const { status, body: out } = await runTool(c.req.param('name'), body, c.get('ctx'));
   return c.json(out, status as 200);
 });
+
+// Voz (PRD 05): token temporal de OpenAI Realtime y cierre con resumen.
+app.route('/voice', voiceRoutes());
 
 app.get('/jobs/:id', requireAuth, async (c) => {
   const { db } = c.get('ctx'); // RLS: dueño del job o miembro del viaje

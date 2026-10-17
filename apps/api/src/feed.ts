@@ -1,6 +1,6 @@
 // activity_feed: toda escritura deja exactamente 1 fila deshacible (+ busy_changed si tocó privados).
 import { randomBytes } from 'node:crypto';
-import type { FeedKind } from '@build101/shared';
+import { SCOUT, type FeedKind } from '@build101/shared';
 import type { Db } from './supabase';
 import type { ToolCtx } from './tools/types';
 import type { Op, Touched } from './blocks';
@@ -69,7 +69,7 @@ export function fmtDay(date: string | null | undefined): string {
 }
 
 export async function actorLabel(ctx: ToolCtx): Promise<string> {
-  if (ctx.actor === 'agent') return 'El asistente';
+  if (ctx.actor === 'agent') return SCOUT.name;
   const { data } = await ctx.admin.from('profiles').select('display_name').eq('id', ctx.userId).maybeSingle();
   return (data?.display_name as string | undefined)?.split(' ')[0] || 'Alguien';
 }

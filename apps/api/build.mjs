@@ -29,6 +29,8 @@ writeFileSync(
     shouldAddHelpers: false,
     supportsResponseStreaming: true,
     maxDuration: 300,
+    // São Paulo: al lado de Supabase (sa-east-1). En iad1 cada consulta cruzaba el continente (contexto de voz 2,3 s → ~0,3 s).
+    regions: [process.env.API_REGION || 'gru1'],
   }),
 );
 writeFileSync(`${out}/config.json`, JSON.stringify({ version: 3, routes: [{ src: '/(.*)', dest: '/index' }] }));

@@ -17,6 +17,7 @@ import { SimPill } from '../features/gps/SimPill';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
 import { ConnectionBanner } from '../ui/ConnectionBanner';
+import { VoiceProvider } from '../voice/VoiceProvider';
 import { setFontsReady } from '../ui/Text';
 import { colors, fonts } from '../ui/theme';
 
@@ -37,7 +38,9 @@ export default function RootLayout() {
           <AuthProvider>
             <LocationContextProvider>
               <StatusBar style="dark" />
-              <RootNavigator />
+              <VoiceProvider>
+                <RootNavigator />
+              </VoiceProvider>
               <ConnectionBanner />
               <SimPill />
             </LocationContextProvider>
