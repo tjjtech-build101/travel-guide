@@ -1,5 +1,5 @@
 // Google Routes computeRoutes (pares en paralelo) + estimación por distancia si no hay key.
-import { distanceMeters, type RouteMode } from '@build101/shared';
+import { distanceMeters, type RouteDetail, type RouteMode, type RouteStepDetail } from '@build101/shared';
 import { env } from '../env';
 import { badInput, notConfigured } from '../errors';
 import { cached } from './cache';
@@ -159,6 +159,22 @@ const VEHICLE: Record<string, TransitPlan['lines'][number]['vehicle']> = {
 
 const secs = (d: string | undefined) => Number.parseFloat((d ?? '0s').replace('s', '')) || 0;
 
+/** transitDetails de un paso de Google → línea (null si no tiene nombre). */
+function transitLine(t: NonNullable<GStep['transitDetails']>): TransitPlan['lines'][number] | null {
+  const name = t.transitLine?.nameShort || t.transitLine?.name;
+  if (!name) return null;
+  return {
+    name,
+    vehicle: VEHICLE[t.transitLine?.vehicle?.type ?? ''] ?? 'other',
+    from_stop: t.stopDetails?.departureStop?.name,
+    to_stop: t.stopDetails?.arrivalStop?.name,
+    departure: hhmm(t.localizedValues?.departureTime?.time?.text, t.stopDetails?.departureTime),
+    arrival: hhmm(t.localizedValues?.arrivalTime?.time?.text, t.stopDetails?.arrivalTime),
+    headsign: t.headsign,
+    stops: t.stopCount,
+  };
+}
+
 /** "18:05" desde el texto localizado ("6:05 p.m." / "18:05") o el ISO (en la zona de Montevideo/BA, UTC−3). */
 export function hhmm(localized: string | undefined, iso: string | undefined): string | undefined {
   const m = localized?.match(/(\d{1,2}):(\d{2})\s*(a|p)?/i);
@@ -185,19 +201,9 @@ export function parseTransit(res: GTransitResponse): TransitPlan | null {
   let afterS = 0;
   for (const s of steps) {
     if (s.travelMode === 'TRANSIT' && s.transitDetails) {
-      const t = s.transitDetails;
-      const name = t.transitLine?.nameShort || t.transitLine?.name;
-      if (!name) continue;
-      lines.push({
-        name,
-        vehicle: VEHICLE[t.transitLine?.vehicle?.type ?? ''] ?? 'other',
-        from_stop: t.stopDetails?.departureStop?.name,
-        to_stop: t.stopDetails?.arrivalStop?.name,
-        departure: hhmm(t.localizedValues?.departureTime?.time?.text, t.stopDetails?.departureTime),
-        arrival: hhmm(t.localizedValues?.arrivalTime?.time?.text, t.stopDetails?.arrivalTime),
-        headsign: t.headsign,
-        stops: t.stopCount,
-      });
+      const line = transitLine(s.transitDetails);
+      if (!line) continue;
+      lines.push(line);
       afterS = 0; // lo caminado antes de este tramo ya no es "después"
     } else if (s.travelMode === 'WALK') {
       const w = secs(s.staticDuration);
@@ -241,4 +247,190 @@ export async function transitPlan(
 /** Link de Google Maps en modo transporte público (botón "Cómo llego"). */
 export function mapsTransitUrl(a: { lat: number; lng: number }, b: { lat: number; lng: number }, mode: 'transit' | 'walking' = 'transit'): string {
   return `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=${mode}`;
+}
+
+// ───────── Ruta detallada para "Cómo llego" embebido en Ahora (route_eta con detail: true)
+
+const DETAIL_MASK = [
+  'routes.duration',
+  'routes.distanceMeters',
+  'routes.polyline.encodedPolyline',
+  'routes.legs.steps.navigationInstruction',
+  'routes.legs.steps.distanceMeters',
+  'routes.legs.steps.staticDuration',
+  'routes.legs.steps.startLocation',
+  'routes.legs.steps.endLocation',
+  'routes.legs.steps.travelMode',
+  'routes.legs.steps.transitDetails',
+].join(',');
+
+type GLatLng = { latLng?: { latitude?: number; longitude?: number } };
+type GDetailStep = GStep & {
+  distanceMeters?: number;
+  startLocation?: GLatLng;
+  endLocation?: GLatLng;
+  navigationInstruction?: { maneuver?: string; instructions?: string };
+};
+export type GDetailResponse = {
+  routes?: {
+    duration?: string;
+    distanceMeters?: number;
+    polyline?: { encodedPolyline?: string };
+    legs?: { steps?: GDetailStep[] }[];
+  }[];
+};
+
+type Pt = { lat: number; lng: number };
+const STEP_MODE: Record<string, RouteMode> = { WALK: 'walk', DRIVE: 'car', TRANSIT: 'transit' };
+const VERB: Record<RouteMode, string> = { walk: 'Caminá', car: 'Manejá', transit: 'Andá' };
+const VEHICLE_LABEL: Record<NonNullable<RouteStepDetail['transit']>['vehicle'], string> = {
+  bus: 'el bus',
+  subway: 'el subte',
+  train: 'el tren',
+  tram: 'el tranvía',
+  ferry: 'el ferry',
+  other: 'la línea',
+};
+
+const toMin = (s: number) => Math.round(s / 60);
+const dest = (name?: string) => name?.trim() || 'tu destino';
+const pt = (l: GLatLng | undefined, fallback: Pt): Pt =>
+  typeof l?.latLng?.latitude === 'number' && typeof l.latLng.longitude === 'number'
+    ? { lat: l.latLng.latitude, lng: l.latLng.longitude }
+    : fallback;
+
+/** Sin Google (o si falla): un solo paso en línea recta ("Caminá hacia tu destino"). */
+export function estimatedDetail(a: Pt, b: Pt, mode: RouteMode, destName?: string): RouteDetail {
+  const est = estimateMinutes(a, b, mode);
+  return {
+    mode,
+    ...est,
+    polyline: null,
+    estimated: true,
+    steps: [{ instruction: `${VERB[mode]} hacia ${dest(destName)}`, maneuver: null, ...est, start: a, end: b, mode }],
+  };
+}
+
+/** Instrucción de un paso en vehículo: "Tomá el bus 121 hacia Pocitos". */
+function rideInstruction(t: NonNullable<RouteStepDetail['transit']>): string {
+  return `Tomá ${VEHICLE_LABEL[t.vehicle]} ${t.line}${t.headsign ? ` hacia ${t.headsign}` : ''}`;
+}
+
+/**
+ * Respuesta de computeRoutes → RouteDetail. null si no hay ruta.
+ * En transit los pasos a pie seguidos se agrupan en uno ("Caminá 4 min hasta la parada X").
+ */
+export function parseRouteDetail(res: GDetailResponse, a: Pt, mode: RouteMode, destName?: string): RouteDetail | null {
+  const r = res.routes?.[0];
+  if (!r) return null;
+  const raw = (r.legs ?? []).flatMap((l) => l.steps ?? []);
+  const steps: RouteStepDetail[] = [];
+  const usesTransit = mode === 'transit' && raw.some((s) => s.travelMode === 'TRANSIT' && s.transitDetails);
+  let prevEnd = a;
+
+  if (!usesTransit) {
+    // A pie / auto (o transit que Google resolvió caminando): los pasos de navegación tal cual.
+    for (const s of raw) {
+      const start = pt(s.startLocation, prevEnd);
+      const stepMode = STEP_MODE[s.travelMode ?? ''] ?? mode;
+      const step: RouteStepDetail = {
+        instruction: s.navigationInstruction?.instructions?.trim() || `${VERB[stepMode]} hacia ${dest(destName)}`,
+        maneuver: s.navigationInstruction?.maneuver ?? null,
+        distance_m: s.distanceMeters ?? 0,
+        duration_min: toMin(secs(s.staticDuration)),
+        start,
+        end: pt(s.endLocation, start),
+        mode: stepMode,
+      };
+      steps.push(step);
+      prevEnd = step.end;
+    }
+  } else {
+    let walk: { s: number; m: number; start: Pt; end: Pt } | null = null;
+    const flushWalk = (target: string) => {
+      if (walk && (walk.s > 0 || walk.m > 0)) {
+        const min = Math.max(1, toMin(walk.s));
+        steps.push({
+          instruction: `Caminá ${min} min hasta ${target}`,
+          maneuver: null,
+          distance_m: walk.m,
+          duration_min: min,
+          start: walk.start,
+          end: walk.end,
+          mode: 'walk',
+        });
+      }
+      walk = null;
+    };
+    for (const s of raw) {
+      const start = pt(s.startLocation, prevEnd);
+      const end = pt(s.endLocation, start);
+      prevEnd = end;
+      const line = s.travelMode === 'TRANSIT' && s.transitDetails ? transitLine(s.transitDetails) : null;
+      if (line) {
+        flushWalk(line.from_stop ? `la parada ${line.from_stop}` : 'la parada');
+        const { name, ...rest } = line;
+        const transit = { line: name, ...rest };
+        steps.push({
+          instruction: rideInstruction(transit),
+          maneuver: null,
+          distance_m: s.distanceMeters ?? 0,
+          duration_min: Math.max(1, toMin(secs(s.staticDuration))),
+          start,
+          end,
+          mode: 'transit',
+          transit,
+        });
+      } else {
+        const w = walk as { s: number; m: number; start: Pt; end: Pt } | null; // TS no ve la reasignación en flushWalk
+        walk = {
+          s: (w?.s ?? 0) + secs(s.staticDuration),
+          m: (w?.m ?? 0) + (s.distanceMeters ?? 0),
+          start: w?.start ?? start,
+          end,
+        };
+      }
+    }
+    flushWalk(dest(destName));
+  }
+
+  return {
+    mode,
+    duration_min: Math.max(1, toMin(secs(r.duration))),
+    distance_m: r.distanceMeters ?? steps.reduce((t, s) => t + s.distance_m, 0),
+    polyline: r.polyline?.encodedPolyline ?? null,
+    steps,
+    estimated: false,
+  };
+}
+
+/**
+ * Ruta detallada entre dos puntos (polilínea + pasos). Nunca falla: sin GOOGLE_MAPS_API_KEY, si Google falla
+ * o no encuentra ruta, devuelve la estimación en línea recta (estimated: true).
+ * departure_time: ISO con zona. En auto se usa solo si es futuro (Google rechaza horas pasadas).
+ */
+export async function routeDetail(a: Pt, b: Pt, mode: RouteMode, departure_time?: string, destName?: string): Promise<RouteDetail> {
+  if (!env().GOOGLE_MAPS_API_KEY) return estimatedDetail(a, b, mode, destName);
+  const body: Record<string, unknown> = {
+    origin: waypoint(a),
+    destination: waypoint(b),
+    travelMode: TRAVEL_MODE[mode],
+    languageCode: 'es',
+  };
+  if (mode === 'car') {
+    body.routingPreference = 'TRAFFIC_AWARE';
+    if (departure_time && Date.parse(departure_time) > Date.now()) body.departureTime = departure_time;
+  } else if (mode === 'transit' && departure_time) {
+    body.departureTime = departure_time;
+  }
+  try {
+    const detail = await cached(`route_detail:${dest(destName)}:${JSON.stringify(body)}`, async () => {
+      const res = await googleFetch<GDetailResponse>(ROUTES_URL, { method: 'POST', fieldMask: DETAIL_MASK, body });
+      return parseRouteDetail(res, a, mode, destName);
+    });
+    return detail ?? estimatedDetail(a, b, mode, destName);
+  } catch (e) {
+    console.warn('[routeDetail]', (e as Error).message);
+    return estimatedDetail(a, b, mode, destName);
+  }
 }

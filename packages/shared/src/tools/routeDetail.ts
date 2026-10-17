@@ -3,12 +3,18 @@
 import type { RouteMode } from '../constants';
 
 export type RouteStepDetail = {
-  /** "Doblá a la derecha en Sarandí" (localizado). */
+  /**
+   * "Doblá a la derecha en Sarandí" (localizado por Google). En transit los tramos a pie vienen agrupados
+   * ("Caminá 4 min hasta la parada Ciudadela") y los de vehículo armados ("Tomá el bus 121 hacia Pocitos").
+   */
   instruction: string;
-  /** Maniobra de Google (TURN_LEFT, STRAIGHT, …) para elegir ícono; null si no hay. */
+  /** Maniobra de Google (TURN_LEFT, STRAIGHT, …) para elegir ícono; null si no hay (pasos agrupados, transit, estimado). */
   maneuver: string | null;
   distance_m: number;
+  /** Redondeado: un paso de navegación corto (< 30 s) puede dar 0. Los pasos agrupados/transit son ≥ 1. */
   duration_min: number;
+  /** Cómo se hace este paso (en transit hay pasos `walk` y `transit`). Opcional por compatibilidad; la API siempre lo manda. */
+  mode?: RouteMode;
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
   /** Solo transit: tramo en vehículo ("Bus 121 · sale 18:05 · 6 paradas"). */

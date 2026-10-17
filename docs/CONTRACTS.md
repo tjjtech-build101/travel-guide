@@ -341,9 +341,44 @@ nuevo `running_late` ya está en `FEED_KINDS`) y la RLS de privados (`2026101700
   op `add` (participantes = miembros del tramo, `created_by_agent: true`). Permisos = los de proponer en el tramo.
   Sin `ANTHROPIC_API_KEY` o si Claude falla → 503 `{code: 'scout_unavailable', message: 'Scout no está disponible ahora.'}`;
   si no queda nada válido → 422 `empty_plan`.
-||||||| 8aabf70
+
+## Cambios PRD 08, research y traslados — en código
+
 - PRD 08: `look_at_photo` acepta `image_base64` (además de `storage_path`), devuelve `LookAtPhotoOutput` (+ `photo_id`, `storage_path`, `timings`); la voz ve la versión del celu `look_at_photo { question? }` y el resultado entra como `[EVENTO:photo_result]`. Env `VISION_MODEL` (default Opus 5.5; prod: `claude-sonnet-5-5`).
 - Herramienta nueva `research { question, place_id?, place_name?, lat?, lng?, trip_id?, language? }` → `{ job_id }` (job `research`, resultado `ResearchResult`: `answer` armada solo con facts verificados en paralelo, `facts`, `rejected`, `place_id`, `saved_facts`). Si es sobre un lugar de `place_library`, los facts verificados se suman a `facts` (dedupe por texto). Eventos `[EVENTO:research_ready] {question, answer, facts}` / `[EVENTO:research_failed] {question, error}`.
 - Memoria de lugares (`apps/api/src/places/library.ts`): `place_library.facts[]` = `{ text, source_url, verified, quote?, verified_at?, origin?: 'research'|'tour'|'camera'|'curated', question? }` (los campos opcionales son nuevos; los viejos no los tienen). Todos los que escriben **suman sin duplicar** (normalizando texto), nunca reemplazan. `research` y la cámara crean el lugar si no existe (`tier='researched'`, coordenadas de `search_places`; con OSM el id va a `osm_id`). `research` puede responder desde la memoria: `{ cached: true, answer, facts, place_id }` sin job.
 - Traslados dentro del día: `blocks.transfer` suma campos opcionales `lines[] {name, vehicle: bus|subway|train|tram|ferry|other, from_stop?, to_stop?, departure?, arrival?, headsign?, stops?}`, `walk_min?`, `summary?`, `maps_url?`, `estimated?` (jsonb, sin migración). `plan_trip` los agrega después de llenar cada tramo (bloques `type='transfer'` entre bloques seguidos si a pie > 20 min; transporte público con Google Routes TRANSIT y la hora real de salida; alerta `late` si no entra en el hueco). Herramienta nueva `plan_transfers { trip_id, leg_id?, day_id? }` → `{ days, added, skipped_existing, estimated }` para viajes ya armados. `route_eta` en modo `transit` con 2 paradas devuelve además `transit { duration_min, walk_min, lines, summary, maps_url }`. Sin `GOOGLE_MAPS_API_KEY`: traslados estimados por distancia, sin líneas.
+
+## Cómo llego embebido (Ahora) — en código
+
+Ruta dentro de la app (mapa + pasos) en vez de mandar a Maps. Tipos en `packages/shared/src/tools/routeDetail.ts`;
+implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDetail`, `estimatedDetail`).
+
+- **`route_eta`** acepta `detail?: boolean`. Con `detail: true` y **exactamente 2 paradas con `lat/lng`** devuelve,
+  además de lo de siempre (`segments`, `total_min`, `estimated?`, `transit?`), `data.detail: RouteDetail`.
+  Sin `detail` (o con > 2 paradas, o con `google_place_id` sin coords) la respuesta es idéntica a antes (la voz y
+  Ahora dependen de eso). La consulta de detalle corre en paralelo con la de siempre.
+- **`RouteDetail`** `{ mode: walk|transit|car, duration_min, distance_m, polyline: string | null, steps: RouteStepDetail[], estimated: boolean }`.
+  `polyline`: polilínea codificada de Google (precisión 5) de toda la ruta; `null` si es estimada.
+- **`RouteStepDetail`** `{ instruction, maneuver: string | null, distance_m, duration_min, start {lat,lng}, end {lat,lng}, mode?, transit? }`.
+  - A pie / auto: los pasos de navegación de Google tal cual (`instruction` localizada en español, `maneuver` de
+    Google — `DEPART`, `TURN_LEFT`, `STRAIGHT`, `RAMP_RIGHT`… — para el ícono). `duration_min` redondeado (un paso
+    corto puede dar 0).
+  - Transporte: los pasos a pie seguidos se **agrupan** en uno: `"Caminá 4 min hasta la parada Ciudadela"` (o
+    `"… hasta tu destino"` al final), `maneuver: null`, `mode: 'walk'`. Cada tramo en vehículo es un paso
+    `"Tomá el bus 121 hacia Pocitos"` (bus / subte / tren / tranvía / ferry / "la línea"), `mode: 'transit'`,
+    `transit { line, vehicle, from_stop?, to_stop?, departure?, arrival?, headsign?, stops? }` con `departure`/`arrival`
+    en hora local `HH:MM` (de `localizedValues`, como `transitPlan`). Si Google resuelve el transporte caminando
+    (distancia corta), vienen los pasos a pie sin agrupar.
+  - `mode?` (nuevo, opcional por compatibilidad; la API siempre lo manda): cómo se hace ese paso.
+- **Google Routes** `computeRoutes`, `languageCode: 'es'`, field mask `routes.duration, routes.distanceMeters,
+  routes.polyline.encodedPolyline, routes.legs.steps.{navigationInstruction, distanceMeters, staticDuration,
+  startLocation, endLocation, travelMode, transitDetails}`. WALK sin hora; DRIVE con `routingPreference: TRAFFIC_AWARE`
+  y `departureTime` solo si `departure_time` es futuro (si no, Google usa "ahora"); TRANSIT con `departureTime` si viene.
+  Caché en memoria 10 min (`cached()`, clave = request).
+- **Fallback** (sin `GOOGLE_MAPS_API_KEY`, Google falla o no hay ruta): nunca error. `estimated: true`,
+  `polyline: null`, un solo paso en línea recta `"Caminá hacia tu destino"` / `"Manejá hacia…"` / `"Andá hacia…"`
+  con distancia y minutos de `estimateMinutes`. Solo tira 400 por input inválido (parada sin coords ni place id).
+- **Salir de la app** (Apple Maps / Google Maps / Waze, para auto y CarPlay) lo arma el celu con las coordenadas de
+  destino; no pasa por la API.
 
