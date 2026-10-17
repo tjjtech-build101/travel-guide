@@ -56,7 +56,11 @@ type State = {
   responding: boolean;
   muted: boolean;
   speaker: boolean;
-  pushToTalk: boolean;
+  /**
+   * Por turnos (default): el mic se cierra mientras el scout suena y se reabre TAIL_MS después (sin auriculares el
+   * micrófono escucha el parlante). false = abierto: se lo puede cortar con la voz (auriculares).
+   */
+  turnTaking: boolean;
   captions: boolean;
   lang: string;
   lines: Line[];
@@ -83,7 +87,7 @@ type Actions = {
   setLanguage: (lang: string) => void;
   setMuted: (muted: boolean) => void;
   setSpeakerOn: (on: boolean) => void;
-  setPushToTalk: (on: boolean) => void;
+  setTurnTaking: (on: boolean) => void;
   setCaptions: (on: boolean) => void;
   setExpanded: (expanded: boolean) => void;
   dismissAction: (id: string) => void;
@@ -102,6 +106,10 @@ let conn: RealtimeConnection | null = null;
 let reconnecting = false;
 let tapAt = 0;
 let micFallback: ReturnType<typeof setTimeout> | null = null;
+/** El parlante está sonando (incluye la cola de TAIL_MS después de que termina el audio del scout). */
+let scoutAudible = false;
+let tailTimer: ReturnType<typeof setTimeout> | null = null;
+const TAIL_MS = 600;
 let firstAudioLogged = false;
 
 const now = () => new Date().toISOString();
@@ -124,7 +132,7 @@ const initial: State = {
   responding: false,
   muted: false,
   speaker: true,
-  pushToTalk: false,
+  turnTaking: true,
   captions: true,
   lang: 'es',
   lines: [],
@@ -153,14 +161,15 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
 
   const applyMic = () => {
     const s = get();
-    // Modo por turnos (plan B del eco): mic cerrado mientras el scout habla.
-    const closedForTurn = s.pushToTalk && s.speaking === 'assistant';
+    // Por turnos: mic cerrado mientras el scout suena (y la cola), así no se escucha a sí mismo.
+    const closedForTurn = s.turnTaking && scoutAudible;
     conn?.setMicEnabled(!s.muted && !closedForTurn);
     if (micFallback) clearTimeout(micFallback);
     micFallback = null;
     // Si nunca llega output_audio_buffer.stopped, no dejar el mic cerrado para siempre.
     if (closedForTurn) {
       micFallback = setTimeout(() => {
+        scoutAudible = false;
         if (get().speaking === 'assistant') set({ speaking: null });
         applyMic();
       }, 30_000);
@@ -176,12 +185,13 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
 
   /** El usuario "dijo" casi lo mismo que el scout: es el parlante. Se descarta y se pasa al modo por turnos. */
   const handleEcho = (itemId: string) => {
-    console.warn('[voice] eco detectado: paso a modo por turnos');
+    const wasOpen = !get().turnTaking;
+    console.warn(`[voice] eco detectado${wasOpen ? ': paso a modo por turnos' : ' (cola del parlante): descartado'}`);
     conn?.send({ type: 'response.cancel' });
     conn?.send({ type: 'conversation.item.delete', item_id: itemId });
-    set((s) => ({ pushToTalk: true, lines: s.lines.filter((l) => l.id !== itemId) }));
+    set((s) => ({ turnTaking: true, lines: s.lines.filter((l) => l.id !== itemId) }));
     applyMic();
-    showNotice('Había eco: activé el modo por turnos. Tocá Interrumpir para cortarme.');
+    if (wasOpen) showNotice('Había eco: activé el modo por turnos. Tocá Interrumpir para cortarme.');
   };
 
   // ---------- herramientas ----------
@@ -230,7 +240,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         const id = String(e.item_id);
         const text = String(e.transcript ?? '').trim();
         const lastScout = [...get().lines].reverse().find((l) => l.role === 'assistant' && l.text.trim());
-        if (!get().pushToTalk && lastScout && looksLikeEcho(text, lastScout.text)) {
+        if (lastScout && looksLikeEcho(text, lastScout.text)) {
           handleEcho(id);
           break;
         }
@@ -251,13 +261,25 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
           firstAudioLogged = true;
           console.log(`[voice] toque → primera palabra: ${Date.now() - tapAt} ms`);
         }
+        if (tailTimer) clearTimeout(tailTimer);
+        tailTimer = null;
+        scoutAudible = true;
         set({ speaking: 'assistant' });
         applyMic();
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
         if (get().speaking === 'assistant') set({ speaking: null });
-        applyMic();
+        // La cola: el parlante y la sala siguen sonando un instante después del último frame.
+        if (tailTimer) clearTimeout(tailTimer);
+        tailTimer = setTimeout(
+          () => {
+            tailTimer = null;
+            scoutAudible = false;
+            applyMic();
+          },
+          e.type === 'output_audio_buffer.cleared' ? 0 : TAIL_MS,
+        );
         break;
       case 'response.done': {
         set({ responding: false });
@@ -373,13 +395,23 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       if (st === 'connecting' || st === 'live' || st === 'reconnecting' || st === 'ending') return;
       tapAt = Date.now();
       firstAudioLogged = false;
-      set({ ...initial, speaker: get().speaker, pushToTalk: get().pushToTalk, captions: get().captions, status: 'connecting', args });
+      scoutAudible = false;
+      set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
       try {
         startCallAudio(get().speaker);
-        await connect(args, false);
+        const s = await connect(args, false);
+        if (get().status !== 'connecting') {
+          // Colgó mientras conectaba: cerrar lo que se abrió y la sesión en la API.
+          conn?.close();
+          conn = null;
+          void endVoiceSession(s.voice_session_id, []).catch(() => {});
+          return;
+        }
         set({ status: 'live', startedAt: Date.now() });
         hapticResult(true);
       } catch (e) {
+        // Colgó mientras conectaba: endCall ya limpió todo, no es un error.
+        if (get().status !== 'connecting') return;
         conn?.close();
         conn = null;
         stopCallAudio();
@@ -401,7 +433,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       const id = s.session?.voice_session_id;
       const durationS = s.startedAt ? Math.round((Date.now() - s.startedAt) / 1000) : 0;
       if (!id) {
-        set({ ...initial, speaker: s.speaker, pushToTalk: s.pushToTalk, captions: s.captions });
+        set({ ...initial, speaker: s.speaker, turnTaking: s.turnTaking, captions: s.captions });
         return;
       }
       let jobId: string | null = null;
@@ -445,8 +477,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       set({ speaker: on });
       setSpeaker(on);
     },
-    setPushToTalk: (on) => {
-      set({ pushToTalk: on });
+    setTurnTaking: (on) => {
+      set({ turnTaking: on });
       applyMic();
     },
     setCaptions: (captions) => set({ captions }),
@@ -454,13 +486,14 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     dismissAction: (id) => set((s) => ({ actions: s.actions.filter((a) => a.id !== id) })),
     dismissSummary: () => {
       const s = get();
-      set({ ...initial, speaker: s.speaker, pushToTalk: s.pushToTalk, captions: s.captions });
+      set({ ...initial, speaker: s.speaker, turnTaking: s.turnTaking, captions: s.captions });
     },
 
     interrupt: () => {
       if (!conn) return;
       conn.send({ type: 'response.cancel' });
       conn.send({ type: 'output_audio_buffer.clear' });
+      scoutAudible = false;
       set((s) => ({ speaking: null, lines: s.lines.map((l) => (l.role === 'assistant' && !l.final ? { ...l, final: true } : l)) }));
       applyMic();
       Haptics.selectionAsync().catch(() => {});

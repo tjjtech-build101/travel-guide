@@ -111,13 +111,15 @@ describe('sesión de OpenAI Realtime', () => {
     expect(s.audio.output.voice).toBe(SCOUT.voice);
     expect(s.audio.input.transcription.language).toBe('en');
     expect(s.audio.input.noise_reduction.type).toBe('far_field');
-    expect(s.audio.input.turn_detection).toMatchObject({ type: 'server_vad', threshold: 0.6, interrupt_response: true });
+    expect(s.audio.input.turn_detection).toMatchObject({ type: 'semantic_vad', eagerness: 'low', interrupt_response: true });
   });
 
   it('VAD configurable por env', () => {
-    expect(vadConfig({ VOICE_VAD_THRESHOLD: '0.75' })).toMatchObject({ type: 'server_vad', threshold: 0.75 });
+    expect(vadConfig({ VOICE_VAD: 'server_vad', VOICE_VAD_THRESHOLD: '0.75' })).toMatchObject({ type: 'server_vad', threshold: 0.75 });
     expect(vadConfig({ VOICE_VAD_THRESHOLD: '7' }).threshold).toBe(0.6);
-    expect(turnDetection(vadConfig({ VOICE_VAD: 'semantic_vad' }))).toMatchObject({ type: 'semantic_vad' });
+    expect(turnDetection(vadConfig({}))).toMatchObject({ type: 'semantic_vad', eagerness: 'low' });
+    expect(turnDetection(vadConfig({ VOICE_VAD_EAGERNESS: 'high' }))).toMatchObject({ eagerness: 'high' });
+    expect(turnDetection(vadConfig({ VOICE_VAD: 'server_vad' }))).toMatchObject({ type: 'server_vad', silence_duration_ms: 700 });
   });
 
   it('createClientSecret: error de OpenAI → upstream 502 sin tirar la key', async () => {

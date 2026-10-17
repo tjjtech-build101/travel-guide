@@ -58,7 +58,7 @@ function Live() {
   const captions = useVoiceStore((s) => s.captions);
   const lines = useVoiceStore((s) => s.lines);
   const notice = useVoiceStore((s) => s.notice);
-  const ptt = useVoiceStore((s) => s.pushToTalk);
+  const ptt = useVoiceStore((s) => s.turnTaking);
   const avatarState = useVoiceStore(scoutStateOf);
   const [showAll, setShowAll] = useState(false);
   const connecting = status === 'connecting';
@@ -133,7 +133,7 @@ function Captions({ lines }: { lines: Line[] }) {
 function Controls() {
   const muted = useVoiceStore((s) => s.muted);
   const speaker = useVoiceStore((s) => s.speaker);
-  const ptt = useVoiceStore((s) => s.pushToTalk);
+  const ptt = useVoiceStore((s) => s.turnTaking);
   const captions = useVoiceStore((s) => s.captions);
   const lang = useVoiceStore((s) => s.lang);
   const st = useVoiceStore.getState();
@@ -160,7 +160,7 @@ function Controls() {
         <Round label={speaker ? 'Usar auricular' : 'Usar parlante'} on={speaker} onPress={() => st.setSpeakerOn(!speaker)}>
           <SpeakerIcon color="#fff" on={speaker} />
         </Round>
-        <Round label="Hablar por turnos (anti eco)" on={ptt} onPress={() => st.setPushToTalk(!ptt)}>
+        <Round label={ptt ? 'Por turnos (anti eco). Tocá para micrófono abierto' : 'Micrófono abierto. Tocá para hablar por turnos'} on={ptt} onPress={() => st.setTurnTaking(!ptt)}>
           <HandIcon color="#fff" />
         </Round>
         <Round label={captions ? 'Ocultar subtítulos' : 'Mostrar subtítulos'} on={captions} onPress={() => st.setCaptions(!captions)}>

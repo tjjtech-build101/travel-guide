@@ -13,22 +13,33 @@ export function voiceToolNames(exclude: readonly string[] = []): ToolName[] {
   return TOOL_NAMES.filter((n) => typeof handlers[n] === 'function' && !exclude.includes(n));
 }
 
-export type VadConfig = { type: 'server_vad' | 'semantic_vad'; threshold: number; silenceMs: number };
+export type VadConfig = {
+  type: 'server_vad' | 'semantic_vad';
+  threshold: number;
+  silenceMs: number;
+  eagerness: 'low' | 'medium' | 'high' | 'auto';
+};
 
+/**
+ * Default semantic_vad con eagerness low: espera a que la persona termine la idea (no la pisa en una pausa).
+ * VOICE_VAD=server_vad vuelve al VAD por silencio (threshold / silence_ms).
+ */
 export function vadConfig(e: NodeJS.ProcessEnv = process.env): VadConfig {
-  const type = e.VOICE_VAD?.trim() === 'semantic_vad' ? 'semantic_vad' : 'server_vad';
+  const type = e.VOICE_VAD?.trim() === 'server_vad' ? 'server_vad' : 'semantic_vad';
+  const eag = e.VOICE_VAD_EAGERNESS?.trim();
   const threshold = Number(e.VOICE_VAD_THRESHOLD);
   const silence = Number(e.VOICE_VAD_SILENCE_MS);
   return {
     type,
     threshold: Number.isFinite(threshold) && threshold > 0 && threshold < 1 ? threshold : 0.6,
-    silenceMs: Number.isFinite(silence) && silence >= 200 ? silence : 500,
+    silenceMs: Number.isFinite(silence) && silence >= 200 ? silence : 700,
+    eagerness: eag === 'medium' || eag === 'high' || eag === 'auto' ? eag : 'low',
   };
 }
 
 export function turnDetection(v: VadConfig): Record<string, unknown> {
   return v.type === 'semantic_vad'
-    ? { type: 'semantic_vad', eagerness: 'auto', interrupt_response: true, create_response: true }
+    ? { type: 'semantic_vad', eagerness: v.eagerness, interrupt_response: true, create_response: true }
     : {
         type: 'server_vad',
         threshold: v.threshold,
