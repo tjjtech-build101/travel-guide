@@ -1,70 +1,60 @@
-// Mapa de intereses (PRD 06, paso "Score"): categorías que usa profiles.interests (jsonb, peso 1-5)
-// y a qué tipos de Google Places / tags de OSM / Wikidata instance-of corresponden.
-// Nuevo interés: agregar acá, nunca inventar uno distinto en el prompt.
-
-export const INTEREST_TAGS = [
-  'historia',
-  'arquitectura',
-  'arte',
-  'comida',
-  'naturaleza',
-  'religioso',
-  'shopping',
-  'nightlife',
-  'curiosidades',
-] as const;
-export type InterestTag = (typeof INTEREST_TAGS)[number];
+// Mapa de intereses (PRD 06, paso "Score"): a qué tipos de Google Places / tags de OSM corresponde
+// cada interés de profile.ts (INTEREST_TAGS — la lista que elige el usuario en el onboarding, PRD 10).
+// Un solo vocabulario de intereses en todo el proyecto: este archivo solo mapea categorías externas
+// a esos tags, nunca inventa uno nuevo.
+import type { InterestTag } from './profile';
 
 /** Google Places (New) `types` → intereses que afina. */
 export const GOOGLE_TYPE_INTERESTS: Record<string, InterestTag[]> = {
-  historical_landmark: ['historia', 'curiosidades'],
-  historical_place: ['historia', 'curiosidades'],
-  monument: ['historia', 'curiosidades'],
-  museum: ['historia', 'arte', 'arquitectura'],
+  historical_landmark: ['historia'],
+  historical_place: ['historia'],
+  monument: ['historia'],
+  museum: ['museos', 'historia', 'arte'],
   art_gallery: ['arte'],
-  church: ['religioso', 'arquitectura', 'historia'],
-  hindu_temple: ['religioso', 'arquitectura'],
-  mosque: ['religioso', 'arquitectura'],
-  synagogue: ['religioso', 'arquitectura'],
-  place_of_worship: ['religioso', 'arquitectura'],
+  church: ['religion', 'arquitectura', 'historia'],
+  hindu_temple: ['religion', 'arquitectura'],
+  mosque: ['religion', 'arquitectura'],
+  synagogue: ['religion', 'arquitectura'],
+  place_of_worship: ['religion', 'arquitectura'],
   park: ['naturaleza'],
   national_park: ['naturaleza'],
-  plaza: ['arquitectura', 'historia'],
-  tourist_attraction: ['curiosidades'],
+  beach: ['playa', 'naturaleza'],
   restaurant: ['comida'],
   cafe: ['comida'],
-  bar: ['comida', 'nightlife'],
-  market: ['comida', 'shopping'],
-  shopping_mall: ['shopping'],
-  night_club: ['nightlife'],
-  performing_arts_theater: ['arte', 'arquitectura'],
+  bar: ['comida', 'vida_nocturna'],
+  market: ['comida', 'mercados'],
+  shopping_mall: ['compras'],
+  night_club: ['vida_nocturna', 'musica'],
+  performing_arts_theater: ['arte', 'musica'],
+  stadium: ['deporte'],
 };
 
 /** OSM: `key=value` (ej. "historic=monument", "tourism=viewpoint") → intereses. */
 export const OSM_TAG_INTERESTS: Record<string, InterestTag[]> = {
-  'historic=*': ['historia', 'curiosidades'],
-  'historic=monument': ['historia', 'curiosidades'],
-  'historic=memorial': ['historia', 'curiosidades'],
+  'historic=*': ['historia'],
+  'historic=monument': ['historia'],
+  'historic=memorial': ['historia'],
   'historic=castle': ['historia', 'arquitectura'],
-  'historic=church': ['religioso', 'arquitectura', 'historia'],
-  'tourism=attraction': ['curiosidades'],
+  'historic=church': ['religion', 'arquitectura', 'historia'],
   'tourism=artwork': ['arte'],
-  'tourism=viewpoint': ['naturaleza', 'curiosidades'],
-  'tourism=museum': ['historia', 'arte'],
-  'amenity=place_of_worship': ['religioso', 'arquitectura'],
-  'amenity=theatre': ['arte', 'arquitectura'],
-  'amenity=marketplace': ['comida', 'shopping'],
+  'tourism=viewpoint': ['naturaleza'],
+  'tourism=museum': ['museos', 'historia', 'arte'],
+  'amenity=place_of_worship': ['religion', 'arquitectura'],
+  'amenity=theatre': ['arte', 'musica'],
+  'amenity=marketplace': ['comida', 'mercados'],
   'leisure=park': ['naturaleza'],
   'leisure=garden': ['naturaleza'],
-  'memorial=*': ['historia', 'curiosidades'],
-  'shop=*': ['shopping'],
+  'leisure=stadium': ['deporte'],
+  'memorial=*': ['historia'],
+  'natural=beach': ['playa', 'naturaleza'],
+  'shop=*': ['compras'],
 };
 
 function normType(t: string): InterestTag[] {
   return GOOGLE_TYPE_INTERESTS[t] ?? [];
 }
 
-/** Intereses de un lugar según sus `types` de Google Places (unión, sin repetir). */
+/** Intereses de un lugar según sus `types` de Google Places (unión, sin repetir). Vacío = sin categoría clara. */
 export function interestsForGoogleTypes(types: string[]): InterestTag[] {
   return [...new Set(types.flatMap(normType))];
 }
@@ -82,7 +72,7 @@ export function interestsForOsmTags(tags: Record<string, string | undefined>): I
   return [...out];
 }
 
-/** Perfil combinado del grupo: peso promedio por interés (0 si nadie lo tiene). Entrada: profiles.interests[] (jsonb). */
+/** Perfil combinado del grupo: peso promedio por interés (0 si nadie lo tiene). Entrada: profiles.interests[] (jsonb, pesos 1-5). */
 export function combineInterestWeights(profiles: (Record<string, number> | null | undefined)[]): Record<string, number> {
   const sums = new Map<string, { total: number; count: number }>();
   for (const p of profiles) {
