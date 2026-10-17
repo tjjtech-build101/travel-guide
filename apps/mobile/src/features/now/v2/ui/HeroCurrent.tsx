@@ -21,6 +21,7 @@ type Props = {
   alerts?: BlockAlert[] | null;
   onTellMe: () => void;
   onPress?: () => void;
+  onLongPress?: () => void;
 };
 
 export function remainingLabel(remainingMin: number | null, endLabel?: string | null): string | null {
@@ -33,11 +34,11 @@ export function remainingLabel(remainingMin: number | null, endLabel?: string | 
   return s[0]!.toUpperCase() + s.slice(1);
 }
 
-export function HeroCurrent({ title, placeName, progress, remainingMin, endLabel, faces, alerts, onTellMe, onPress }: Props) {
+export function HeroCurrent({ title, placeName, progress, remainingMin, endLabel, faces, alerts, onTellMe, onPress, onLongPress }: Props) {
   const left = remainingLabel(remainingMin, endLabel);
   const pct = progress == null ? null : Math.min(1, Math.max(0, progress));
   return (
-    <HeroCard onPress={onPress} accessibilityLabel={`Ahora: ${title}${left ? `. ${left}` : ''}`}>
+    <HeroCard onPress={onPress} onLongPress={onLongPress} accessibilityLabel={`Ahora: ${title}${left ? `. ${left}` : ''}`}>
       <Kicker>AHORA</Kicker>
       <View style={styles.text}>
         <Text style={heroText.title} numberOfLines={2}>

@@ -1,37 +1,44 @@
 // Protagonista "estado" de Ahora v2 (antes / después / sin tramos / sin día) y las piezas comunes de
 // todas las tarjetas Hero*: tarjeta, kicker y fila de acciones (máximo 2 botones: primario + secundario).
-import type { ReactNode } from 'react';
+import { useContext, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { Button } from '../../../../ui/Button';
-import { Text } from '../../../../ui/Text';
+import { Text, TextBoost } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 
 export const HERO_BUTTON = 56;
 
 // ───────────────────────── Piezas comunes
 
-/** Tarjeta grande y limpia. Si recibe onPress, toda la tarjeta abre el detalle. */
+/** Tarjeta grande y limpia. Si recibe onPress, toda la tarjeta abre el detalle (pulsación larga: atajo opcional). */
 export function HeroCard({
   children,
   onPress,
+  onLongPress,
   accessibilityLabel,
   style,
 }: {
   children: ReactNode;
   onPress?: () => void;
+  onLongPress?: () => void;
   accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
 }) {
-  if (!onPress) {
-    return <View style={[styles.card, style]}>{children}</View>;
+  // Modo exterior: borde con más contraste.
+  const outdoor = useContext(TextBoost).contrast;
+  const card = [styles.card, outdoor && styles.cardOutdoor];
+  if (!onPress && !onLongPress) {
+    return <View style={[card, style]}>{children}</View>;
   }
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={450}
       accessibilityLabel={accessibilityLabel}
-      accessibilityHint="Abre el detalle"
-      style={({ pressed }) => [styles.card, pressed && styles.pressed, style]}
+      accessibilityHint={onPress ? 'Abre el detalle' : undefined}
+      style={({ pressed }) => [card, pressed && styles.pressed, style]}
     >
       {children}
     </Pressable>
@@ -166,6 +173,7 @@ const styles = StyleSheet.create({
     padding: space.xl,
     gap: space.sm,
   },
+  cardOutdoor: { borderWidth: 2, borderColor: colors.text },
   pressed: { opacity: 0.85 },
   kicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1.2 },
   actions: { gap: space.sm, marginTop: space.md },

@@ -21,6 +21,9 @@ export type PlanDayVars = {
 export function planDayErrorText(e: unknown): string {
   if (e instanceof ToolCallError) {
     if (e.code === 'network_error') return 'Sin conexión: no pude armar la tarde.';
+    // La API ya manda el texto amable ("Scout no está disponible ahora.").
+    if (e.code === 'scout_unavailable' && e.message) return e.message;
+    if (e.code === 'empty_plan') return 'No encontré nada que entre en ese rato.';
     if (e.code === 'forbidden') return 'No podés proponer cambios en este viaje.';
     if (e.code === 'not_found') return 'No encontré el día.';
     if (e.code === 'unauthenticated') return 'Tu sesión venció. Volvé a entrar.';

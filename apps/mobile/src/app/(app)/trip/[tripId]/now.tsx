@@ -1,68 +1,105 @@
-// Vista Ahora (PRD 19): la principal en la calle. Qué toca ahora, qué sigue y cuándo salir, más acceso
-// grande y rápido a lo del Scout (hablar, "Tour acá, ahora", cámara, cómo llego).
-// Fecha/hora simulables para probar con el seed: menú dev o `build101://trip/<id>/now?at=2026-10-18T10:30`
-// (`at=real` vuelve al reloj real). Previsualizar el avatar: `?scout=listening|speaking|thinking|idle`.
-// Tour en vivo (solo __DEV__, para probar sin tocar la pantalla): `?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30`
-// y simulador `?sim=play|pause|x1|x10|stop<N>|t<segundos>` (stop: salta a ~15 s de la parada N; t: a ese segundo del
-// track). `&n=<algo>` para repetir el mismo.
-// Vigilante de horarios (solo dev): `?watch=run` (una pasada ya), `reset` (olvidar los avisos de hoy),
-// `later` (olvidar y pasar en 8 s, para ver el aviso desde otra pantalla), `notif-reset` (volver a pedir permiso).
-import { SCOUT, scheduleAlertText } from '@build101/shared';
+// Vista Ahora v2 (PRD 19 + docs/AHORA-V2.md): responde "¿qué hago ya?" con UN protagonista.
+// Encabezado + clima · frase de Scout · riel del día · protagonista (pickHero) · "Después" · un aviso · dock.
+// Deep links de prueba (build101://trip/<id>/now?...):
+//   ?at=2026-10-18T10:30 | real  · hora simulada (Montevideo)      ?preview=day1 · vista previa del día 1
+//   ?loc=simulated|real|near     · near: GPS simulado a ~8 min a pie del próximo bloque
+//   ?scout=listening|speaking|thinking|idle · estado del avatar
+//   ?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30|nearby:<min>|nearby-start (solo __DEV__)
+//   ?sim=play|pause|x1|x10|stop<N>|t<seg> (simulador de GPS, solo __DEV__)
+//   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · &n=<algo> repite el mismo link
+import { SCOUT, scheduleAlertText, zonedParts } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
+import { isStale, useLatestPlanJob } from '../../../../features/jobs/queries';
 import { useClockStore, useNow } from '../../../../features/now/clock';
-import {
-  CurrentCard,
-  LaterList,
-  NextCard,
-  openDirections,
-  ScoutDock,
-  StateCard,
-  Suggestions,
-} from '../../../../features/now/components';
+import { openDirections } from '../../../../features/now/components';
 import {
   buildNowPlan,
   clock,
+  formatMinutes,
   hasCoords,
   isFarAway,
-  leaveInMin,
-  leaveUrgency,
-  localParts,
-  nearbyIdeas,
-  needsSuggestions,
+  isMineForNow,
   resolveToday,
+  tripTimeZone,
 } from '../../../../features/now/selectors';
 import { useEta } from '../../../../features/now/useEta';
-import { ProposalBanner, StaleBanner } from '../../../../features/plan/components/PlanRows';
-import { showMenu } from '../../../../features/plan/menu';
+import { useNowDemo } from '../../../../features/now/v2/demo';
+import {
+  planDayErrorText,
+  useGapSuggestions,
+  useGroupPositions,
+  useNowCache,
+  useOutdoorMode,
+  usePlanDay,
+  useRainPlanB,
+  useScoutLine,
+  useShareMyLocation,
+  useTourPreview,
+  useWeatherNow,
+} from '../../../../features/now/v2/hooks';
+import { gapStartTime } from '../../../../features/now/v2/hooks/pure';
+import { countdown, dayRail, nearPoint, nextRowLabel, pickHero, pickNotice, showNextRow, toBriefSnapshot } from '../../../../features/now/v2/model';
+import type { GapSuggestion } from '../../../../features/now/v2/types';
+import { Countdown } from '../../../../features/now/v2/ui/Countdown';
+import { DayRail } from '../../../../features/now/v2/ui/DayRail';
+import { DockV2 } from '../../../../features/now/v2/ui/DockV2';
+import { GroupFaces, type GroupFacesPerson } from '../../../../features/now/v2/ui/GroupFaces';
+import { HeroCurrent } from '../../../../features/now/v2/ui/HeroCurrent';
+import { HeroFree } from '../../../../features/now/v2/ui/HeroFree';
+import { HeroLeave } from '../../../../features/now/v2/ui/HeroLeave';
+import { HeroState, PreviewChip } from '../../../../features/now/v2/ui/HeroState';
+import { HeroTour } from '../../../../features/now/v2/ui/HeroTour';
+import { InlineNotice } from '../../../../features/now/v2/ui/InlineNotice';
+import { LateSheet } from '../../../../features/now/v2/ui/LateSheet';
+import { MiniRoute } from '../../../../features/now/v2/ui/MiniRoute';
+import { NextRow } from '../../../../features/now/v2/ui/NextRow';
+import { ScoutLine } from '../../../../features/now/v2/ui/ScoutLine';
+import { WeatherChip } from '../../../../features/now/v2/ui/WeatherChip';
+import { ActionToast } from '../../../../features/plan/components/ActionToast';
+import { useMoveBlock } from '../../../../features/plan/mutations';
 import { openBlock, openProposals } from '../../../../features/plan/nav';
 import { useMe, usePendingProposals, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import type { PlanBlock } from '../../../../features/plan/selectors';
+import { showToast } from '../../../../features/plan/store';
 import { LiveTourView } from '../../../../features/tour/LiveTourView';
 import { NearbyTourCard } from '../../../../features/tours/NearbyTourCard';
 import { NEARBY_DURATIONS, startNearbyTour, useNearbyTourAvailable, useNearbyTourJob } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
+import { callTool } from '../../../../lib/api';
 import { formatDay } from '../../../../lib/format';
 import { useLocationFix, useLocationProvider } from '../../../../location/LocationContext';
-import type { AvatarPerson } from '../../../../ui/Avatar';
-import { Button } from '../../../../ui/Button';
-import { ErrorState, SkeletonCard } from '../../../../ui/States';
-import { Text } from '../../../../ui/Text';
-import { colors, font, radius, space } from '../../../../ui/theme';
-import { useTourStore } from '../../../../tour/store';
 import { resetNotificationAsk } from '../../../../schedule/notifications';
 import { useScheduleStore } from '../../../../schedule/store';
+import { useTourStore } from '../../../../tour/store';
+import type { AvatarPerson } from '../../../../ui/Avatar';
+import { ErrorState, SkeletonCard } from '../../../../ui/States';
+import { Text, TextBoost } from '../../../../ui/Text';
+import { colors, font, radius, space } from '../../../../ui/theme';
 import { showToScout } from '../../../../voice/camera/showToScout';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
 
-const DOCK_HEIGHT = 190;
+/** Lugar que deja el dock abajo (botón + íconos). */
+const DOCK_SPACE = 150;
 const PREVIEW_STATES: ScoutState[] = ['idle', 'listening', 'speaking', 'thinking'];
+const NORMAL = { scale: 1, contrast: false };
+const OUTDOOR = { scale: 1.15, contrast: true };
 
+type Link = {
+  at?: string;
+  preview?: string;
+  scout?: string;
+  loc?: string;
+  tour?: string;
+  sim?: string;
+  watch?: string;
+  n?: string;
+};
 
 export default function NowTab() {
   const tripId = useTripId();
@@ -71,44 +108,323 @@ export default function NowTab() {
   const overview = usePlanOverview(tripId);
   const blocks = usePlanBlocks(tripId);
   const proposals = usePendingProposals(tripId);
-  const { now, simulated } = useNow();
   const scout = useScout();
-  const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
+  const { outdoor } = useOutdoorMode();
   const tourAvailable = useNearbyTourAvailable().data === true;
-  // PRD 07: con un tour activo, Ahora se convierte en el tour.
   const tourPhase = useTourStore((s) => s.phase);
   const tourError = useTourStore((s) => s.error);
   const nearbyJob = useNearbyTourJob((s) => s.job);
+  const planJob = useLatestPlanJob(tripId);
+  const cache = useNowCache(tripId);
+  useShareMyLocation(tripId);
+  const moveBlock = useMoveBlock(tripId);
+  const planDay = usePlanDay();
+  const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
 
-  // Deep link de pruebas: ?at=2026-10-18T10:30 | real · ?scout=listening
-  const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string; tour?: string; sim?: string; watch?: string; n?: string }>();
-  useEffect(() => {
-    if (!link.at) return;
-    if (link.at === 'real') useClockStore.getState().reset();
-    else useClockStore.getState().simulate(link.at);
-  }, [link.at]);
-  useEffect(() => {
-    if (link.scout && (PREVIEW_STATES as string[]).includes(link.scout)) previewScoutState(link.scout as ScoutState);
-  }, [link.scout]);
+  // Reloj: cada 30 s; con la cuenta regresiva en segundos, cada 1 s.
+  const [tickMs, setTickMs] = useState<number>(30_000);
+  const { now, simulated, preview } = useNow(tickMs);
 
-  // Ubicación: la vista Ahora es el momento justo para pedirla (ETA y "Tour acá, ahora").
+  useEffect(() => {
+    void useNearbyTourJob.getState().hydrate();
+  }, []);
+
+  // ───────── Ubicación (ETA, grupo, "Tour acá, ahora")
   const location = useLocationProvider();
   const fix = useLocationFix();
   const triedStart = useRef<string | null>(null);
   useEffect(() => {
-    // Un intento por provider (si el usuario niega el permiso, no insistimos: queda el link "Activar ubicación").
+    // Un intento por provider: si niega el permiso no insistimos.
     if (location.active || triedStart.current === location.kind) return;
     triedStart.current = location.kind;
     void location.start();
   }, [location]);
   const here = fix ? { lat: fix.lat, lng: fix.lng } : null;
-  // Deep link de pruebas: ?loc=simulated|real elige el LocationProvider.
-  const { setKind } = location;
+  const group = useGroupPositions(tripId, here);
+
+  // ───────── Hoy
+  const legs = overview.data?.legs;
+  const tz = useMemo(() => tripTimeZone(legs ?? [], me, now), [legs, me, now]);
+  const today = useMemo(() => (overview.data ? resolveToday(overview.data.legs, me, now, trip.data) : null), [overview.data, me, now, trip.data]);
+  const dayId = today?.kind === 'today' ? today.day.id : null;
+  const nowMin = today && (today.kind === 'today' || today.kind === 'noDay') ? today.minutes : 0;
+  const myDayBlocks = useMemo(
+    () => (dayId && blocks.data ? blocks.data.filter((b) => b.day_id === dayId && isMineForNow(b, me)) : []),
+    [dayId, blocks.data, me],
+  );
+  const plan = useMemo(() => (today?.kind === 'today' && blocks.data ? buildNowPlan(myDayBlocks, me, today.minutes) : null), [today, blocks.data, myDayBlocks, me]);
+  const next = plan?.next ?? null;
+  const nextTarget = next && hasCoords(next.block) ? { id: next.block.id, lat: next.block.lat, lng: next.block.lng } : null;
+  const far = !!here && !!nextTarget && isFarAway(here, nextTarget);
+  const eta = useEta(far ? null : here, nextTarget);
+  const etaData = far ? null : (eta.data ?? null);
+
+  const hero = useMemo(
+    () => pickHero({ today, plan, eta: etaData, nowMin, far, tourBlocks: myDayBlocks }),
+    [today, plan, etaData, nowMin, far, myDayBlocks],
+  );
+  const rail = useMemo(() => dayRail(myDayBlocks, nowMin), [myDayBlocks, nowMin]);
+
+  // Cuenta regresiva (≤ 10 min: con segundos).
+  const cd = hero.kind === 'leave' ? countdown(hero.leaveIn, zonedParts(now, tz).seconds) : null;
+  const wantTick = cd?.tickMs ?? 30_000;
+  useEffect(() => setTickMs(wantTick), [wantTick]);
+
+  // Haptic al pasar a "justo" o "tarde".
+  const urgency = hero.kind === 'leave' ? hero.urgency : null;
+  const prevUrgency = useRef(urgency);
+  useEffect(() => {
+    const prev = prevUrgency.current;
+    prevUrgency.current = urgency;
+    if (urgency && urgency !== 'ok' && prev !== urgency && prev !== null) {
+      void Haptics.notificationAsync(
+        urgency === 'late' ? Haptics.NotificationFeedbackType.Error : Haptics.NotificationFeedbackType.Warning,
+      ).catch(() => {});
+    }
+  }, [urgency]);
+
+  // ───────── Clima, lluvia, ideas, frase de Scout
+  const leg = today?.kind === 'today' ? today.leg : (legs?.[0] ?? null);
+  const date = today && 'date' in today ? today.date : null;
+  const weather = useWeatherNow({ lat: leg?.lat, lng: leg?.lng, date: today?.kind === 'today' ? date : null, dayId, tz });
+  const rain = useRainPlanB({ weather, dayBlocks: myDayBlocks, allBlocks: blocks.data ?? [], dayId });
+  const gap = useGapSuggestions({
+    tripId,
+    legId: today?.kind === 'today' ? today.leg.id : null,
+    dayId,
+    here,
+    minutes: hero.kind === 'free' ? (hero.gapMin ?? 180) : 0,
+    date: date ?? '',
+    localTime: clock(nowMin),
+    enabled: hero.kind === 'free' && !nearbyJob,
+  });
+  const [addingId, setAddingId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!gap.adding) setAddingId(null);
+  }, [gap.adding]);
+
+  const city = leg?.city ?? null;
+  const snapshot = useMemo(
+    () =>
+      today
+        ? toBriefSnapshot({ hero, nowMin, city, plan, eta: etaData, weather, suggestions: gap.items, group })
+        : null,
+    [today, hero, nowMin, city, plan, etaData, weather, gap.items, group],
+  );
+  const line = useScoutLine(snapshot, tripId);
+
+  // ───────── Personas
+  const members = useMemo(
+    () => new Map<string, AvatarPerson>((overview.data?.members ?? []).map((m) => [m.id, m])),
+    [overview.data?.members],
+  );
+  const facesFor = (b: PlanBlock): GroupFacesPerson[] =>
+    b.participant_ids
+      .filter((id) => id !== me)
+      .map((id) => ({
+        ...(members.get(id) ?? { id, display_name: null, avatar_url: null }),
+        distance_m: group.find((g) => g.user_id === id)?.distance_m ?? null,
+      }));
+  const faces = (b: PlanBlock) => {
+    const people = facesFor(b);
+    return people.length ? <GroupFaces people={people} /> : null;
+  };
+
+  // Último aviso del vigilante de horarios para el próximo bloque (va chiquito dentro de "Salí para").
+  const lastAlert = useScheduleStore((s) => (next ? s.last[next.block.id] : undefined));
+  const alertNote = lastAlert
+    ? `Te avisé a las ${clock(zonedParts(lastAlert.at, tz).minutes)} · ${scheduleAlertText(lastAlert.payload, next?.block.place_name).title}`
+    : null;
+
+  // ───────── Acciones del Scout
+  const talkAbout = (b: PlanBlock) =>
+    scout.startScoutCall({
+      tripId,
+      focus: { block_id: b.id, label: b.title, ...(hasCoords(b) ? { lat: b.lat, lng: b.lng } : {}) },
+      context: {
+        kind: 'block',
+        title: b.title,
+        type: b.type,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        place_name: b.place_name,
+        participants: b.participant_ids.map((id) => members.get(id)?.display_name ?? id),
+        alerts: b.alerts,
+      },
+    });
+  // Pulsación larga en el protagonista: atajo a "hablar de esto".
+  const talkShortcut = (b: PlanBlock) => () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    void talkAbout(b);
+  };
+
+  const onTalk = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    if (scout.inCall) void scout.endScoutCall();
+    else void scout.startScoutCall({ tripId });
+  };
+
+  const heroBlock =
+    hero.kind === 'leave' ? hero.next.block : hero.kind === 'tour' ? hero.block : hero.kind === 'current' ? hero.current.block : null;
+  const onScoutLine = () => {
+    if (scout.inCall) return;
+    if (heroBlock) void talkAbout(heroBlock);
+    else void scout.startScoutCall({ tripId });
+  };
+
+  const onNearbyTour = async () => {
+    if (!tourAvailable) {
+      Alert.alert('Tour acá, ahora', `Muy pronto: ${SCOUT.name} te va a armar un recorrido con paradas verificadas desde donde estés.`);
+      return;
+    }
+    if (!here) {
+      Alert.alert('Necesito tu ubicación', 'Activá la ubicación para armarte un tour desde donde estás.', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Activar', onPress: () => void location.start() },
+      ]);
+      return;
+    }
+    if (nearbyJob) {
+      Alert.alert('Tour acá, ahora', `${SCOUT.name} ya te está armando un tour.`);
+      return;
+    }
+    // PRD 18: duración 30 / 60 / 90.
+    const go = async (duration_min: number) => {
+      const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min });
+      if (!res.ok) Alert.alert('No pude armar el tour', res.message);
+    };
+    Alert.alert('Tour acá, ahora', '¿Cuánto tiempo tenés?', [
+      ...NEARBY_DURATIONS.map((m) => ({ text: m === 60 ? '1 hora' : m === 90 ? '1 h 30' : `${m} min`, onPress: () => void go(m) })),
+      { text: 'Cancelar', style: 'cancel' as const },
+    ]);
+  };
+
+  // Tour del día (en curso o próximo) con su tour ya generado.
+  const tourBlock =
+    hero.kind === 'tour'
+      ? hero.block
+      : ([plan?.current?.block, next?.block].find((b): b is PlanBlock => !!b && b.type === 'tour' && !!b.tour_id) ?? null);
+  const tourPreview = useTourPreview(hero.kind === 'tour' ? hero.block.tour_id : null);
+  const onStartTour = async (b: PlanBlock) => {
+    const names = b.participant_ids.map((id) => members.get(id)?.display_name).filter((n): n is string => !!n);
+    const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
+    if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
+  };
+
+  // PRD 08: cámara; si no hay llamada, el Scout se conecta de fondo para narrar la foto.
+  const onCamera = () => void showToScout({ tripId });
+
+  // Cómo llego: al próximo bloque; si no hay, al actual.
+  const directionsTarget = [next?.block, plan?.current?.block].find((b): b is PlanBlock => !!b && hasCoords(b)) ?? null;
+  const onDirections = directionsTarget && hasCoords(directionsTarget) ? () => openDirections(directionsTarget) : null;
+
+  // ───────── Voy tarde
+  const [lateOpen, setLateOpen] = useState(false);
+  const [notify, setNotify] = useState<'idle' | 'notifying' | 'notified'>('idle');
+  const lateBlockId = hero.kind === 'leave' ? hero.next.block.id : null;
+  useEffect(() => setNotify('idle'), [lateBlockId]);
+  const lateBy = hero.kind === 'leave' ? Math.max(0, -hero.leaveIn) : 0;
+
+  const onNotifyLate = async () => {
+    if (hero.kind !== 'leave') return;
+    setNotify('notifying');
+    const res = await callTool<'report_late', { feed_id: string; summary: string }>('report_late', {
+      trip_id: tripId,
+      block_id: hero.next.block.id,
+      late_by_min: Math.max(5, lateBy),
+    });
+    if (!res.ok) {
+      setNotify('idle');
+      setLateOpen(false);
+      showToast({ text: res.error.code === 'network_error' ? 'Sin conexión: no pude avisar.' : 'No pude avisar al grupo.', tone: 'error' });
+      return;
+    }
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setNotify('notified');
+    setTimeout(() => {
+      setLateOpen(false);
+      showToast({ text: 'Le avisé al grupo', tone: 'success', undoToken: res.undo_token, tripId });
+    }, 700);
+  };
+
+  const onShiftLate = (min: number) => {
+    if (hero.kind !== 'leave' || !dayId) return;
+    const to = clock(hero.next.start + min);
+    setLateOpen(false);
+    moveBlock.mutate({ blockId: hero.next.block.id, dayId, startTime: to, title: hero.next.block.title, toLabel: `a las ${to}` });
+  };
+
+  // ───────── Armame la tarde / Agregar idea
+  const onPlanDay = () => {
+    if (!dayId) {
+      showToast({ text: 'Hoy no hay un día del viaje para armar.', tone: 'error' });
+      return;
+    }
+    planDay.mutate(
+      {
+        tripId,
+        dayId,
+        fromTime: gapStartTime(clock(nowMin)),
+        ...(hero.kind === 'free' && hero.until ? { toTime: clock(hero.until.start) } : {}),
+        here,
+      },
+      {
+        onSuccess: () => openProposals(tripId),
+        onError: (e) => showToast({ text: planDayErrorText(e), tone: 'error' }, 4000),
+      },
+    );
+  };
+  const onAddSuggestion = (s: GapSuggestion) => {
+    setAddingId(s.id);
+    gap.add(s);
+  };
+
+  // ───────── Deep links de prueba
+  const link = useLocalSearchParams<Link>();
+  useEffect(() => {
+    if (!link.at) return;
+    if (link.at === 'real') useClockStore.getState().reset();
+    else useClockStore.getState().simulate(link.at);
+  }, [link.at, link.n]);
+  useEffect(() => {
+    if (link.scout && (PREVIEW_STATES as string[]).includes(link.scout)) previewScoutState(link.scout as ScoutState);
+  }, [link.scout]);
+  const startDate = trip.data?.start_date ?? legs?.[0]?.start_date ?? null;
+  useEffect(() => {
+    if (link.preview === 'day1' && startDate) useClockStore.getState().previewDay1(startDate, tz);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link.preview, link.n, startDate]);
+
+  const { setKind, placeSimulatedAt } = location;
   useEffect(() => {
     if (link.loc === 'simulated' || link.loc === 'real') setKind(link.loc);
   }, [link.loc, setKind]);
 
-  // Deep links de pruebas del tour en vivo (solo dev).
+  // ?loc=near (o "Ubicación cerca" del menú dev): GPS simulado a ~8 min a pie del próximo bloque con lugar.
+  const nearTarget = useRef<{ lat: number; lng: number } | null>(null);
+  nearTarget.current = (() => {
+    const b = [next?.block, ...(plan?.later ?? [])].find((x): x is PlanBlock => !!x && hasCoords(x));
+    return b && hasCoords(b) ? { lat: b.lat, lng: b.lng } : null;
+  })();
+  const nearReq = useNowDemo((s) => s.nearReq);
+  const nearKey = link.loc === 'near' ? `link:${link.n ?? ''}` : nearReq ? `menu:${nearReq}` : null;
+  useEffect(() => {
+    if (!nearKey) return;
+    // Un respiro para que el ?at= del mismo link ya haya movido el reloj (y el "próximo" sea el de esa hora).
+    const t = setTimeout(() => {
+      const target = nearTarget.current;
+      if (!target) {
+        showToast({ text: 'No hay un próximo bloque con lugar.', tone: 'info' });
+        return;
+      }
+      const p = nearPoint(target, 8);
+      placeSimulatedAt(p.lat, p.lng, 'Cerca del próximo bloque');
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nearKey]);
+
+  // Tour en vivo y simulador (solo dev).
   const { simulator, simStops } = location;
   useEffect(() => {
     if (!__DEV__ || !link.sim) return;
@@ -127,12 +443,11 @@ export default function NowTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link.sim, link.n]);
 
-  // Deep links de pruebas del vigilante de horarios (solo dev).
   useEffect(() => {
     if (!__DEV__ || !link.watch) return;
     const w = useScheduleStore.getState();
     if (link.watch === 'later') {
-      // Probar la notificación con la app en otra pantalla: olvida y corre de nuevo en 8 s.
+      // Probar la notificación desde otra pantalla: olvida y corre de nuevo en 8 s.
       setTimeout(() => {
         useScheduleStore.getState().reset();
         void useScheduleStore.getState().run({ source: 'deep link (8 s)' });
@@ -145,122 +460,6 @@ export default function NowTab() {
     setTimeout(() => void useScheduleStore.getState().run({ source: 'deep link' }), 600);
   }, [link.watch, link.n]);
 
-  const members = useMemo(
-    () => new Map<string, AvatarPerson>((overview.data?.members ?? []).map((m) => [m.id, m])),
-    [overview.data?.members],
-  );
-
-  const today = useMemo(
-    () => (overview.data ? resolveToday(overview.data.legs, me, now, trip.data) : null),
-    [overview.data, me, now, trip.data],
-  );
-
-  const plan = useMemo(() => {
-    if (!today || today.kind !== 'today' || !blocks.data) return null;
-    return buildNowPlan(
-      blocks.data.filter((b) => b.day_id === today.day.id),
-      me,
-      today.minutes,
-    );
-  }, [today, blocks.data, me]);
-
-  const nowMin = today && (today.kind === 'today' || today.kind === 'noDay') ? today.minutes : 0;
-  const next = plan?.next ?? null;
-  const nextTarget = next && hasCoords(next.block) ? { id: next.block.id, lat: next.block.lat, lng: next.block.lng } : null;
-  // Muy lejos (otra ciudad, o el GPS por defecto del simulador): no calculamos "salí en X".
-  const far = !!here && !!nextTarget && isFarAway(here, nextTarget);
-  const eta = useEta(far ? null : here, nextTarget);
-
-  // Último aviso del vigilante de horarios para el próximo bloque.
-  const lastAlert = useScheduleStore((s) => (next ? s.last[next.block.id] : undefined));
-  const alertNote = lastAlert
-    ? `Te avisé a las ${clock(localParts(lastAlert.at, -180).minutes)}${lastAlert.channel === 'notification' ? '' : ` por ${SCOUT.name}`}: ${scheduleAlertText(lastAlert.payload, next?.block.place_name).title}`
-    : null;
-
-  // Haptic suave cuando "Salí en X" pasa a naranja.
-  const urgency = next && eta.data ? leaveUrgency(leaveInMin(next.start, nowMin, eta.data.minutes)) : null;
-  const prevUrgency = useRef(urgency);
-  useEffect(() => {
-    if (urgency === 'soon' && prevUrgency.current === 'ok') {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    }
-    prevUrgency.current = urgency;
-  }, [urgency]);
-
-  const legId = today?.kind === 'today' ? today.leg.id : overview.data?.legs[0]?.id;
-  const ideas = useMemo(
-    () => (legId && blocks.data ? nearbyIdeas(blocks.data, legId, here, 1, 3) : []),
-    // here cambia con cada fix: recalcular por celda alcanza.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [legId, blocks.data, here ? `${here.lat.toFixed(3)}:${here.lng.toFixed(3)}` : ''],
-  );
-
-  // ───────── Acciones del Scout
-  const talkAbout = (b: PlanBlock) =>
-    scout.startScoutCall({
-      tripId,
-      focus: { block_id: b.id, label: b.title, ...(hasCoords(b) ? { lat: b.lat, lng: b.lng } : {}) },
-      context: {
-        kind: 'block',
-        title: b.title,
-        type: b.type,
-        start_time: b.start_time,
-        end_time: b.end_time,
-        place_name: b.place_name,
-        participants: b.participant_ids.map((id) => members.get(id)?.display_name ?? id),
-        alerts: b.alerts,
-      },
-    });
-
-  const onLongPress = (b: PlanBlock) =>
-    showMenu(b.title, [
-      { label: `Hablar de esto con ${SCOUT.name}`, onPress: () => void talkAbout(b) },
-      { label: 'Ver detalle', onPress: () => openBlock(tripId, b.id) },
-    ]);
-
-  const onPressBlock = (b: PlanBlock) => openBlock(tripId, b.id);
-
-  const onTalk = () => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    if (scout.inCall) void scout.endScoutCall();
-    else void scout.startScoutCall({ tripId });
-  };
-
-  const onNearbyTour = async () => {
-    if (!tourAvailable) {
-      Alert.alert('Tour acá, ahora', `Muy pronto: ${SCOUT.name} te va a armar un recorrido con paradas verificadas desde donde estés.`);
-      return;
-    }
-    if (!here) {
-      Alert.alert('Necesito tu ubicación', 'Activá la ubicación para armarte un tour desde donde estás.', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Activar', onPress: () => void location.start() },
-      ]);
-      return;
-    }
-    if (nearbyJob) {
-      Alert.alert('Tour acá, ahora', `${SCOUT.name} ya te está armando un tour: mirá la tarjeta de arriba.`);
-      return;
-    }
-    // PRD 18: duración 30 / 60 / 90 (temas y modo explorador: fuera por ahora).
-    const go = async (duration_min: number) => {
-      const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min });
-      if (!res.ok) Alert.alert('No pude armar el tour', res.message);
-    };
-    Alert.alert('Tour acá, ahora', '¿Cuánto tiempo tenés?', [
-      ...NEARBY_DURATIONS.map((m) => ({ text: m === 60 ? '1 hora' : m === 90 ? '1 h 30' : `${m} min`, onPress: () => void go(m) })),
-      { text: 'Cancelar', style: 'cancel' as const },
-    ]);
-  };
-
-  // "Empezar tour" desde el bloque tour del día (actual o próximo) con su tour ya generado.
-  const tourBlock = [plan?.current?.block, next?.block].find((b): b is PlanBlock => !!b && b.type === 'tour' && !!b.tour_id) ?? null;
-  const onStartTour = async (b: PlanBlock) => {
-    const names = b.participant_ids.map((id) => members.get(id)?.display_name).filter((n): n is string => !!n);
-    const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
-    if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
-  };
-
   useEffect(() => {
     if (!__DEV__ || !link.tour) return;
     const t = useTourStore.getState();
@@ -269,7 +468,9 @@ export default function NowTab() {
     else if (cmd === 'close') t.close();
     else if (cmd === 'skip') {
       const live = t.live;
-      const pending = live ? [...live.tour.stops].sort((a, b) => a.sort_order - b.sort_order).find((x) => !live.engine.visited[x.stop_id] && !live.engine.skipped.includes(x.stop_id)) : null;
+      const pending = live
+        ? [...live.tour.stops].sort((a, b) => a.sort_order - b.sort_order).find((x) => !live.engine.visited[x.stop_id] && !live.engine.skipped.includes(x.stop_id))
+        : null;
       if (pending) t.skip(pending.stop_id);
     } else if (cmd === 'more') {
       const c = t.card;
@@ -282,25 +483,15 @@ export default function NowTab() {
     } else if (cmd === 'nearby-start') {
       const j = useNearbyTourJob.getState().job;
       if (j) void t.start({ tourId: j.tourId, tripId: j.tripId }).then((ok) => ok && useNearbyTourJob.getState().clear());
-    }
-    else if (cmd === 'start') {
+    } else if (cmd === 'start') {
       if (tourBlock) void onStartTour(tourBlock);
     } else void t.start({ tourId: cmd, tripId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link.tour, link.n, !!tourBlock]);
 
-  // PRD 08: abre la cámara y, si no hay llamada, el scout se conecta de fondo para narrar la foto.
-  const onCamera = () => void showToScout({ tripId });
-
-  // Cómo llego: al próximo bloque; si no hay, al actual.
-  const directionsTarget = [next?.block, plan?.current?.block].find((b): b is PlanBlock => !!b && hasCoords(b)) ?? null;
-  const onDirections =
-    directionsTarget && hasCoords(directionsTarget) ? () => openDirections(directionsTarget) : null;
-
   // ───────── Estados
   const loading = overview.isPending || blocks.isPending || trip.isPending;
   const hardError = (overview.isError && !overview.data) || (blocks.isError && !blocks.data);
-  const stale = (overview.isError && !!overview.data) || (blocks.isError && !!blocks.data);
   const retry = () => {
     void overview.refetch();
     void blocks.refetch();
@@ -308,17 +499,17 @@ export default function NowTab() {
   };
 
   const dock = (
-    <ScoutDock
+    <DockV2
       scoutState={scout.state}
       onTalk={onTalk}
       onNearbyTour={() => void onNearbyTour()}
       tourAvailable={tourAvailable}
       onCamera={onCamera}
       onDirections={onDirections}
-      directionsLabel={directionsTarget ? `Indicaciones a pie hasta ${directionsTarget.place_name ?? directionsTarget.title}` : undefined}
     />
   );
 
+  // PRD 07: con un tour activo, Ahora se convierte en el tour.
   if (tourPhase === 'live' || tourPhase === 'done') return <LiveTourView />;
 
   if (loading) {
@@ -342,107 +533,190 @@ export default function NowTab() {
     );
   }
 
-  const city = today.kind === 'today' ? today.leg.city : overview.data?.legs[0]?.city;
-  const date = 'date' in today ? today.date : null;
-  const pendingCount = proposals.data?.length ?? 0;
-  const showSuggestions = (plan && needsSuggestions(plan)) || today.kind === 'noDay';
+  // Un solo aviso (sin conexión > lluvia > propuestas).
+  const notice = pickNotice({
+    offlineMinutesAgo: cache.offline ? cache.minutesAgo : null,
+    rain,
+    proposalsCount: proposals.data?.length ?? 0,
+  });
+  const onNotice = () => {
+    if (!notice) return;
+    if (notice.kind === 'offline') retry();
+    else if (notice.kind === 'rain') goToPlan();
+    else openProposals(tripId);
+  };
+
+  const job = planJob.data;
+  const jobActive = !!job && (job.status === 'running' || job.status === 'queued') && !isStale(job);
+
+  // ───────── Protagonista
+  let protagonist: ReactNode;
+  if (nearbyJob && hero.kind !== 'leave') {
+    // "Tour acá, ahora" en marcha: su progreso ocupa el lugar del protagonista.
+    protagonist = <NearbyTourCard here={here} />;
+  } else if (hero.kind === 'leave') {
+    const b = hero.next.block;
+    protagonist = (
+      <HeroLeave
+        countdown={
+          <Countdown
+            text={cd?.text ?? ''}
+            urgency={hero.urgency}
+            sub={`${formatMinutes(hero.eta.minutes)} ${hero.eta.mode === 'walk' ? 'a pie' : 'en transporte'}`}
+          />
+        }
+        map={hasCoords(b) ? <MiniRoute from={here} to={{ lat: b.lat, lng: b.lng }} /> : null}
+        faces={faces(b)}
+        title={b.title}
+        placeName={b.place_name}
+        startLabel={clock(hero.next.start)}
+        onDirections={() => (hasCoords(b) ? openDirections(b) : undefined)}
+        onLate={hero.urgency !== 'ok' ? () => setLateOpen(true) : undefined}
+        note={alertNote}
+        onPress={() => openBlock(tripId, b.id)}
+        onLongPress={talkShortcut(b)}
+      />
+    );
+  } else if (hero.kind === 'tour') {
+    const b = hero.block;
+    protagonist = (
+      <HeroTour
+        title={b.title}
+        when={hero.when}
+        startLabel={b.start_time ? b.start_time.slice(0, 5) : null}
+        stopsCount={tourPreview?.stopsCount ?? 0}
+        durationMin={tourPreview?.durationMin ?? null}
+        distanceKm={tourPreview?.distanceKm ?? null}
+        stopNames={tourPreview?.stopNames}
+        loading={!tourPreview}
+        onStart={() => void onStartTour(b)}
+        starting={tourPhase === 'starting'}
+        error={tourError && tourPhase === 'idle' ? `No pude empezar: ${tourError}` : null}
+        onPress={() => openBlock(tripId, b.id)}
+        onLongPress={talkShortcut(b)}
+      />
+    );
+  } else if (hero.kind === 'current') {
+    const c = hero.current;
+    protagonist = (
+      <HeroCurrent
+        title={c.block.title}
+        placeName={c.block.place_name}
+        progress={c.progress}
+        remainingMin={c.remainingMin}
+        endLabel={clock(c.end)}
+        faces={faces(c.block)}
+        alerts={c.block.alerts}
+        onTellMe={() => void talkAbout(c.block)}
+        onPress={() => openBlock(tripId, c.block.id)}
+        onLongPress={talkShortcut(c.block)}
+      />
+    );
+  } else if (hero.kind === 'free') {
+    const addState = addingId ? { [addingId]: 'adding' as const } : undefined;
+    protagonist = (
+      <HeroFree
+        gapMin={hero.gapMin}
+        untilLabel={hero.until ? clock(hero.until.start) : null}
+        suggestions={gap.items}
+        loading={gap.isLoading}
+        addState={addState}
+        onAdd={onAddSuggestion}
+        onPlanDay={onPlanDay}
+        planning={planDay.isPending}
+        onNearbyTour={() => void onNearbyTour()}
+      />
+    );
+  } else {
+    protagonist = (
+      <HeroState
+        state={hero.state}
+        daysUntil={hero.daysUntil}
+        onPreviewDay1={startDate ? () => useClockStore.getState().previewDay1(startDate, tz) : undefined}
+        onOpenPlan={goToPlan}
+        onAddLeg={goToPlan}
+      />
+    );
+  }
+
+  const nextRow =
+    next && showNextRow(hero, plan)
+      ? (() => {
+          const head = `${clock(next.start)} · ${next.block.title}`;
+          const trailing = nextRowLabel(next, nextTarget && etaData ? etaData.minutes : null).slice(head.length + 3);
+          return (
+            <NextRow time={clock(next.start)} title={next.block.title} trailing={trailing} onPress={() => openBlock(tripId, next.block.id)} />
+          );
+        })()
+      : null;
+
+  const localNow = zonedParts(now, tz);
 
   return (
-    <View style={styles.flex}>
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: DOCK_HEIGHT + space.xl }]}
-        refreshControl={<RefreshControl refreshing={overview.isRefetching || blocks.isRefetching} onRefresh={retry} />}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerDate}>{date ? `Hoy · ${formatDay(date)}` : 'Hoy'}</Text>
-          {city ? <Text style={styles.headerCity}>{city}</Text> : null}
-          {simulated ? (
-            <Text style={styles.sim} accessibilityLabel="Hora simulada">
-              Hora simulada · {clock(localParts(now, -180).minutes)}
+    <TextBoost.Provider value={outdoor ? OUTDOOR : NORMAL}>
+      <View style={styles.flex}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: DOCK_SPACE + space.xl }]}
+          refreshControl={<RefreshControl refreshing={overview.isRefetching || blocks.isRefetching} onRefresh={retry} />}
+        >
+          <View style={styles.header}>
+            <Text style={styles.headerText} numberOfLines={1}>
+              {[date ? formatDay(date) : 'Hoy', city].filter(Boolean).join(' · ')}
             </Text>
-          ) : null}
-        </View>
-
-        <AgentJobProgress tripId={tripId} showSkeleton={false} />
-        <NearbyTourCard here={here} />
-        <ProposalBanner count={pendingCount} onPress={() => openProposals(tripId)} />
-        {stale ? <StaleBanner /> : null}
-
-        {today.kind === 'noLegs' ? (
-          <StateCard title="Este viaje está en blanco" body={`Armá el plan y ${SCOUT.name} te va diciendo qué toca en cada momento.`}>
-            <Button label="Ir a Planificación" onPress={goToPlan} />
-          </StateCard>
-        ) : null}
-        {today.kind === 'before' ? (
-          <StateCard
-            title={today.daysUntil === 1 ? 'Tu viaje empieza mañana' : `Tu viaje empieza en ${today.daysUntil} días`}
-            body="Cuando arranque, acá vas a ver qué toca ahora, qué sigue y cuándo salir."
-          >
-            <Button label="Ver el plan" onPress={goToPlan} />
-          </StateCard>
-        ) : null}
-        {today.kind === 'after' ? (
-          <StateCard title="Tu viaje terminó" body="Esperamos que la hayas pasado bárbaro.">
-            <Button label="Ver el plan" variant="secondary" onPress={goToPlan} />
-          </StateCard>
-        ) : null}
-        {today.kind === 'noDay' ? (
-          <StateCard title="Hoy no tenés nada en el plan" body={`Pedile a ${SCOUT.name} un tour o agregá algo desde Planificación.`} />
-        ) : null}
-
-        {showSuggestions ? (
-          <Suggestions ideas={ideas} onIdea={onPressBlock} onNearbyTour={() => void onNearbyTour()} tourAvailable={tourAvailable} />
-        ) : null}
-        {tourBlock ? (
-          <View style={styles.startTour}>
-            <Text style={styles.startTourKicker}>TOUR DE HOY</Text>
-            <Text style={styles.startTourTitle}>{tourBlock.title}</Text>
-            <Button
-              label="Empezar tour"
-              loading={tourPhase === 'starting'}
-              onPress={() => void onStartTour(tourBlock)}
-              accessibilityHint={`${SCOUT.name} te avisa al llegar a cada parada`}
-            />
-            {tourError && tourPhase === 'idle' ? <Text style={styles.hint}>No pude empezar: {tourError}</Text> : null}
+            {__DEV__ && simulated && !preview ? (
+              <Text style={styles.sim} accessibilityLabel="Hora simulada">
+                {clock(localNow.minutes)}
+              </Text>
+            ) : null}
+            <WeatherChip weather={weather} />
           </View>
-        ) : null}
-        {plan?.current ? (
-          <CurrentCard current={plan.current} members={members} onPress={onPressBlock} onLongPress={onLongPress} />
-        ) : null}
-        {next ? (
-          <NextCard
-            next={next}
-            nowMin={nowMin}
-            eta={far ? null : (eta.data ?? null)}
-            locationOff={!here}
-            farAway={far}
-            onEnableLocation={() => void location.start()}
-            members={members}
-            alertNote={alertNote}
-            onPress={onPressBlock}
-            onLongPress={onLongPress}
+
+          {preview ? <PreviewChip onExit={() => useClockStore.getState().reset()} /> : null}
+
+          {line.text || line.loading ? <ScoutLine text={line.text ?? ''} loading={line.loading} onPress={onScoutLine} /> : null}
+
+          {rail.length ? (
+            <View style={styles.rail}>
+              <DayRail items={rail} onPress={(id) => openBlock(tripId, id)} />
+            </View>
+          ) : null}
+
+          {jobActive ? <AgentJobProgress tripId={tripId} showSkeleton={false} /> : null}
+
+          {protagonist}
+          {nextRow}
+          {notice ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
+        </ScrollView>
+        <ActionToast bottom={DOCK_SPACE + space.sm} />
+        {dock}
+        {hero.kind === 'leave' ? (
+          <LateSheet
+            visible={lateOpen}
+            blockTitle={hero.next.block.title}
+            lateByMin={lateBy}
+            onNotify={() => void onNotifyLate()}
+            onShift={onShiftLate}
+            onDirections={() => {
+              setLateOpen(false);
+              const b = hero.next.block;
+              if (hasCoords(b)) openDirections(b);
+            }}
+            onClose={() => setLateOpen(false)}
+            notifying={notify === 'notifying'}
+            notified={notify === 'notified'}
           />
         ) : null}
-        {plan && !plan.current && !next && plan.total > 0 && !showSuggestions ? (
-          <StateCard title="Terminaste lo de hoy" body="No queda nada más en el plan de hoy." />
-        ) : null}
-        {plan ? <LaterList blocks={plan.later} onPress={onPressBlock} onLongPress={onLongPress} /> : null}
-        {plan && (plan.current || next) ? <Text style={styles.hint}>Mantené apretada una tarjeta para hablar de eso con {SCOUT.name}.</Text> : null}
-      </ScrollView>
-      {dock}
-    </View>
+      </View>
+    </TextBoost.Provider>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   content: { padding: space.lg, gap: space.md },
-  header: { gap: 2, marginBottom: space.xs },
-  headerDate: { fontSize: font.small, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 },
-  headerCity: { fontSize: font.title, fontWeight: '800', color: colors.text },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 32 },
+  headerText: { flex: 1, fontSize: font.body, fontWeight: '700', color: colors.text },
   sim: {
-    alignSelf: 'flex-start',
-    marginTop: space.xs,
     fontSize: font.tiny,
     fontWeight: '700',
     color: '#8A5A00',
@@ -451,9 +725,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.pill,
     overflow: 'hidden',
+    fontVariant: ['tabular-nums'],
   },
-  hint: { fontSize: font.tiny, color: colors.textMuted, textAlign: 'center' },
-  startTour: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.scout, padding: space.lg, gap: space.sm },
-  startTourKicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1, color: colors.scout },
-  startTourTitle: { fontSize: font.h2, fontWeight: '800', color: colors.text },
+  // El riel va de borde a borde (su propio padding lateral).
+  rail: { marginHorizontal: -space.lg },
 });

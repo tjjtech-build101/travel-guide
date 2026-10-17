@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { formatMinutes } from '../../selectors';
@@ -14,23 +15,27 @@ export type TourPreviewProps = {
   /** Primeras 3 paradas. */
   stopNames?: string[];
   map?: ReactNode;
+  /** Todavía no llegó el resumen del tour: una línea esqueleto. */
+  loading?: boolean;
 };
 
 function km(n: number): string {
   return `${n < 10 ? n.toFixed(1).replace('.', ',') : Math.round(n)} km`;
 }
 
-export function TourPreview({ stopsCount, durationMin, distanceKm, stopNames, map }: TourPreviewProps) {
+export function TourPreview({ stopsCount, durationMin, distanceKm, stopNames, map, loading }: TourPreviewProps) {
+  if (loading) return <Skeleton width="60%" height={18} style={styles.preview} />;
   const stats = [
-    `${stopsCount} ${stopsCount === 1 ? 'parada' : 'paradas'}`,
+    stopsCount ? `${stopsCount} ${stopsCount === 1 ? 'parada' : 'paradas'}` : null,
     durationMin ? formatMinutes(durationMin) : null,
     distanceKm ? km(distanceKm) : null,
   ].filter(Boolean) as string[];
   const names = (stopNames ?? []).slice(0, 3);
+  if (!stats.length && !names.length && !map) return null;
   return (
     <View style={styles.preview} accessible accessibilityLabel={`${stats.join(', ')}${names.length ? `. ${names.join(', ')}` : ''}`}>
       {map ? <View style={styles.map}>{map}</View> : null}
-      <Text style={styles.stats}>{stats.join(' · ')}</Text>
+      {stats.length ? <Text style={styles.stats}>{stats.join(' · ')}</Text> : null}
       {names.length ? (
         <Text style={heroText.place} numberOfLines={2}>
           {names.join(' → ')}
@@ -51,12 +56,13 @@ type Props = TourPreviewProps & {
   /** Mensaje si no se pudo empezar. */
   error?: string | null;
   onPress?: () => void;
+  onLongPress?: () => void;
 };
 
-export function HeroTour({ title, when, startLabel, onStart, starting, error, onPress, ...preview }: Props) {
+export function HeroTour({ title, when, startLabel, onStart, starting, error, onPress, onLongPress, ...preview }: Props) {
   const status = when === 'current' ? 'En curso' : startLabel ? `Empieza a las ${startLabel}` : 'Empieza pronto';
   return (
-    <HeroCard onPress={onPress} accessibilityLabel={`Tu tour: ${title}. ${status}`}>
+    <HeroCard onPress={onPress} onLongPress={onLongPress} accessibilityLabel={`Tu tour: ${title}. ${status}`}>
       <Kicker color={colors.scout}>TU TOUR</Kicker>
       <Text style={heroText.title} numberOfLines={2}>
         {title}
