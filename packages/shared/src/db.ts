@@ -20,9 +20,18 @@ export interface ProfileRow {
   locale: string;
   home_currency: string | null;
   interests: Record<string, number> | null;
+  pace: 'relaxed' | 'balanced' | 'intense' | null;
+  chronotype: 'early' | 'normal' | 'night' | null;
+  budget_level: 'low' | 'mid' | 'high' | 'no_limit' | null;
+  dietary: string[] | null;
+  mobility: unknown | null;
+  languages: string[] | null;
+  travel_style: 'planned' | 'mixed' | 'spontaneous' | null;
+  avoid: string[] | null;
   guide_name: string | null;
   guide_voice: string | null;
   guide_style: string | null;
+  inferred_traits: unknown | null;
   onboarded_at: string | null;
 }
 
