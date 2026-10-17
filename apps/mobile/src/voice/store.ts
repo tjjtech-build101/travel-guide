@@ -119,6 +119,11 @@ const TAIL_MS = 600;
 let vadMode: 'normal' | 'barge' = 'normal';
 const MAX_EVENTS = 200;
 let echoCount = 0;
+/** Hay una respuesta del modelo en curso en el servidor (entre response.created y response.done). */
+let responseActive = false;
+/** Se pidió un response.create mientras había otra en curso: se manda al terminar (evita conversation_already_has_active_response). */
+let responseQueued = false;
+let responseWatchdog: ReturnType<typeof setTimeout> | null = null;
 let firstAudioLogged = false;
 
 const now = () => new Date().toISOString();
@@ -186,6 +191,22 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     }
   };
 
+  /** response.create con cola: si el servidor ya está respondiendo, se manda cuando termine. */
+  const requestResponse = () => {
+    if (!conn) return;
+    if (responseActive) {
+      responseQueued = true;
+      return;
+    }
+    responseActive = true; // optimista: hasta que llegue response.created
+    conn.send({ type: 'response.create' });
+    // Si el pedido falló y nunca llega response.created, que la cola no quede trabada.
+    if (responseWatchdog) clearTimeout(responseWatchdog);
+    responseWatchdog = setTimeout(() => {
+      if (responseActive && !get().responding) responseActive = false;
+    }, 4000);
+  };
+
   const log = (dir: VoiceLogEntry['dir'], text: string) =>
     set((s) => ({ events: [...s.events.slice(-(MAX_EVENTS - 1)), { at: Date.now(), dir, text }] }));
 
@@ -217,10 +238,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     });
     conn.send({
       type: 'conversation.item.create',
-      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: languageSwitchMessage(lang) }] },
+      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: languageSwitchMessage(lang, announce) }] },
     });
     // Desde la barra: que confirme ya en el idioma nuevo. Desde set_language la respuesta llega sola tras el output.
-    if (announce) conn.send({ type: 'response.create' });
+    if (announce) requestResponse();
     log('→', `idioma ${lang}`);
   };
 
@@ -275,8 +296,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     }
     hapticResult(results.every((r) => r.res.ok));
     set((s) => ({ toolsRunning: s.toolsRunning.filter((t) => !calls.some((c) => c.call_id === t.callId)) }));
-    // Un solo response.create para todas las llamadas paralelas.
-    conn?.send({ type: 'response.create' });
+    // Un solo response.create para todas las llamadas paralelas (con cola si el servidor ya arrancó otra).
+    requestResponse();
   };
 
   // ---------- eventos del data channel ----------
@@ -321,6 +342,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         break;
       }
       case 'response.created':
+        responseActive = true;
         set({ responding: true });
         break;
       case 'response.output_audio_transcript.delta':
@@ -357,7 +379,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         );
         break;
       case 'response.done': {
+        responseActive = false;
         set({ responding: false });
+        if (responseQueued) {
+          responseQueued = false;
+          requestResponse();
+        }
         const response = e.response as { status?: string; output?: { type: string; call_id: string; name: string; arguments: string }[] };
         const calls = (response?.output ?? []).filter((o) => o.type === 'function_call');
         if (calls.length) {
@@ -368,6 +395,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       case 'error': {
         const err = e.error as { message?: string; code?: string } | undefined;
         console.warn('[voice] error del servidor', err?.code, err?.message);
+        // Carrera con una respuesta automática del VAD: se reintenta cuando termine.
+        if (err?.code === 'conversation_already_has_active_response') responseQueued = true;
         break;
       }
     }
@@ -392,7 +421,11 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
             },
           });
         }
-        if (!isRetry) c.send({ type: 'response.create' });
+        if (!isRetry) {
+          // El saludo con la detección exigente: un ruido de la sala no lo cancela; una voz cercana sí.
+          setVad('barge');
+          requestResponse();
+        }
       },
       onConnectionLost: (state) => void handleLost(state),
     });
@@ -412,6 +445,12 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     });
     const tApi = Date.now() - t0 - tPrep;
     sessionConfig = s.session_config;
+    // Antes de abrir el canal: onOpen (saludo, setVad) ya ve la sesión.
+    set({
+      session: { voice_session_id: s.voice_session_id, instructions_base: s.instructions_base, session_config: s.session_config },
+      scoutName: s.scout.name,
+      lang: s.lang,
+    });
     if (s.answer_sdp) await c.applyAnswer(s.answer_sdp);
     else if (s.client_secret) await c.answer(s.client_secret);
     else throw new Error('La API no devolvió ni answer_sdp ni client_secret');
@@ -473,6 +512,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       scoutAudible = false;
       vadMode = 'normal';
       echoCount = 0;
+      responseActive = false;
+      responseQueued = false;
       set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
       try {
         startCallAudio(get().speaker);
@@ -528,7 +569,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         type: 'conversation.item.create',
         item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: formatVoiceEvent(type, payload) }] },
       });
-      if (sent && opts.respond !== false) conn.send({ type: 'response.create' });
+      if (sent && opts.respond !== false) requestResponse();
       return sent;
     },
 

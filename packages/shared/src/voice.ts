@@ -136,8 +136,10 @@ export function composeVoiceInstructions(base: string, lang: string): string {
 }
 
 /** Mensaje de sistema que se inyecta al cambiar de idioma (la charla previa en español arrastra al modelo). */
-export function languageSwitchMessage(lang: string): string {
-  return `[IDIOMA] Desde ahora respondé únicamente en ${voiceLangName(lang)}. Confirmalo en una frase corta en ese idioma.`;
+export function languageSwitchMessage(lang: string, confirm = true): string {
+  const base = `[IDIOMA] Desde ahora respondé únicamente en ${voiceLangName(lang)}.`;
+  // Por voz (set_language) no hace falta confirmar: la respuesta a la herramienta ya va en el idioma nuevo.
+  return confirm ? `${base} Confirmalo en una frase corta en ese idioma.` : base;
 }
 
 /**
