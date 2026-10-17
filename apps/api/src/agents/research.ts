@@ -1,19 +1,22 @@
-// research (voz): "no lo sé, lo averiguo y te cuento". Job en segundo plano con presupuesto de tiempo:
+// research (voz): "no lo sé, lo averiguo y te cuento".
+//   0) memoria: si el lugar ya está en place_library con facts verificados que responden la pregunta, contesta al toque
+//      (sin job, sin web_search)
 //   1) investigar: Claude + web_search/web_fetch → datos atómicos con su URL (captureViaTool, PRD 06)
 //   2) verificar EN PARALELO cada dato contra su URL (verifyFact + VERIFY_SYSTEM del generador de tours)
 //   3) responder en ≤60 palabras SOLO con lo verificado (sin herramientas)
-//   4) si es sobre un lugar de place_library, sumar los facts verificados (los usan la cámara y los tours)
+//   4) guardar en place_library (crea el lugar si no existía): quote, verified_at, origin, question
 // La voz escucha el job por Realtime y recibe [EVENTO:research_ready].
+import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import type { ResearchResult, ToolInput } from '@build101/shared';
 import { createJob, JobProgress } from '../jobs';
+import { appendFacts, ensurePlace, findPlaceByName, type LibraryFact } from '../places/library';
 import type { ToolCtx } from '../tools/types';
 import { anthropicClient, PLANNER_MODEL, textOf, type AnyBlock } from './llm';
 import { addUsage, emptyUsage, type Usage } from './schemas';
 import { anthropicTourLlm, captureViaTool, type TourLlmConfig } from './tourLlm';
 import { renderVerifyUser, VERIFY_SYSTEM } from './tourPrompts';
 import { ResearchOutput, type ResearchOutputT } from './tourSchemas';
-import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 
 /** Tope total (Vercel corta a los 300 s; la voz espera "un ratito", no minutos). */
 const BUDGET_MS = 75_000;
@@ -27,14 +30,43 @@ export function renderResearchQUser(i: Pick<ToolInput<'research'>, 'question' | 
 }
 
 const AnswerOut = z.object({ answer: z.string() });
+const CacheOut = z.object({
+  answerable: z.boolean().describe('true solo si los datos responden la pregunta (lo central, no algo parecido)'),
+  answer: z.string().describe('Respuesta hablada ≤60 palabras con esos datos; vacío si answerable=false'),
+});
 
 export const ANSWER_SYSTEM = `Sos un guía de viaje que habla en voz alta. Respondé la pregunta en máximo 60 palabras, en tono hablado, usando SOLO los datos verificados que te paso (podés reordenarlos y conectarlos, no agregar años, nombres ni cifras que no estén). Si los datos no alcanzan para responder del todo, decí qué sí se sabe. No menciones fuentes ni "los datos".`;
+export const CACHE_SYSTEM = `Te paso una pregunta y los datos verificados que ya tenemos de un lugar. Decidí si esos datos responden la pregunta (lo que se pregunta concretamente, no algo parecido). Si sí, respondé en máximo 60 palabras en tono hablado usando SOLO esos datos. Si no alcanzan, answerable=false.`;
+
+export type VerifiedFact = { text: string; source_url: string; quote: string };
 
 export interface ResearchLLM {
   research(args: { question: ToolInput<'research'>; config: TourLlmConfig; signal: AbortSignal }): Promise<{ facts: ResearchOutputT['facts']; usage: Usage }>;
-  verify(args: { fact: { text: string; source_url: string }; config: TourLlmConfig }): Promise<{ supported: boolean; usage: Usage }>;
+  verify(args: { fact: { text: string; source_url: string }; config: TourLlmConfig }): Promise<{ supported: boolean; quote: string; usage: Usage }>;
   answer(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answer: string; usage: Usage }>;
+  fromMemory(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answerable: boolean; answer: string }>;
 }
+
+/** Modelo para las respuestas cortas (memoria / respuesta final): el rápido de visión si está configurado. */
+function fastModel(): string {
+  return process.env.RESEARCH_FAST_MODEL?.trim() || process.env.VISION_MODEL?.trim() || PLANNER_MODEL;
+}
+
+async function structured<T extends z.ZodType>(schema: T, system: string, user: string, model: string): Promise<z.infer<T>> {
+  const client = anthropicClient();
+  const format = betaZodOutputFormat(schema);
+  const params = {
+    model,
+    max_tokens: 800,
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: format.schema } },
+    system: [{ type: 'text', text: system }],
+    messages: [{ role: 'user', content: user }],
+  };
+  const msg = (await client.beta.messages.create(params as never)) as unknown as { content: AnyBlock[]; usage: Parameters<typeof addUsage>[1] };
+  return format.parse(textOf(msg.content)) as z.infer<T>;
+}
+
+const factsBlock = (facts: { text: string }[]) => facts.map((f) => `- ${f.text}`).join('\n');
 
 export function anthropicResearchLlm(): ResearchLLM {
   const tour = anthropicTourLlm();
@@ -54,25 +86,15 @@ export function anthropicResearchLlm(): ResearchLLM {
     },
     async verify({ fact, config }) {
       const v = await tour.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(fact), config });
-      return { supported: !!(v.result?.supported && v.result.quote.trim()), usage: v.usage };
+      const quote = v.result?.quote?.trim() ?? '';
+      return { supported: !!(v.result?.supported && quote), quote, usage: v.usage };
     },
     async answer({ question, facts, language }) {
-      const client = anthropicClient();
-      const format = betaZodOutputFormat(AnswerOut);
-      const params = {
-        model: PLANNER_MODEL,
-        max_tokens: 800,
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: format.schema } },
-        system: [{ type: 'text', text: ANSWER_SYSTEM }],
-        messages: [
-          {
-            role: 'user',
-            content: `Idioma: ${language}\nPregunta: ${question}\nDatos verificados:\n${facts.map((f) => `- ${f.text}`).join('\n')}`,
-          },
-        ],
-      };
-      const msg = (await client.beta.messages.create(params as never)) as unknown as { content: AnyBlock[]; usage: Parameters<typeof addUsage>[1] };
-      return { answer: format.parse(textOf(msg.content)).answer, usage: addUsage(emptyUsage(), msg.usage) };
+      const out = await structured(AnswerOut, ANSWER_SYSTEM, `Idioma: ${language}\nPregunta: ${question}\nDatos verificados:\n${factsBlock(facts)}`, PLANNER_MODEL);
+      return { answer: out.answer, usage: emptyUsage() };
+    },
+    async fromMemory({ question, facts, language }) {
+      return structured(CacheOut, CACHE_SYSTEM, `Idioma: ${language}\nPregunta: ${question}\nDatos verificados del lugar:\n${factsBlock(facts)}`, fastModel());
     },
   };
 }
@@ -80,37 +102,38 @@ export function anthropicResearchLlm(): ResearchLLM {
 const RESEARCH_CONFIG: TourLlmConfig = { effort: 'medium', maxTokens: 8000, maxIterations: 8, fallbacks: true };
 const VERIFY_CONFIG: TourLlmConfig = { effort: 'low', maxTokens: 4000, maxIterations: 4, fallbacks: true };
 
-type Fact = { text: string; source_url: string; verified?: boolean };
+const near = (i: ToolInput<'research'>) => (i.lat != null && i.lng != null ? { lat: i.lat, lng: i.lng } : null);
 
-const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
-
-/** Suma facts verificados a place_library sin duplicar por texto. Devuelve cuántos agregó. */
-export function mergeFacts(existing: Fact[] | null, add: { text: string; source_url: string }[]): { facts: Fact[]; added: number } {
-  const list = [...(existing ?? [])];
-  const seen = new Set(list.map((f) => norm(f.text)));
-  let added = 0;
-  for (const f of add) {
-    if (seen.has(norm(f.text))) continue;
-    seen.add(norm(f.text));
-    list.push({ text: f.text, source_url: f.source_url, verified: true });
-    added++;
-  }
-  return { facts: list, added };
+/** El lugar ya conocido de la pregunta (por id o por nombre). No crea nada. */
+async function knownPlaceId(ctx: ToolCtx, input: ToolInput<'research'>): Promise<string | null> {
+  if (input.place_id) return input.place_id;
+  if (!input.place_name) return null;
+  return findPlaceByName(ctx.admin, input.place_name, near(input));
 }
 
-/** place_library por nombre (sin tildes ni mayúsculas), el más cercano si hay ubicación. */
-async function findPlaceId(ctx: ToolCtx, input: ToolInput<'research'>): Promise<string | null> {
-  if (!input.place_name) return null;
-  const words = norm(input.place_name).split(' ').filter((w) => w.length > 3);
-  if (!words.length) return null;
-  const { data } = await ctx.admin.from('place_library').select('id,name,lat,lng').ilike('name', `%${words.sort((a, b) => b.length - a.length)[0]}%`).limit(10);
-  const rows = ((data ?? []) as { id: string; name: string | null; lat: number | null; lng: number | null }[]).filter((p) =>
-    words.every((w) => norm(p.name ?? '').includes(w)),
-  );
-  if (!rows.length) return null;
-  if (input.lat == null || input.lng == null) return rows[0].id;
-  const d = (p: { lat: number | null; lng: number | null }) => (p.lat == null || p.lng == null ? Infinity : (p.lat - input.lat!) ** 2 + (p.lng - input.lng!) ** 2);
-  return rows.sort((a, b) => d(a) - d(b))[0].id;
+async function language(ctx: ToolCtx, input: ToolInput<'research'>): Promise<string> {
+  if (input.language) return input.language;
+  const { data } = await ctx.admin.from('profiles').select('locale').eq('id', ctx.userId).maybeSingle();
+  return (data?.locale as string | undefined) ?? 'es';
+}
+
+export type MemoryHit = { cached: true; answer: string; facts: { text: string; source_url: string }[]; place_id: string };
+
+/** Paso 0: ¿la memoria (place_library) ya responde? null si no (o si falla: se investiga igual). */
+export async function answerFromMemory(input: ToolInput<'research'>, ctx: ToolCtx, llm: ResearchLLM = anthropicResearchLlm()): Promise<MemoryHit | null> {
+  try {
+    const placeId = await knownPlaceId(ctx, input);
+    if (!placeId) return null;
+    const { data } = await ctx.admin.from('place_library').select('facts').eq('id', placeId).maybeSingle();
+    const facts = ((data?.facts ?? []) as LibraryFact[]).filter((f) => f.verified && f.text && f.source_url);
+    if (!facts.length) return null;
+    const r = await llm.fromMemory({ question: input.question, facts, language: await language(ctx, input) });
+    if (!r.answerable || !r.answer.trim()) return null;
+    return { cached: true, answer: r.answer, facts: facts.map((f) => ({ text: f.text, source_url: f.source_url })), place_id: placeId };
+  } catch (e) {
+    console.warn('[research] memoria:', (e as Error).message);
+    return null;
+  }
 }
 
 export async function startResearch(input: ToolInput<'research'>, ctx: ToolCtx, llm: ResearchLLM = anthropicResearchLlm()) {
@@ -123,8 +146,15 @@ export async function startResearch(input: ToolInput<'research'>, ctx: ToolCtx, 
   return { job_id: jobId, run: () => runResearch({ jobId, input, ctx, llm }) };
 }
 
-export async function runResearch(args: { jobId: string; input: ToolInput<'research'>; ctx: ToolCtx; llm: ResearchLLM }): Promise<ResearchResult> {
+export async function runResearch(args: {
+  jobId: string;
+  input: ToolInput<'research'>;
+  ctx: ToolCtx;
+  llm: ResearchLLM;
+  ensure?: typeof ensurePlace;
+}): Promise<ResearchResult> {
   const { jobId, input, ctx, llm } = args;
+  const ensure = args.ensure ?? ensurePlace;
   const progress = new JobProgress(ctx.admin, jobId, [{ at: new Date().toISOString(), text: 'Investigando…' }]);
   await progress.set({ status: 'running' });
   progress.startHeartbeat(() => 'Sigo investigando…');
@@ -132,11 +162,7 @@ export async function runResearch(args: { jobId: string; input: ToolInput<'resea
   const budget = setTimeout(() => ctrl.abort(), BUDGET_MS);
   const t0 = Date.now();
   try {
-    const { data: profile } = await ctx.admin.from('profiles').select('locale').eq('id', ctx.userId).maybeSingle();
-    const language = input.language ?? (profile?.locale as string | undefined) ?? 'es';
-
-    // La voz suele mandar el nombre del lugar sin id: lo buscamos en place_library cerca (si no, no se guarda nada).
-    const placeId = input.place_id ?? (await findPlaceId(ctx, input));
+    const lang = await language(ctx, input);
     const found = await llm.research({ question: input, config: RESEARCH_CONFIG, signal: ctrl.signal });
     void progress.push(`Encontré ${found.facts.length} datos, verificando…`);
 
@@ -145,26 +171,28 @@ export async function runResearch(args: { jobId: string; input: ToolInput<'resea
     const checks = await Promise.all(
       found.facts.map((fact) =>
         Promise.race([
-          llm.verify({ fact, config: VERIFY_CONFIG }).then((v) => v.supported).catch(() => false),
-          new Promise<boolean>((r) => setTimeout(() => r(false), remaining)),
+          llm.verify({ fact, config: VERIFY_CONFIG }).catch(() => ({ supported: false, quote: '' })),
+          new Promise<{ supported: false; quote: '' }>((r) => setTimeout(() => r({ supported: false, quote: '' }), remaining)),
         ]),
       ),
     );
-    const verified = found.facts.filter((_, i) => checks[i]);
+    const verified: VerifiedFact[] = found.facts.flatMap((f, i) => (checks[i].supported ? [{ ...f, quote: checks[i].quote }] : []));
     const rejected = found.facts.length - verified.length;
 
-    const answer = verified.length ? (await llm.answer({ question: input.question, facts: verified, language })).answer : '';
+    const answer = verified.length ? (await llm.answer({ question: input.question, facts: verified, language: lang })).answer : '';
 
+    // Memoria: al lugar (si no existía y es un lugar, se crea con sus coordenadas reales).
+    let placeId = await knownPlaceId(ctx, input);
     let saved = 0;
-    if (placeId && verified.length) {
-      const { data: place } = await ctx.admin.from('place_library').select('facts').eq('id', placeId).maybeSingle();
-      if (place) {
-        const merged = mergeFacts(place.facts as Fact[] | null, verified);
-        if (merged.added) {
-          const { error } = await ctx.admin.from('place_library').update({ facts: merged.facts, updated_at: new Date().toISOString() }).eq('id', placeId);
-          if (error) console.warn('[research] place_library:', error.message);
-          else saved = merged.added;
-        }
+    if (verified.length) {
+      if (!placeId && input.place_name) placeId = (await ensure(ctx.admin, { name: input.place_name, near: near(input), language: lang }))?.id ?? null;
+      if (placeId) {
+        const now = new Date().toISOString();
+        saved = await appendFacts(
+          ctx.admin,
+          placeId,
+          verified.map((f) => ({ text: f.text, source_url: f.source_url, verified: true, quote: f.quote, verified_at: now, origin: 'research', question: input.question })),
+        );
       }
     }
 
