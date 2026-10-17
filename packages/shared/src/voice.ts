@@ -130,6 +130,16 @@ export type ScheduleAlertPayload = {
   late_by_min: number | null;
 };
 
+/** Fuentes que llegan a la llamada (research, cámara, paradas del tour): las muestra la hoja de Fuentes. */
+export type VoiceSourceGroup = {
+  id: string;
+  kind: 'research' | 'photo' | 'stop';
+  /** De qué se trata: la pregunta, el lugar de la foto o la parada. */
+  topic: string;
+  items: { text?: string; url: string; quote?: string; title?: string }[];
+  at: number;
+};
+
 /** Payload de [EVENTO:tour_ready]. */
 export type TourReadyEvent = {
   tour_id: string;

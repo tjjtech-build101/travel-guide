@@ -11,6 +11,7 @@ import { ScoutAvatar } from '../ui/ScoutAvatar';
 import { colors, font, radius, space } from '../ui/theme';
 import { setLocationSource, useVoiceStore } from './store';
 import { ActionCards } from './ui/ActionCards';
+import { SourcesSheet, SourcesToast } from './ui/Sources';
 import { CallBar } from './ui/CallBar';
 import { CallSummary } from './ui/CallSummary';
 import { CameraModal } from './camera/CameraModal';
@@ -19,6 +20,7 @@ import { CallView } from './ui/CallView';
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const status = useVoiceStore((s) => s.status);
   const expanded = useVoiceStore((s) => s.expanded);
+  const sourcesOpen = useVoiceStore((s) => s.sourcesOpen);
   const insets = useSafeAreaInsets();
   const { provider } = useLocationProvider();
   // El store vive fuera de React: le pasamos de dónde sacar la ubicación (real | simulada).
@@ -36,11 +38,18 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       <SafeAreaInsetsContext.Provider value={inCall ? { ...insets, top: 0 } : insets}>
         <View style={styles.flex}>
           {children}
-          {inCall && !expanded ? <ActionCards style={styles.floatingCards} /> : null}
+          {inCall && !expanded ? (
+            <View style={styles.floatingCards} pointerEvents="box-none">
+              <ActionCards />
+              <SourcesToast style={{ marginTop: space.sm }} />
+            </View>
+          ) : null}
         </View>
       </SafeAreaInsetsContext.Provider>
       <CallView />
       <CameraModal />
+      {/* Llamada minimizada: la hoja de Fuentes se abre sobre la app (con la vista de llamada abierta va adentro). */}
+      <SourcesSheet visible={sourcesOpen && inCall && !expanded} />
       <CallSummary />
       <MicPermissionSheet />
     </View>

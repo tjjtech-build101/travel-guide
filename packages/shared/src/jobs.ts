@@ -32,7 +32,8 @@ export type ResearchResult = {
   question: string;
   /** ≤60 palabras, armada SOLO con facts verificados. Vacía si no se encontró nada respaldado. */
   answer: string;
-  facts: { text: string; source_url: string }[];
+  /** quote = frase textual de la fuente que respalda el dato (la muestra la hoja de Fuentes). */
+  facts: { text: string; source_url: string; quote?: string }[];
   /** Datos investigados que no pasaron la verificación (para la mini-evaluación). */
   rejected: number;
   place_id: string | null;
