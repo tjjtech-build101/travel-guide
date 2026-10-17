@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
+import { registerFreshPositionTools, setFreshPositionSource } from '../location/freshPositionTools';
 import { useLocationProvider } from '../location/LocationContext';
 import { startBackgroundUpdates, stopBackgroundUpdates } from './backgroundLocation';
 import { useTourStore } from './store';
@@ -17,8 +18,12 @@ export function TourRunner() {
 
   useEffect(() => {
     registerTourVoiceTools();
+    registerFreshPositionTools();
     void useTourStore.getState().hydrate();
   }, []);
+
+  // Posición fresca para search_places / route_eta de la voz (location/freshPositionTools.ts).
+  useEffect(() => setFreshPositionSource(() => provider.getCurrent()), [provider]);
 
   // Motor: cada muestra del provider actual + reloj.
   useEffect(() => {
