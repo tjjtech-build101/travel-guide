@@ -71,20 +71,21 @@ export class JobError extends Error {
   }
 }
 
-function anthropicClient(): Anthropic {
+// Exportados: los reusan otros agentes (ej. tourLlm.ts) para no duplicar el cliente ni el parseo.
+export function anthropicClient(): Anthropic {
   const apiKey = env().ANTHROPIC_API_KEY;
   if (!apiKey) throw notConfigured('Anthropic (ANTHROPIC_API_KEY)');
   // 2 reintentos (429/5xx) por defecto del SDK.
   return new Anthropic({ apiKey });
 }
 
-function fallbackParams(config: PlannerConfig): Record<string, unknown> {
+export function fallbackParams(config: Pick<PlannerConfig, 'fallbacks'>): Record<string, unknown> {
   return config.fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {};
 }
 
-type AnyBlock = { type: string; text?: string };
+export type AnyBlock = { type: string; text?: string };
 
-function textOf(content: AnyBlock[]): string {
+export function textOf(content: AnyBlock[]): string {
   return content
     .filter((b) => b.type === 'text' && typeof b.text === 'string')
     .map((b) => b.text)

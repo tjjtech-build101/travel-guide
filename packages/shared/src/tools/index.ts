@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   AddBlockInput,
   AddIdeaInput,
+  EventsSearchInput,
+  GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
   MoveBlockInput,
@@ -13,6 +15,7 @@ import {
   SearchPlacesInput,
   UndoInput,
   UpdateBlockInput,
+  WeatherInput,
 } from './schemas';
 
 export * from './schemas';
@@ -69,6 +72,19 @@ export const toolDefs = {
     description:
       'Arma un viaje entero (tramos, días y bloques) a partir de la conversación. Es un trabajo en segundo plano: devuelve { job_id, trip_id } y el progreso se ve en agent_jobs.',
     input: PlanTripInput,
+  },
+  generate_tour: {
+    description:
+      'Arma un tour con paradas verificadas (planificado, espontáneo o explorador). Trabajo en segundo plano: devuelve { job_id, tour_id } y el progreso (y las paradas) se ven por Realtime en agent_jobs / tour_stops.',
+    input: GenerateTourInput,
+  },
+  weather: {
+    description: 'Pronóstico diario y horario (Open-Meteo) para un punto y rango de fechas.',
+    input: WeatherInput,
+  },
+  events_search: {
+    description: 'Busca eventos (con fecha y fuente) en una ciudad para un rango de fechas.',
+    input: EventsSearchInput,
   },
 } as const satisfies Record<string, ToolDef>;
 

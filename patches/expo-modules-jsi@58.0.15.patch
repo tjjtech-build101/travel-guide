@@ -1,0 +1,61 @@
+diff --git a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptActor.swift b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptActor.swift
+index bedb057d4fb756444013bcfd46b1bde3cd90b0a4..d039c34d62f5441f446bc91ff5b8e587bce17720 100644
+--- a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptActor.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptActor.swift
+@@ -95,7 +95,7 @@ internal class JavaScriptExecutor: SerialExecutor, @unchecked Sendable {
+ 
+ /// An actor that is dedicated for the specific runtime.
+ internal actor JavaScriptRuntimeActor {
+-  private weak let runtime: JavaScriptRuntime?
++  private nonisolated(unsafe) weak var runtime: JavaScriptRuntime?
+   nonisolated private let executor: JavaScriptExecutor
+ 
+   init(runtime: JavaScriptRuntime) {
+@@ -114,7 +114,7 @@ internal actor JavaScriptRuntimeActor {
+ 
+ /// Serial executor dedicated for the specific runtime.
+ internal final class JavaScriptRuntimeExecutor: JavaScriptExecutor, @unchecked Sendable {
+-  private weak let runtime: JavaScriptRuntime?
++  private nonisolated(unsafe) weak var runtime: JavaScriptRuntime?
+ 
+   init(runtime: JavaScriptRuntime) {
+     self.runtime = runtime
+diff --git a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptCallback.swift b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptCallback.swift
+index 56638fe844641c5ce868ee00405ad16f8243ce88..0fb34ed136dd7688e45d3123051c42d1c6c1c30d 100644
+--- a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptCallback.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptCallback.swift
+@@ -34,7 +34,7 @@ public final class JavaScriptCallback: Sendable {
+     }
+   }
+ 
+-  private weak let runtime: JavaScriptRuntime?
++  private nonisolated(unsafe) weak var runtime: JavaScriptRuntime?
+   private let longLivedState: LongLivedState
+ 
+   /// Wraps the function in `value`. Throws when the value isn't a function.
+diff --git a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
+index 808b2d4ee7b7ab12b4a19f33614d7bda78c29ec2..0d5bfdec1bcd982c6ecf2f150182d71e7d451236 100644
+--- a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptError.swift
+@@ -12,7 +12,7 @@ internal import jsi
+ ///   it may be caught on any thread, but reading its value or releasing it should happen on the
+ ///   JavaScript thread while the runtime is alive.
+ public final class JavaScriptError: Error, Sendable {
+-  private weak let runtime: JavaScriptRuntime?
++  private nonisolated(unsafe) weak var runtime: JavaScriptRuntime?
+   nonisolated(unsafe) private let pointee: facebook.jsi.JSError
+ 
+   internal init(_ runtime: JavaScriptRuntime, _ error: facebook.jsi.JSError) {
+diff --git a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptPromise.swift b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptPromise.swift
+index abbe99d98bfe5a107ee8d34856e769262ef54849..5935b982ccef59b4461565fa27db9d20730e6a69 100644
+--- a/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptPromise.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/Values/JavaScriptPromise.swift
+@@ -10,7 +10,7 @@ internal import jsi
+ public struct JavaScriptPromise: JavaScriptType, ~Copyable {
+   private typealias PromiseContinuation = CheckedContinuation<JavaScriptValue.Ref, any Error>
+ 
+-  private weak let runtime: JavaScriptRuntime?
++  private nonisolated(unsafe) weak var runtime: JavaScriptRuntime?
+ 
+   /// Owns the promise's JSI values (the object and, for a deferred promise, its resolve/reject
+   /// functions). Registered with the runtime's ``LongLivedObjectCollection`` so they're released on

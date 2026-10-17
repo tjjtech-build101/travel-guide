@@ -54,10 +54,13 @@ export async function startNearbyTour(input: StartNearbyTourInput): Promise<Near
   if (!token) return { ok: false, code: 'error', message: 'No hay sesión' };
   try {
     // generate_tour todavía no está en packages/shared (lo agrega PRD 06): llamada cruda.
+    // generate_tour (PRD 06) espera start_lat/start_lng (coincide con el modo 'planned'): se traduce acá,
+    // la firma pública startNearbyTour({lat, lng, ...}) de este archivo no cambia.
+    const { lat, lng, ...rest } = input;
     const res = await fetch(`${env.apiUrl}/tools/${NEARBY_TOUR_TOOL}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ mode: 'spontaneous', duration_min: 60, ...input }),
+      body: JSON.stringify({ mode: 'spontaneous', duration_min: 60, start_lat: lat, start_lng: lng, ...rest }),
     });
     const json = (await res.json().catch(() => null)) as
       | { ok: true; data: { job_id: string; tour_id: string } }
