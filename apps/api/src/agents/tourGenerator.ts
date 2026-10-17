@@ -450,9 +450,19 @@ async function pool<T, R>(items: T[], size: number, fn: (t: T, i: number) => Pro
   return out;
 }
 
+/**
+ * Presupuesto de tiempo total del job (Vercel corta a los 300s, PRD 06 "runtime en Vercel"): a partir
+ * de esto dejamos de investigar/verificar lugares nuevos y escribimos lo que ya esté listo, en vez de
+ * que la función se corte a mitad de camino y la fila quede 'running' para siempre (visto en el iPhone,
+ * commit 263f073: la voz esperaba 4 min a que el job terminara solo).
+ */
+const JOB_DEADLINE_MS = 260_000;
+
 export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<void> {
   const { jobId, tourId, tripId, input, ctx } = args;
   const { admin } = ctx;
+  const t0 = Date.now();
+  const timeLeftMs = () => JOB_DEADLINE_MS - (Date.now() - t0);
   const progress = new JobProgress(admin, jobId, [{ at: new Date().toISOString(), text: args.firstLine }]);
   const usage: Usage = emptyUsage();
   const stats = { web_search_calls: 0, places_reused: 0, places_new: 0, facts_verified: 0, facts_rejected: 0 };
@@ -517,8 +527,28 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
 
     // ── Investigación + verificación (hasta 4 lugares en paralelo, solo los que no tienen ≥4 facts verificados)
     void progress.push('Investigando y verificando datos…');
-    const enriched = await pool(ordered, 4, async (c) => {
-      let facts = c.facts.filter((f) => f.verified);
+
+    /** Un fact: investigar su fuente original; si no se sostiene, UNA fuente alternativa (en paralelo entre facts). */
+    const verifyOneFact = async (f: { text: string; source_url: string }): Promise<Fact | null> => {
+      const v1 = await deps.llm.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(f), config: deps.config });
+      addUsage(usage, v1.usage as never);
+      if (v1.result?.supported && v1.result.quote.trim()) return { text: f.text, source_url: f.source_url, verified: true };
+      if (timeLeftMs() < 20_000) return null; // sin tiempo para una segunda vuelta
+      const alt = await deps.llm.findAlternateSource({ system: ALT_SOURCE_SYSTEM, user: renderAltSourceUser(f), config: deps.config });
+      addUsage(usage, alt.usage as never);
+      stats.web_search_calls += alt.web_search_calls;
+      if (!alt.source_url) return null;
+      const v2 = await deps.llm.verifyFact({
+        system: VERIFY_SYSTEM,
+        user: renderVerifyUser({ text: f.text, source_url: alt.source_url }),
+        config: deps.config,
+      });
+      addUsage(usage, v2.usage as never);
+      return v2.result?.supported && v2.result.quote.trim() ? { text: f.text, source_url: alt.source_url, verified: true } : null;
+    };
+
+    const enrichOnePlace = async (c: RawCandidate): Promise<RawCandidate> => {
+      const facts = c.facts.filter((f) => f.verified);
       if (facts.length >= 4) return { ...c, facts: c.facts };
       const research = await deps.llm.research({
         system: RESEARCH_SYSTEM,
@@ -527,36 +557,32 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
       });
       addUsage(usage, research.usage as never);
       stats.web_search_calls += research.web_search_calls;
-      const verified: Fact[] = [];
-      for (const f of research.facts) {
-        const v1 = await deps.llm.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(f), config: deps.config });
-        addUsage(usage, v1.usage as never);
-        if (v1.result?.supported && v1.result.quote.trim()) {
-          verified.push({ text: f.text, source_url: f.source_url, verified: true });
-          continue;
-        }
-        const alt = await deps.llm.findAlternateSource({ system: ALT_SOURCE_SYSTEM, user: renderAltSourceUser(f), config: deps.config });
-        addUsage(usage, alt.usage as never);
-        stats.web_search_calls += alt.web_search_calls;
-        if (alt.source_url) {
-          const v2 = await deps.llm.verifyFact({
-            system: VERIFY_SYSTEM,
-            user: renderVerifyUser({ text: f.text, source_url: alt.source_url }),
-            config: deps.config,
-          });
-          addUsage(usage, v2.usage as never);
-          if (v2.result?.supported && v2.result.quote.trim()) {
-            verified.push({ text: f.text, source_url: alt.source_url, verified: true });
-            continue;
-          }
-        }
-        stats.facts_rejected++;
-      }
+      // Facts del mismo lugar en paralelo (antes era secuencial: con 6-8 facts por lugar llegaba a pasarse
+      // de los 300s de Vercel — visto en el iPhone, commit 263f073).
+      const results = await Promise.all(research.facts.map(verifyOneFact));
+      const verified = results.filter((f): f is Fact => f !== null);
+      stats.facts_rejected += results.length - verified.length;
       stats.facts_verified += verified.length;
       if (!c.place_library_id) stats.places_new++;
       return { ...c, facts: [...c.facts, ...verified] };
+    };
+
+    // Por lugar completado se guarda enseguida en enrichedByIndex (no se espera a todos): si el tiempo
+    // se agota, seguimos con lo que ya esté listo en vez de que la función se corte sin escribir nada.
+    const enrichedByIndex: RawCandidate[] = [...ordered];
+    let placesEnriched = 0;
+    const enrichAll = pool(ordered, 4, async (c, i) => {
+      const result = await enrichOnePlace(c);
+      enrichedByIndex[i] = result;
+      placesEnriched++;
+      return result;
     });
-    const withFacts = enriched.map((r, i) => (r.status === 'fulfilled' ? r.value : { ...ordered[i], facts: ordered[i].facts }));
+    const deadline = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), Math.max(0, timeLeftMs())));
+    const raced = await Promise.race([enrichAll.then(() => 'done' as const), deadline]);
+    if (raced === 'timeout') {
+      void progress.push(`Sin tiempo para todos: sigo con ${placesEnriched}/${ordered.length} lugares investigados`);
+    }
+    const withFacts = enrichedByIndex;
     void progress.push(`Verifiqué ${stats.facts_verified} datos`);
 
     // ── Generación (una sola llamada, effort high)
