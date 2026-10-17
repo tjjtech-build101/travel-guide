@@ -1,5 +1,5 @@
 // OpenAI Realtime: config de la sesión y token temporal (client_secret). La key nunca sale del servidor.
-import { REALTIME_TRANSCRIBE_MODEL, SCOUT, toRealtimeTools, TOOL_NAMES, type ToolName } from '@build101/shared';
+import { REALTIME_TRANSCRIBE_MODEL, SCOUT, toRealtimeTools, TOOL_NAMES, VOICE_CLIENT_TOOLS, type ToolName } from '@build101/shared';
 import { env } from '../env';
 import { notConfigured, upstream } from '../errors';
 import { handlers } from '../tools/registry';
@@ -51,12 +51,13 @@ export function turnDetection(v: VadConfig): Record<string, unknown> {
 }
 
 export function realtimeModel(): string {
-  return process.env.OPENAI_REALTIME_MODEL?.trim() || 'gpt-realtime';
+  // 2.1: 8/8 en la mini evaluación de herramientas contra 7/8 de gpt-realtime (encadena y no corta en "lo busco").
+  return process.env.OPENAI_REALTIME_MODEL?.trim() || 'gpt-realtime-2.1';
 }
 
 /** El objeto `session` de client_secrets (también se devuelve al celu como session_config). */
 export function buildRealtimeSession(args: { instructions: string; lang: string; tools?: ToolName[] }) {
-  const tools = toRealtimeTools(args.tools ?? voiceToolNames());
+  const tools = [...toRealtimeTools(args.tools ?? voiceToolNames()), ...VOICE_CLIENT_TOOLS];
   return {
     type: 'realtime' as const,
     model: realtimeModel(),

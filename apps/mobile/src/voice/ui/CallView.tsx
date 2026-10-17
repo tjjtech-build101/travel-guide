@@ -183,14 +183,22 @@ function Round({ children, label, on, onPress }: { children: React.ReactNode; la
 }
 
 function TranscriptSheet({ visible, lines, onClose }: { visible: boolean; lines: Line[]; onClose: () => void }) {
+  const [tab, setTab] = useState<'transcript' | 'events'>('transcript');
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={styles.sheet}>
         <View style={styles.sheetHead}>
-          <Text style={styles.sheetTitle}>Transcript</Text>
+          <View style={styles.tabs}>
+            {(['transcript', 'events'] as const).map((t) => (
+              <Pressable key={t} onPress={() => setTab(t)} style={[styles.tab, tab === t && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: tab === t }}>
+                <Text style={[styles.tabText, tab === t && styles.tabTextOn]}>{t === 'transcript' ? 'Transcript' : 'Eventos'}</Text>
+              </Pressable>
+            ))}
+          </View>
           <Button label="Cerrar" variant="ghost" onPress={onClose} />
         </View>
-        <ScrollView contentContainerStyle={{ padding: space.lg, gap: space.sm }}>
+        {tab === 'events' ? <EventsLog /> : null}
+        <ScrollView style={tab === 'events' ? styles.hidden : undefined} contentContainerStyle={{ padding: space.lg, gap: space.sm }}>
           {lines.filter((l) => l.text.trim()).length === 0 ? <Text style={styles.empty}>Todavía no hablaron.</Text> : null}
           {lines
             .filter((l) => l.text.trim())
@@ -205,7 +213,32 @@ function TranscriptSheet({ visible, lines, onClose }: { visible: boolean; lines:
   );
 }
 
+/** Consola de la llamada: eventos del data channel, herramientas (args → resultado), ecos descartados, idioma. */
+function EventsLog() {
+  const events = useVoiceStore((s) => s.events);
+  const t0 = events[0]?.at ?? 0;
+  return (
+    <ScrollView contentContainerStyle={{ padding: space.md, gap: 2 }}>
+      {events.length === 0 ? <Text style={styles.empty}>Sin eventos todavía.</Text> : null}
+      {events.map((e, i) => (
+        <Text key={i} style={[styles.event, e.dir === '🔧' && styles.eventTool, e.dir === '⚠️' && styles.eventWarn]} selectable>
+          {`${((e.at - t0) / 1000).toFixed(1).padStart(6)}s ${e.dir} ${e.text}`}
+        </Text>
+      ))}
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
+  tabs: { flexDirection: 'row', gap: space.sm },
+  tab: { paddingHorizontal: space.md, minHeight: 36, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: colors.surfaceMuted },
+  tabOn: { backgroundColor: colors.text },
+  tabText: { fontWeight: '700', color: colors.text, fontSize: font.small },
+  tabTextOn: { color: '#fff' },
+  hidden: { display: 'none' },
+  event: { fontFamily: 'Menlo', fontSize: 11, color: colors.text },
+  eventTool: { color: colors.primary, fontWeight: '700' },
+  eventWarn: { color: colors.danger },
   root: { flex: 1, backgroundColor: BG },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl, gap: space.md },

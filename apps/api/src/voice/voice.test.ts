@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
+import { composeVoiceInstructions, SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
 import { topInterests, upcomingLines } from './context';
 import { buildInstructions, nowHHMM, nowText, type InstructionsInput } from './instructions';
 import { buildRealtimeSession, createCall, createClientSecret, turnDetection, vadConfig, voiceToolNames } from './openai';
@@ -36,7 +36,9 @@ describe('instrucciones del scout', () => {
     expect(b).toContain('-34.90000, -56.20000');
     expect(b).toContain('saludá en una frase');
     expect(b).toContain('- tu persona: user_id=u1\n- trip_id=t1\n- hoy 2026-10-17: day_id=d1, leg_id=l1');
-    expect(full).toBe(`${b}\n${voiceLangLine('es')}`);
+    expect(full).toBe(composeVoiceInstructions(b, 'es'));
+    expect(full.startsWith(voiceLangLine('es'))).toBe(true);
+    expect(b).toContain('SIEMPRE con herramientas');
   });
 
   it('con focus abre hablando de eso; sin viaje lo dice', () => {
@@ -52,8 +54,9 @@ describe('instrucciones del scout', () => {
   });
 
   it('idioma: en → inglés', () => {
-    expect(voiceLangLine('en')).toContain('inglés');
-    expect(buildInstructions({ ...base, lang: 'en' }).full.endsWith(voiceLangLine('en'))).toBe(true);
+    expect(voiceLangLine('en')).toContain('SOLO en inglés');
+    const full = buildInstructions({ ...base, lang: 'en' }).full;
+    expect(full.startsWith(voiceLangLine('en')) && full.endsWith(voiceLangLine('en'))).toBe(true);
   });
 
   it('hora en Montevideo', () => {
@@ -107,7 +110,7 @@ describe('sesión de OpenAI Realtime', () => {
     expect(voiceToolNames()).toEqual(TOOL_NAMES);
     expect(voiceToolNames(['plan_trip'])).not.toContain('plan_trip');
     const s = buildRealtimeSession({ instructions: 'x', lang: 'en' });
-    expect(s.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    expect(s.tools.map((t) => t.name)).toEqual([...TOOL_NAMES, 'set_language']);
     expect(s.audio.output.voice).toBe(SCOUT.voice);
     expect(s.audio.input.transcription.language).toBe('en');
     expect(s.audio.input.noise_reduction.type).toBe('far_field');

@@ -1,9 +1,11 @@
 // Estado de la llamada con el scout (PRD 05): idle → permission → connecting → live (↔ reconnecting) → ending → summary.
 // Zustand fuera de React: el motor del tour (PRD 07) y la cámara (PRD 08) llaman injectEvent() sin componentes.
 import {
+  BARGE_IN_TURN_DETECTION,
+  composeVoiceInstructions,
   formatVoiceEvent,
+  languageSwitchMessage,
   REALTIME_TRANSCRIBE_MODEL,
-  voiceLangLine,
   type TranscriptLine,
   type VoiceEventType,
   type VoiceFocus,
@@ -17,7 +19,7 @@ import { looksLikeEcho } from './echo';
 import { micPermission, requestMic } from './permissions';
 import { setSpeaker, startCallAudio, stopCallAudio } from './audioRoute';
 import { RealtimeConnection, type ServerEvent } from './realtimeClient';
-import { actionText, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
+import { actionText, registerLocalTool, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
 
 export type CallStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'ending' | 'summary' | 'error';
 
@@ -42,6 +44,7 @@ export function setLocationSource(fn: () => Fix) {
 export type Line = { id: string; role: 'user' | 'assistant'; text: string; at: string; final: boolean };
 export type ActionCard = { id: string; text: string; proposed: boolean; undoToken: string; tripId: string | null; at: number };
 export type CallError = { code: string; message: string };
+export type VoiceLogEntry = { at: number; dir: '←' | '→' | '🔧' | '⚠️'; text: string };
 
 type State = {
   status: CallStatus;
@@ -68,6 +71,8 @@ type State = {
   actions: ActionCard[];
   expanded: boolean;
   summary: { jobId: string | null; voiceSessionId: string; durationS: number; tripId: string | null } | null;
+  /** Consola de eventos (dev): lo que pasa por el data channel y las herramientas, más nuevo al final. */
+  events: VoiceLogEntry[];
   /** Aviso corto en la llamada ("Activé el modo por turnos…"). */
   notice: string | null;
   /** Llamada esperando la explicación del permiso de micrófono. */
@@ -110,6 +115,10 @@ let micFallback: ReturnType<typeof setTimeout> | null = null;
 let scoutAudible = false;
 let tailTimer: ReturnType<typeof setTimeout> | null = null;
 const TAIL_MS = 600;
+/** Detección de turno actual del lado del servidor: la normal (session_config) o la de "barge-in" mientras habla. */
+let vadMode: 'normal' | 'barge' = 'normal';
+const MAX_EVENTS = 200;
+let echoCount = 0;
 let firstAudioLogged = false;
 
 const now = () => new Date().toISOString();
@@ -132,7 +141,7 @@ const initial: State = {
   responding: false,
   muted: false,
   speaker: true,
-  turnTaking: true,
+  turnTaking: false,
   captions: true,
   lang: 'es',
   lines: [],
@@ -141,6 +150,7 @@ const initial: State = {
   expanded: false,
   summary: null,
   notice: null,
+  events: [],
   askPermission: null,
   lastEventAt: 0,
 };
@@ -176,6 +186,51 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     }
   };
 
+  const log = (dir: VoiceLogEntry['dir'], text: string) =>
+    set((s) => ({ events: [...s.events.slice(-(MAX_EVENTS - 1)), { at: Date.now(), dir, text }] }));
+
+  /** Mic abierto: mientras el scout suena, VAD con umbral alto (el eco atenuado no lo corta, tu voz sí). */
+  const setVad = (mode: 'normal' | 'barge') => {
+    const s = get();
+    if (vadMode === mode || !conn || !s.session || s.turnTaking) return;
+    vadMode = mode;
+    const normal = (s.session.session_config as { audio?: { input?: { turn_detection?: unknown } } }).audio?.input?.turn_detection;
+    conn.send({
+      type: 'session.update',
+      session: { type: 'realtime', audio: { input: { turn_detection: mode === 'barge' ? BARGE_IN_TURN_DETECTION : normal } } },
+    });
+    log('→', `turn_detection ${mode === 'barge' ? 'exigente (scout hablando)' : 'normal'}`);
+  };
+
+  /** Cambia idioma: instrucciones (idioma arriba y abajo), transcripción y un mensaje de sistema explícito. */
+  const applyLanguage = (lang: string, announce: boolean) => {
+    const s = get();
+    set({ lang });
+    if (!conn || !s.session) return;
+    conn.send({
+      type: 'session.update',
+      session: {
+        type: 'realtime',
+        instructions: composeVoiceInstructions(s.session.instructions_base, lang),
+        audio: { input: { transcription: { model: REALTIME_TRANSCRIBE_MODEL, language: lang } } },
+      },
+    });
+    conn.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: languageSwitchMessage(lang) }] },
+    });
+    // Desde la barra: que confirme ya en el idioma nuevo. Desde set_language la respuesta llega sola tras el output.
+    if (announce) conn.send({ type: 'response.create' });
+    log('→', `idioma ${lang}`);
+  };
+
+  registerLocalTool('set_language', async (input) => {
+    const lang = String(input.lang ?? '').trim().slice(0, 2).toLowerCase();
+    if (!/^[a-z]{2}$/.test(lang)) return { ok: false, error: { code: 'invalid_input', message: 'lang = código ISO de 2 letras' } };
+    applyLanguage(lang, false);
+    return { ok: true, data: { lang } };
+  });
+
   const showNotice = (notice: string) => {
     set({ notice });
     setTimeout(() => {
@@ -184,21 +239,28 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
   };
 
   /** El usuario "dijo" casi lo mismo que el scout: es el parlante. Se descarta y se pasa al modo por turnos. */
-  const handleEcho = (itemId: string) => {
-    const wasOpen = !get().turnTaking;
-    console.warn(`[voice] eco detectado${wasOpen ? ': paso a modo por turnos' : ' (cola del parlante): descartado'}`);
+  const handleEcho = (itemId: string, text: string) => {
+    echoCount++;
+    console.warn(`[voice] eco detectado (${echoCount}): descartado`);
+    log('⚠️', `eco descartado: «${text.slice(0, 60)}»`);
     conn?.send({ type: 'response.cancel' });
     conn?.send({ type: 'conversation.item.delete', item_id: itemId });
-    set((s) => ({ turnTaking: true, lines: s.lines.filter((l) => l.id !== itemId) }));
-    applyMic();
-    if (wasOpen) showNotice('Había eco: activé el modo por turnos. Tocá Interrumpir para cortarme.');
+    set((s) => ({ lines: s.lines.filter((l) => l.id !== itemId) }));
+    if (echoCount === 3 && !get().turnTaking) {
+      showNotice('Hay mucho eco del parlante. Con auriculares va perfecto; si no, probá el modo por turnos (✋).');
+    }
   };
 
   // ---------- herramientas ----------
   const flushCalls = async (calls: FunctionCall[]) => {
     set((s) => ({ toolsRunning: [...s.toolsRunning, ...calls.map((c) => ({ callId: c.call_id, name: c.name }))] }));
     hapticLight();
+    for (const c of calls) log('🔧', `${c.name}(${c.arguments.replace(/\s+/g, ' ').slice(0, 140)})`);
+    const t0 = Date.now();
     const results = await runFunctionCalls(calls);
+    for (const r of results) {
+      log('🔧', `${r.call.name} → ${r.res.ok ? 'ok' : `error ${r.res.error.code}: ${r.res.error.message.slice(0, 80)}`} (${Date.now() - t0} ms)`);
+    }
     const tripId = get().args?.tripId ?? null;
     for (const { call, res } of results) {
       conn?.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: toModelOutput(res) } });
@@ -220,7 +282,18 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
   // ---------- eventos del data channel ----------
   const onEvent = (e: ServerEvent) => {
     set({ lastEventAt: Date.now() });
-    if (__DEV__ && !e.type.endsWith('.delta') && e.type !== 'rate_limits.updated') console.log('[voice] ←', e.type);
+    if (!e.type.endsWith('.delta') && e.type !== 'rate_limits.updated') {
+      if (__DEV__) console.log('[voice] ←', e.type);
+      const extra =
+        e.type === 'conversation.item.input_audio_transcription.completed'
+          ? ` «${String(e.transcript ?? '').trim().slice(0, 80)}»`
+          : e.type === 'response.done'
+            ? ` ${String((e.response as { status?: string })?.status ?? '')}`
+            : e.type === 'error'
+              ? ` ${JSON.stringify(e.error).slice(0, 160)}`
+              : '';
+      log('←', `${e.type}${extra}`);
+    }
     switch (e.type) {
       case 'input_audio_buffer.speech_started':
         // El servidor ya corta al scout (interrupt_response); nosotros cerramos su subtítulo.
@@ -241,7 +314,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         const text = String(e.transcript ?? '').trim();
         const lastScout = [...get().lines].reverse().find((l) => l.role === 'assistant' && l.text.trim());
         if (lastScout && looksLikeEcho(text, lastScout.text)) {
-          handleEcho(id);
+          handleEcho(id, text);
           break;
         }
         upsertLine(id, 'user', () => ({ text, final: true }));
@@ -266,6 +339,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         scoutAudible = true;
         set({ speaking: 'assistant' });
         applyMic();
+        setVad('barge');
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
@@ -277,6 +351,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
             tailTimer = null;
             scoutAudible = false;
             applyMic();
+            setVad('normal');
           },
           e.type === 'output_audio_buffer.cleared' ? 0 : TAIL_MS,
         );
@@ -396,6 +471,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       tapAt = Date.now();
       firstAudioLogged = false;
       scoutAudible = false;
+      vadMode = 'normal';
+      echoCount = 0;
       set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
       try {
         startCallAudio(get().speaker);
@@ -455,19 +532,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       return sent;
     },
 
-    setLanguage: (lang) => {
-      const s = get();
-      set({ lang });
-      if (!conn || !s.session) return;
-      conn.send({
-        type: 'session.update',
-        session: {
-          type: 'realtime',
-          instructions: `${s.session.instructions_base}\n${voiceLangLine(lang)}`,
-          audio: { input: { transcription: { model: REALTIME_TRANSCRIBE_MODEL, language: lang } } },
-        },
-      });
-    },
+    setLanguage: (lang) => applyLanguage(lang, true),
 
     setMuted: (muted) => {
       set({ muted });

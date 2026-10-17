@@ -1,6 +1,6 @@
 // Instrucciones del scout para OpenAI Realtime (PRD 05). Función pura: el contexto lo carga context.ts.
 // Nombre y personalidad salen de SCOUT (packages/shared/src/scout.ts): un solo personaje para todos.
-import { SCOUT, voiceLangLine } from '@build101/shared';
+import { composeVoiceInstructions, SCOUT } from '@build101/shared';
 
 export type InstructionsInput = {
   mode: 'chat' | 'tour';
@@ -38,7 +38,13 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     'Para cualquier cosa del plan usá herramientas. Contá qué pasó recién cuando vuelve el resultado: si dice mode "proposed", quedó como propuesta al grupo (decilo así: "te lo dejo propuesto al grupo"); si dice "applied", ya está hecho. Nunca lo anuncies antes.',
     'Si algo es solo para la persona ("para mí solo"), mandá participant_ids con su id: eso es personal y se aplica directo.',
     'Usá siempre los ids reales de "Datos para herramientas"; nunca inventes un id. Si te falta uno, pedilo con get_trip_overview o get_day_plan.',
-    'Antes de una herramienta lenta, avisá en 3-4 palabras ("Dale, lo busco").',
+    'HERRAMIENTAS (reglas firmes):',
+    '- Lugares para ir o comer, qué hay abierto, horarios, precios, distancias o tiempos: SIEMPRE con herramientas (search_places, place_details, route_eta). Nunca recomiendes un lugar de memoria.',
+    '- Si decís que vas a buscar algo, llamá la herramienta en ESA MISMA respuesta. Nunca termines un turno con "lo busco" sin haberla llamado.',
+    '- Encadená sin esperar a la persona: si necesitás un id o coordenadas, primero search_places y enseguida place_details o route_eta.',
+    '- Máximo 3 place_details por pregunta: elegí los más cercanos o relevantes.',
+    '- Si una herramienta falla o no trae el dato, decí que no lo sabés; no lo completes inventando.',
+    '- Podés avisar en 3-4 palabras antes ("Dale, lo busco"), pero siempre junto con la llamada.',
     `Hoy es ${i.nowText}.`,
   ];
   if (i.trip) {
@@ -74,7 +80,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
 
 export function buildInstructions(i: InstructionsInput): { base: string; full: string } {
   const base = buildInstructionsBase(i);
-  return { base, full: `${base}\n${voiceLangLine(i.lang)}` };
+  return { base, full: composeVoiceInstructions(base, i.lang) };
 }
 
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];

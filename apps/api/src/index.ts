@@ -6,6 +6,7 @@ import { requireAuth, type AuthVars } from './auth';
 import { env, missingSupabaseEnv } from './env';
 import { dbError } from './errors';
 import { runTool } from './tools/registry';
+import { realtimeModel } from './voice/openai';
 import { voiceRoutes } from './voice/routes';
 
 const app = new Hono<{ Variables: AuthVars }>();
@@ -23,7 +24,7 @@ app.get('/health', (c) => {
     google: !!e.GOOGLE_MAPS_API_KEY,
     anthropic: !!e.ANTHROPIC_API_KEY,
     openai: !!e.OPENAI_API_KEY,
-    realtime_model: process.env.OPENAI_REALTIME_MODEL?.trim() || 'gpt-realtime',
+    realtime_model: realtimeModel(),
     tools: TOOL_NAMES,
   });
 });

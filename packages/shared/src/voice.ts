@@ -113,11 +113,61 @@ const LANG_NAMES: Record<string, string> = {
   pt: 'portugués (português)',
 };
 
+export function voiceLangName(lang: string): string {
+  return LANG_NAMES[lang] ?? lang;
+}
+
 /**
- * Última línea de las instrucciones: el idioma. La API arma `instructions_base + '\n' + voiceLangLine(lang)` y el
- * celu hace lo mismo en `session.update` al cambiar de idioma (así no hay que pedir otra sesión).
+ * Regla de idioma. Va arriba y abajo de las instrucciones (composeVoiceInstructions): las instrucciones y la charla
+ * previa están en español y, si no, el modelo vuelve al español a mitad de frase.
  */
 export function voiceLangLine(lang: string): string {
-  const name = LANG_NAMES[lang] ?? lang;
-  return `Idioma: hablá en ${name}. Si la persona te habla en otro idioma o te lo pide, cambiá en el momento y seguí en ese.`;
+  if (lang === 'es') {
+    return 'IDIOMA: hablá en español rioplatense, con voseo. Si la persona te pide otro idioma, llamá set_language y cambiá en el momento.';
+  }
+  const name = voiceLangName(lang);
+  return `IDIOMA OBLIGATORIO: respondé SOLO en ${name}, cada frase entera, aunque estas instrucciones y la charla anterior estén en español. Esto pisa cualquier otra indicación de idioma (incluida la del personaje). Si te piden volver al español u otro idioma, llamá set_language.`;
 }
+
+/** Instrucciones completas = idioma + base + idioma. La API y el celu (al cambiar de idioma) usan la misma función. */
+export function composeVoiceInstructions(base: string, lang: string): string {
+  const line = voiceLangLine(lang);
+  return `${line}\n${base}\n${line}`;
+}
+
+/** Mensaje de sistema que se inyecta al cambiar de idioma (la charla previa en español arrastra al modelo). */
+export function languageSwitchMessage(lang: string): string {
+  return `[IDIOMA] Desde ahora respondé únicamente en ${voiceLangName(lang)}. Confirmalo en una frase corta en ese idioma.`;
+}
+
+/**
+ * Herramientas que resuelve el celu, no el backend (controles de la llamada, no datos). La API las suma a la sesión.
+ * look_at_photo (PRD 08) se agrega acá con su esquema reducido.
+ */
+export const VOICE_CLIENT_TOOLS = [
+  {
+    type: 'function' as const,
+    name: 'set_language',
+    description:
+      'Cambia el idioma de la llamada (lo que hablás y lo que se transcribe). Usala cuando la persona pide que le hables en otro idioma.',
+    parameters: {
+      type: 'object',
+      properties: { lang: { type: 'string', description: 'Código ISO 639-1: es, en, pt, fr, it, de…' } },
+      required: ['lang'],
+      additionalProperties: false,
+    },
+  },
+];
+
+/**
+ * Detección de turno mientras el scout habla (micrófono abierto, se lo corta con la voz): VAD por energía con umbral
+ * alto, así el eco que queda después del AEC no lo corta pero una voz cercana sí. Al terminar se vuelve a la normal.
+ */
+export const BARGE_IN_TURN_DETECTION = {
+  type: 'server_vad',
+  threshold: 0.85,
+  prefix_padding_ms: 200,
+  silence_duration_ms: 500,
+  interrupt_response: true,
+  create_response: true,
+} as const;
