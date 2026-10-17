@@ -38,6 +38,7 @@ const FRIENDLY: Record<string, string> = {
   add_idea: 'Guardando la idea',
   undo: 'Deshaciendo',
   plan_trip: 'Armando el viaje',
+  tour_brief: 'Pensando el tour',
   generate_tour: 'Armando el tour',
   look_at_photo: 'Mirando la foto',
   research: 'Averiguando',

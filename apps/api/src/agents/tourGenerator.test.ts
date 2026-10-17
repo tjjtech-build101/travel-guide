@@ -1,17 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  claimsSupported,
-  clampStopCount,
-  dedupeCandidates,
-  extractClaims,
-  filterCandidates,
-  nameSimilarity,
-  orderStops,
-  pickTopCandidates,
-  scoreCandidate,
-  type Fact,
-  type RawCandidate,
-} from './tourGenerator';
+import { composeTour, dedupeCandidates, filterCandidates, matchMustInclude, nameSimilarity, type RawCandidate } from './tourGenerator';
+import { brief, fakeDeps, fakeLlm, input } from './tourTestKit';
 
 const cand = (over: Partial<RawCandidate> = {}): RawCandidate => ({
   source: 'google',
@@ -22,7 +11,6 @@ const cand = (over: Partial<RawCandidate> = {}): RawCandidate => ({
   lat: -34.9073,
   lng: -56.2006,
   interests: ['arquitectura'],
-  notability: 50,
   facts: [],
   ...over,
 });
@@ -36,13 +24,15 @@ describe('nameSimilarity', () => {
 });
 
 describe('dedupeCandidates', () => {
-  it('fusiona por wikidata_id igual, se queda con la fuente más rica', () => {
-    const a = cand({ source: 'wikipedia', wikidata_id: 'Q123', notability: 10 });
-    const b = cand({ source: 'place_library', wikidata_id: 'Q123', notability: 99, tier: 'curated', facts: [{ text: 'x', source_url: 'y', verified: true }] });
+  it('fusiona por wikidata_id igual, se queda con la fuente más rica y conserva el título de Wikipedia', () => {
+    const a = cand({ source: 'wikipedia', wikidata_id: 'Q123', wiki_title: 'Teatro Solís', sitelinks: 30 });
+    const b = cand({ source: 'place_library', wikidata_id: 'Q123', tier: 'curated', facts: [{ text: 'x', source_url: 'y', verified: true }] });
     const out = dedupeCandidates([a, b]);
     expect(out).toHaveLength(1);
     expect(out[0].tier).toBe('curated');
     expect(out[0].facts).toHaveLength(1);
+    expect(out[0].wiki_title).toBe('Teatro Solís');
+    expect(out[0].sitelinks).toBe(30);
   });
 
   it('fusiona por cercanía + nombre similar aunque no compartan ids', () => {
@@ -61,28 +51,19 @@ describe('dedupeCandidates', () => {
   });
 });
 
-describe('scoreCandidate', () => {
-  it('bonus 1.5x para curated', () => {
-    const base = cand({ interests: ['historia'], notability: 100 });
-    const curated = cand({ interests: ['historia'], notability: 100, tier: 'curated' });
-    const weights = { historia: 5 };
-    expect(scoreCandidate(curated, weights)).toBeCloseTo(scoreCandidate(base, weights) * 1.5, 5);
-  });
-
-  it('mayor afinidad de intereses → mayor score', () => {
-    const weights = { historia: 5, comida: 1 };
-    const historia = cand({ interests: ['historia'], notability: 10 });
-    const comida = cand({ interests: ['comida'], notability: 10 });
-    expect(scoreCandidate(historia, weights)).toBeGreaterThan(scoreCandidate(comida, weights));
-  });
-});
-
 describe('filterCandidates', () => {
-  it('descarta por avoid (match en nombre/categoría)', () => {
-    const museo = cand({ name: 'Museo Nacional', category_hint: 'museum' });
+  it('evitar museos: el museo queda solo como fachada; otros avoid descartan', () => {
+    const museo = cand({ name: 'Museo Torres García', category_hint: 'museum' });
+    const iglesia = cand({ name: 'Iglesia Matriz', category_hint: 'church' });
     const plaza = cand({ name: 'Plaza Independencia' });
-    const out = filterCandidates([museo, plaza], { avoid: ['museo'], stepFree: false });
-    expect(out).toEqual([plaza]);
+    const out = filterCandidates([museo, iglesia, plaza], { avoid: ['museos', 'iglesias'], stepFree: false });
+    expect(out.map((c) => c.name)).toEqual(['Museo Torres García', 'Plaza Independencia']);
+    expect(out[0].exteriorOnly).toBe(true);
+  });
+
+  it('descarta lugares que no son de tour (estacionamientos, hoteles, bancos)', () => {
+    const out = filterCandidates([cand({ name: 'Parking Convencion' }), cand({ name: 'Algo', category_hint: 'tourism=hotel' }), cand({ name: 'Cabildo' })], { avoid: [], stepFree: false });
+    expect(out.map((c) => c.name)).toEqual(['Cabildo']);
   });
 
   it('descarta wheelchair=no cuando step_free', () => {
@@ -93,89 +74,57 @@ describe('filterCandidates', () => {
   });
 });
 
-describe('clampStopCount', () => {
-  it('redondea duration_min/8 entre 3 y 12', () => {
-    expect(clampStopCount(30)).toBe(4);
-    expect(clampStopCount(60)).toBe(8);
-    expect(clampStopCount(15)).toBe(3); // clamp mínimo
-    expect(clampStopCount(240)).toBe(12); // clamp máximo
+describe('matchMustInclude', () => {
+  it('encuentra por nombre parcial o parecido y devuelve los que faltan', () => {
+    const cands = [cand({ name: 'Mercado del Puerto' }), cand({ name: 'Teatro Solís' })];
+    const r = matchMustInclude(cands, ['el mercado del puerto', 'Solis', 'Palacio Legislativo']);
+    expect([...r.keys].sort()).toEqual([0, 1]);
+    expect(r.missing).toEqual(['Palacio Legislativo']);
   });
 });
 
-describe('pickTopCandidates', () => {
-  it('elige los N de mayor score', () => {
-    const weights = { historia: 5 };
-    const cands = [
-      cand({ name: 'A', interests: ['historia'], notability: 5 }),
-      cand({ name: 'B', interests: ['historia'], notability: 500 }),
-      cand({ name: 'C', interests: [], notability: 1 }),
-    ];
-    const out = pickTopCandidates(cands, weights, 2);
-    expect(out.map((c) => c.name)).toEqual(['B', 'A']);
-  });
-});
+// ───────────────────────── composeTour de punta a punta con dependencias falsas (sin red)
 
-describe('orderStops', () => {
-  it('arranca en el punto 0 y visita todos', () => {
-    const pts = [
-      { lat: 0, lng: 0 },
-      { lat: 0, lng: 0.01 },
-      { lat: 0, lng: 0.05 },
-      { lat: 0, lng: 0.02 },
-    ];
-    const order = orderStops(pts);
-    expect(order[0]).toBe(0);
-    expect([...order].sort()).toEqual([0, 1, 2, 3]);
-  });
+describe('composeTour (dependencias falsas)', () => {
+  it('arma un tour con tesis, borra datos sin respaldo y cita solo fuentes verificadas', async () => {
+    const llm = fakeLlm();
+    const lines: string[] = [];
+    const t = await composeTour({ input: input(), brief: brief(), progress: (l) => lines.push(l), startedAt: Date.now() }, fakeDeps(llm));
 
-  it('con endIndex, termina ahí', () => {
-    const pts = [
-      { lat: 0, lng: 0 },
-      { lat: 0, lng: 0.05 },
-      { lat: 0, lng: 0.01 },
-      { lat: 0, lng: 0.02 },
-    ];
-    const order = orderStops(pts, 1);
-    expect(order.at(-1)).toBe(1);
+    expect(t.title).toBe('La ciudad que miró al puerto');
+    expect(t.thesis).toContain('puerto');
+    expect(t.stops.length).toBeGreaterThanOrEqual(3);
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+    for (const s of t.stops) {
+      // La oración inventada ("1999… Napoleón") se borró; la respaldada quedó y sin la marca [fN].
+      expect(s.written.narration_short).not.toMatch(/Napoleón|1999/);
+      expect(s.written.narration_short).not.toMatch(/\[f\d+\]/);
+      expect(s.written.narration_short).toMatch(/se inauguró en \d{4}\./);
+      // La cita inventada (Gaudí) nunca llega a los facts.
+      expect(s.facts.every((f) => f.verified && !/Gaudí/.test(f.text))).toBe(true);
+      expect(s.sources.length).toBeGreaterThan(0);
+      expect(s.sources.every((src) => src.url.startsWith('https://es.wikipedia.org/'))).toBe(true);
+      expect(s.dwell_min).toBeGreaterThan(0);
+      expect([25, 30, 35, 40, 50]).toContain(s.geofence_radius_m);
+    }
+    expect(t.stops[t.stops.length - 1].written.transition_to_next).toBeNull();
+    expect(t.stats.sentences_dropped).toBeGreaterThanOrEqual(t.stops.length);
+    expect(t.stats.facts_rejected).toBeGreaterThan(0);
+    expect(t.estDurationMin).toBeLessThanOrEqual(66);
   });
 
-  it('nunca repite ni pierde puntos (N random)', () => {
-    const pts = Array.from({ length: 8 }, (_, i) => ({ lat: Math.sin(i) * 0.01, lng: Math.cos(i * 2) * 0.01 }));
-    const order = orderStops(pts);
-    expect([...order].sort((a, b) => a - b)).toEqual(pts.map((_, i) => i));
-  });
-});
-
-describe('extractClaims', () => {
-  it('saca años, números y nombres propios (no al principio de oración)', () => {
-    const claims = extractClaims('El Teatro Solís se inauguró en 1856 con 2500 butacas, diseñado por Carlo Zucchi.');
-    expect(claims).toContain('1856');
-    expect(claims).toContain('2500');
-    expect(claims).toContain('Carlo');
-    expect(claims).toContain('Zucchi.'.replace(/\.$/, '')); // el regex limpia puntuación final
+  it('con un lugar pedido sí o sí, queda en el recorrido', async () => {
+    const t = await composeTour(
+      { input: input({ must_include: ['Mercado del Puerto'], duration_min: 45 }), brief: brief(), progress: () => {}, startedAt: Date.now() },
+      fakeDeps(fakeLlm()),
+    );
+    expect(t.stops.map((s) => s.candidate.name)).toContain('Mercado del Puerto');
   });
 
-  it('no incluye la primera palabra de la oración', () => {
-    const claims = extractClaims('Desde acá se ve toda la plaza.');
-    expect(claims).not.toContain('Desde');
-  });
-});
-
-describe('claimsSupported', () => {
-  const facts: Fact[] = [
-    { text: 'El Teatro Solís se inauguró en 1856.', source_url: 'https://a', verified: true },
-    { text: 'Fue diseñado por Carlo Zucchi.', source_url: 'https://b', verified: false },
-  ];
-
-  it('true si todos los claims aparecen en facts VERIFICADOS', () => {
-    expect(claimsSupported(['1856'], facts)).toBe(true);
-  });
-
-  it('false si el claim solo está en un fact no verificado', () => {
-    expect(claimsSupported(['Zucchi'], facts)).toBe(false);
-  });
-
-  it('false si el claim no aparece en ningún fact', () => {
-    expect(claimsSupported(['1920'], facts)).toBe(false);
+  it('menos de 3 candidatos → error legible', async () => {
+    const deps = fakeDeps(fakeLlm());
+    deps.searchGoogle = async () => [];
+    deps.searchWikipedia = async () => [];
+    await expect(composeTour({ input: input(), brief: brief(), progress: () => {}, startedAt: Date.now() }, deps)).rejects.toThrow(/mínimo 3/);
   });
 });

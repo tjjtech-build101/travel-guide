@@ -242,3 +242,61 @@ export async function transitPlan(
 export function mapsTransitUrl(a: { lat: number; lng: number }, b: { lat: number; lng: number }, mode: 'transit' | 'walking' = 'transit'): string {
   return `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=${mode}`;
 }
+
+// ───────────────────────── Polilíneas (algoritmo de Google): unir los tramos de un tour en una sola
+
+export function decodePolyline(str: string): [number, number][] {
+  const out: [number, number][] = [];
+  let i = 0;
+  let lat = 0;
+  let lng = 0;
+  while (i < str.length) {
+    for (const axis of [0, 1]) {
+      let result = 0;
+      let shift = 0;
+      let b: number;
+      do {
+        b = str.charCodeAt(i++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20 && i < str.length);
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 0) lat += delta;
+      else lng += delta;
+    }
+    out.push([lat / 1e5, lng / 1e5]);
+  }
+  return out;
+}
+
+export function encodePolyline(points: [number, number][]): string {
+  let out = '';
+  let pLat = 0;
+  let pLng = 0;
+  const enc = (v: number) => {
+    let x = v < 0 ? ~(v << 1) : v << 1;
+    let s = '';
+    while (x >= 0x20) {
+      s += String.fromCharCode((0x20 | (x & 0x1f)) + 63);
+      x >>= 5;
+    }
+    return s + String.fromCharCode(x + 63);
+  };
+  for (const [la, ln] of points) {
+    const lat = Math.round(la * 1e5);
+    const lng = Math.round(ln * 1e5);
+    out += enc(lat - pLat) + enc(lng - pLng);
+    pLat = lat;
+    pLng = lng;
+  }
+  return out;
+}
+
+/** Une las polilíneas de cada tramo (las que falten se saltean). null si no hay ninguna. */
+export function mergePolylines(polys: (string | null)[]): string | null {
+  const pts = polys.filter((p): p is string => !!p).flatMap((p, k) => {
+    const d = decodePolyline(p);
+    return k === 0 ? d : d.slice(1);
+  });
+  return pts.length ? encodePolyline(pts) : null;
+}

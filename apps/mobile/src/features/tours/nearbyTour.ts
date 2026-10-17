@@ -3,10 +3,11 @@
 //
 // Interfaz que usa la app (estable):
 //   isNearbyTourAvailable(): Promise<boolean>   ¿la API expone generate_tour? (GET /health → tools)
-//   startNearbyTour({ lat, lng, trip_id?, duration_min?, themes? }): Promise<NearbyTourResult>
+//   fetchTourBrief({ lat, lng, trip_id?, duration_min }): resumen + preguntas de la entrevista (tour_brief)
+//   startNearbyTour({ lat, lng, trip_id?, duration_min?, ...respuestas }): Promise<NearbyTourResult>
 //      → POST /tools/generate_tour { mode:'spontaneous', start_lat, start_lng, duration_min, ... } → { job_id, tour_id }
 //   useNearbyTourJob: el job en curso (para la tarjeta de progreso en Ahora), persistido en AsyncStorage.
-import type { GenerateTourStart, ToolInput } from '@build101/shared';
+import type { GenerateTourStart, ToolInput, TourBriefResult } from '@build101/shared';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
@@ -15,15 +16,32 @@ import { callTool } from '../../lib/api';
 import { env } from '../../lib/env';
 
 export const NEARBY_TOUR_TOOL = 'generate_tour';
-export const NEARBY_DURATIONS = [30, 60, 90] as const;
+export const NEARBY_DURATIONS = [30, 45, 60, 90, 120] as const;
+
+type TourAnswerFields = Pick<
+  ToolInput<'generate_tour'>,
+  'themes' | 'energy' | 'familiarity' | 'food_stop' | 'include_paid_entries' | 'kids' | 'indoor' | 'finish' | 'must_include' | 'notes'
+>;
 
 export type StartNearbyTourInput = {
   lat: number;
   lng: number;
   trip_id?: string;
   duration_min?: number;
-  themes?: ToolInput<'generate_tour'>['themes'];
-};
+} & Partial<TourAnswerFields>;
+
+/** Entrevista previa (tour_brief): qué sabe el Scout y qué conviene preguntar. */
+export async function fetchTourBrief(args: { lat: number; lng: number; trip_id?: string; duration_min: number }): Promise<TourBriefResult> {
+  const res = await callTool<'tour_brief', TourBriefResult>('tour_brief', {
+    mode: 'spontaneous',
+    start_lat: args.lat,
+    start_lng: args.lng,
+    duration_min: args.duration_min,
+    ...(args.trip_id ? { trip_id: args.trip_id } : {}),
+  });
+  if (!res.ok) throw new Error(res.error.message);
+  return res.data;
+}
 
 export type NearbyTourResult =
   | { ok: true; job_id: string; tour_id: string }
@@ -62,7 +80,7 @@ export async function startNearbyTour(input: StartNearbyTourInput): Promise<Near
     ...rest,
   });
   if (res.ok) {
-    useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: input.trip_id ?? null });
+    useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: input.trip_id ?? null, input });
     return { ok: true, job_id: res.data.job_id, tour_id: res.data.tour_id };
   }
   if (res.error.code === 'unknown_tool') return { ok: false, code: 'not_available', message: 'El "Tour acá, ahora" llega muy pronto.' };
@@ -105,7 +123,8 @@ export async function generateTourForBlock(block: {
 
 // ---------- job en curso ----------
 
-export type NearbyJob = { jobId: string; tourId: string; durationMin: number; tripId: string | null; at: number };
+/** `input`: lo que se pidió (para "Reintentar" con las mismas respuestas). */
+export type NearbyJob = { jobId: string; tourId: string; durationMin: number; tripId: string | null; at: number; input?: StartNearbyTourInput };
 
 const JOB_KEY = 'tour.nearby.job.v1';
 /** Un armado de hace más de 3 h ya no se muestra. */
