@@ -1,10 +1,11 @@
 // Tarjetas del Plan: bloque, "Ocupado" (privado ajeno), fantasma (propuesta add) y compacta (paralelo).
 import type { BlockAlert, BlockStatus } from '@build101/shared';
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { AvatarStack, type AvatarPerson } from '../../../ui/Avatar';
+import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 import { ALERT_COLORS, ALERT_FALLBACK, STATUS_COLORS, STATUS_LABEL, TRANSFER_MODE_LABEL, TYPE_LABEL } from '../labels';
 import { durationLabel, hhmm, timeLabel, type GhostBlock, type PlanBlock } from '../selectors';

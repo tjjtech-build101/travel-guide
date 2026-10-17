@@ -6,7 +6,7 @@ import { SCOUT } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { useClockStore, useNow } from '../../../../features/now/clock';
@@ -45,6 +45,7 @@ import { useLocationFix, useLocationProvider } from '../../../../location/Locati
 import type { AvatarPerson } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
 import { ErrorState, SkeletonCard } from '../../../../ui/States';
+import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
 

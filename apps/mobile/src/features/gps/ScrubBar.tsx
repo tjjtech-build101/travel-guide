@@ -1,7 +1,8 @@
 // Barra de tiempo del simulador: muestra el avance (con marcas de las paradas) y salta con botones de ±10 s / ±1 min.
 // (Una barra arrastrable dentro del modal del menú dev no recibía los toques de forma confiable; los botones sí.)
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { formatClock } from './format';
 

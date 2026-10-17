@@ -1,6 +1,6 @@
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { appNow } from '../../features/now/clock';
 import { isTripInProgress } from '../../features/now/selectors';
@@ -9,6 +9,7 @@ import { formatDateRange } from '../../lib/format';
 import { AvatarStack } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
 import { EmptyState, ErrorState, LoadingList } from '../../ui/States';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 
 function openNewTrip() {
@@ -26,7 +27,7 @@ export default function MyTripsScreen() {
 
   if (trips.data.length === 0) {
     return (
-      <EmptyState title="Todavía no tenés viajes" subtitle="Armá uno nuevo o sumate al de tu grupo con el código de invitación.">
+      <EmptyState pose="wave" title="Todavía no tenés viajes" subtitle="Armá uno nuevo o sumate al de tu grupo con el código de invitación.">
         {/* PRD 04 (Unirme con código) */}
         <Button label="Nuevo viaje" onPress={openNewTrip} />
         <Button label="Unirme con código" variant="secondary" disabled accessibilityHint="Próximamente" />

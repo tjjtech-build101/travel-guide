@@ -3,7 +3,7 @@ import { maxJumpMeters, parseTrack, TrackCursor } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { accuracyColor, formatClock, formatDistance } from '../../features/gps/format';
 import { useSimulator } from '../../location/LocationContext';
@@ -18,6 +18,7 @@ import {
   trackRecorder,
 } from '../../location/recorder';
 import { Button } from '../../ui/Button';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 
 export default function RecordTrackScreen() {

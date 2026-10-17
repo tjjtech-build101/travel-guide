@@ -2,10 +2,11 @@
 // Arrastrable; toque largo la achica a solo "SIM" (para grabar pantalla limpia) y un toque la vuelve a abrir.
 import { SIM_SPEEDS } from '@build101/shared';
 import { useRef, useState } from 'react';
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSimulator } from '../../location/LocationContext';
+import { Text } from '../../ui/Text';
 import { formatClock } from './format';
 
 export function SimPill() {

@@ -3,8 +3,9 @@
 import { INTEREST_TAGS } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import type { ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { Text } from '../../ui/Text';
 import { colors, font, space } from '../../ui/theme';
 import { Chip } from '../plan/components/Controls';
 import {

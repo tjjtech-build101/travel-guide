@@ -1,11 +1,12 @@
 // Grupo (placeholder hasta PRD 04; acceso secundario desde el menú de Planificación, fuera de las tabs): miembros + últimas filas de activity_feed.
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useLocalSearchParams } from 'expo-router';
 import { errorDetail, useActivityFeed, useTripMembers } from '../../../features/trips/queries';
 import { timeAgo } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
 import { ErrorState, LoadingList } from '../../../ui/States';
+import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 
 const ROLE_LABEL = { organizer: 'Organiza', traveler: 'Viaja', follower: 'Sigue el viaje' } as const;

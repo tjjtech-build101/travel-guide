@@ -2,7 +2,7 @@
 import { BLOCK_TYPES, type BlockType } from '@build101/shared';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { BlockForm, emptyForm, formToFields, type BlockFormState, type FormErrors } from '../../../features/plan/components/BlockForm';
 import { closeSheet, SheetBody, SheetHeader, SheetRoot, SheetMessage } from '../../../features/plan/components/Sheet';
@@ -12,6 +12,7 @@ import { toolErrorMessage, useAddBlock } from '../../../features/plan/mutations'
 import { useMe, usePermissions, usePlanOverview } from '../../../features/plan/queries';
 import type { PlanLeg } from '../../../features/plan/selectors';
 import { Button } from '../../../ui/Button';
+import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 
 const TYPE_HINT: Record<BlockType, string> = {

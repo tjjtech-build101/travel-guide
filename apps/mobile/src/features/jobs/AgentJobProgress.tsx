@@ -4,13 +4,14 @@
 import type { AgentJobRow, PlanTripResult, PlanTripStart } from '@build101/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, FadeInDown, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { callTool } from '../../lib/api';
 import { formatDay } from '../../lib/format';
 import { Button } from '../../ui/Button';
 import { Skeleton } from '../../ui/States';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { tripKeys } from '../trips/keys';
 import { useTripBlocks, useTripLegs } from '../trips/queries';

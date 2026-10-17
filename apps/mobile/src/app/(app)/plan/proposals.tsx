@@ -4,7 +4,7 @@ import type { AgentProposalRow, ProposalOp } from '@build101/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { SheetBody, SheetHeader, SheetRoot, SheetMessage } from '../../../features/plan/components/Sheet';
 import { SparkIcon } from '../../../features/plan/components/TypeIcon';
@@ -18,6 +18,7 @@ import { FEATURES } from '../../../lib/features';
 import { timeAgo } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
 import { Button } from '../../../ui/Button';
+import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 
 const OP_COLORS = {

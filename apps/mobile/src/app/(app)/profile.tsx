@@ -1,7 +1,7 @@
 // Perfil simple (PRD 10 mínimo): ver y editar las preferencias que usa el Scout para armar tours.
 import { SCOUT } from '@build101/shared';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../features/auth/AuthProvider';
@@ -12,6 +12,7 @@ import { errorDetail } from '../../features/trips/queries';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
 import { ErrorState, LoadingList } from '../../ui/States';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 
 export default function ProfileScreen() {

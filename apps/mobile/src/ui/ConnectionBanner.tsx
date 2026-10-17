@@ -1,9 +1,10 @@
 // Banner global: "Sin conexión — mostrando lo último" cuando no hay red o el canal Realtime cae.
 import { useNetworkState } from 'expo-network';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useConnectionStore } from '../realtime/connectionStore';
+import { Text } from './Text';
 import { colors, font, radius, space } from './theme';
 
 export function useIsOffline(): boolean {
