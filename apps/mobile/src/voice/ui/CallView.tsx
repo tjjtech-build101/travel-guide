@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '../../ui/Button';
 import { CameraIcon, CaptionsIcon, HandIcon, HangUpIcon, MicIcon, SpeakerIcon } from '../../ui/icons';
-import { camera } from '../camera/cameraStore';
+import { camera, useCameraStore } from '../camera/cameraStore';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore, type Line } from '../store';
 import { friendlyToolName } from '../toolBridge';
@@ -21,8 +21,10 @@ export function CallView() {
   const status = useVoiceStore((s) => s.status);
   const expanded = useVoiceStore((s) => s.expanded);
   const error = useVoiceStore((s) => s.error);
-  // Conectando y error también se ven acá (pantalla completa), aunque no se haya expandido.
-  const visible = expanded || status === 'connecting' || status === 'error';
+  const cameraOpen = useCameraStore((s) => s.open);
+  // Conectando y error también se ven acá (pantalla completa), aunque no se haya expandido; con la cámara abierta no
+  // (iOS no presenta dos Modal: la llamada se abre de fondo para narrar la foto).
+  const visible = !cameraOpen && (expanded || status === 'connecting' || status === 'error');
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useVoiceStore.getState().setExpanded(false)}>
       <SafeAreaView style={styles.root}>{status === 'error' ? <ErrorView code={error?.code} message={error?.message} /> : <Live />}</SafeAreaView>

@@ -288,7 +288,7 @@ export function ScoutDock({
       {tiles ? <View style={styles.tiles}>{tiles}</View> : null}
       <View style={[styles.tiles, tiles ? styles.hidden : null]}>
         <Tile label="Tour acá, ahora" soon={!tourAvailable} onPress={onNearbyTour} icon={<FlagIcon color={colors.text} />} />
-        <Tile label="Cámara" soon onPress={onCamera} icon={<CameraIcon color={colors.text} />} />
+        <Tile label="Cámara" onPress={onCamera} icon={<CameraIcon color={colors.text} />} />
         {onDirections ? (
           <Tile
             label="Cómo llego"

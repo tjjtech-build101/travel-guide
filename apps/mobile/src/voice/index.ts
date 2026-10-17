@@ -2,4 +2,5 @@
 export { useVoice, useVoiceStore, voice, type StartCallArgs, type CallStatus } from './store';
 export { registerLocalTool } from './toolBridge';
 export { camera } from './camera/cameraStore';
+export { showToScout } from './camera/showToScout';
 export { VoiceProvider } from './VoiceProvider';
