@@ -111,32 +111,30 @@ export function clockText(min: number): string {
 }
 
 export type Headline = {
-  /** "Llegás 15:52" */
-  arrive: string;
-  /** "12 min · 900 m" */
+  /** "Llegás 15:52" (salís ya) o "Salí en 19 min" (todavía hay que esperar). */
+  title: string;
+  /** "12 min · 900 m", o "6 min · 450 m · llegás 15:55" cuando el título es "Salí en". */
   sub: string;
-  /** "Salí en 8 min" / "Salí ya" / "Vas 5 min tarde" (solo si el destino es un bloque de hoy con hora). */
-  leave: { text: string; tone: 'ok' | 'soon' | 'late' } | null;
+  /** Chip junto a "Llegás": "Salí ya" / "Vas 5 min tarde" (solo si el destino es un bloque de hoy con hora). */
+  leave: { text: string; tone: 'soon' | 'late' } | null;
 };
 
 /**
  * Encabezado. `nowMin` = minutos locales del viaje; `startMin` = inicio del bloque (si es de hoy). La cuenta de "Salí en"
- * es la misma de Ahora (inicio − ETA − 5 min − ahora).
+ * es la misma de Ahora (inicio − ETA − 5 min − ahora). Si todavía falta para salir, el título es "Salí en X" y la llegada
+ * va abajo calculada desde esa salida: nunca "Llegás 15:36" (saliendo ya) al lado de "Salí en 19 min".
  */
 export function headline({ nowMin, etaMin, distanceM, startMin }: { nowMin: number; etaMin: number; distanceM: number; startMin?: number | null }): Headline {
-  const leave = startMin == null ? null : leaveText(leaveInMin(startMin, nowMin, etaMin));
+  const sub = distanceM > 0 ? `${formatMin(etaMin)} · ${formatDistance(distanceM)}` : formatMin(etaMin);
+  const leaveIn = startMin == null ? null : Math.round(leaveInMin(startMin, nowMin, etaMin));
+  if (leaveIn != null && leaveIn > 0) {
+    return { title: `Salí en ${formatMin(leaveIn)}`, sub: `${sub} · llegás ${clockText(nowMin + leaveIn + etaMin)}`, leave: null };
+  }
   return {
-    arrive: `Llegás ${clockText(nowMin + etaMin)}`,
-    sub: distanceM > 0 ? `${formatMin(etaMin)} · ${formatDistance(distanceM)}` : formatMin(etaMin),
-    leave,
+    title: `Llegás ${clockText(nowMin + etaMin)}`,
+    sub,
+    leave: leaveIn == null ? null : leaveIn < 0 ? { text: `Vas ${formatMin(-leaveIn)} tarde`, tone: 'late' } : { text: 'Salí ya', tone: 'soon' },
   };
-}
-
-function leaveText(leaveIn: number): NonNullable<Headline['leave']> {
-  const m = Math.round(leaveIn);
-  if (m < 0) return { text: `Vas ${formatMin(-m)} tarde`, tone: 'late' };
-  if (m === 0) return { text: 'Salí ya', tone: 'soon' };
-  return { text: `Salí en ${formatMin(m)}`, tone: m <= 5 ? 'soon' : 'ok' };
 }
 
 // ───────── Indicaciones
@@ -322,7 +320,16 @@ export function externalUrls(app: ExternalApp, mode: RouteMode, dest: LatLng): {
   return { scheme: `waze://?ll=${ll}&navigate=yes`, web: `https://waze.com/ul?ll=${ll}&navigate=yes` };
 }
 
-/** Apps para la fila "Abrir en" (Apple Maps solo en iOS). */
-export function externalApps(platform: string): ExternalApp[] {
-  return platform === 'ios' ? ['apple', 'google', 'waze'] : ['google', 'waze'];
+/** Apps para la fila "Abrir en" (Apple Maps solo en iOS; Waze solo en auto, porque siempre arma ruta en auto). */
+export function externalApps(platform: string, mode: RouteMode): ExternalApp[] {
+  const apps: ExternalApp[] = platform === 'ios' ? ['apple', 'google'] : ['google'];
+  return mode === 'car' ? [...apps, 'waze'] : apps;
+}
+
+/**
+ * Lo que conviene que el lector de pantalla anuncie de una indicación: cambia al pasar de paso o al llegar a la
+ * maniobra ("En 230 m, …" → "Ahora, …"), no con cada metro.
+ */
+export function announceKey(next: NextInstruction): string {
+  return `${next.distanceM <= 15 ? 'now' : 'soon'}|${next.kind}|${next.text.replace(/^En [^,]+, /, '')}`;
 }

@@ -3,26 +3,27 @@
 // la próxima indicación (o la línea de tiempo del transporte) y "Abrir en" Apple Maps · Google Maps · Waze (CarPlay).
 // Params: block_id (destino = bloque; muestra "Salí en X" como Ahora) o lat/lng/name. Se abre con features/route/nav.openRoute.
 // Deep link dev (solo __DEV__): build101://trip/<id>/route?lat=..&lng=..&sim=walk[&x=5] → el GPS simulado recorre la ruta a pie.
-import { synthesizeTrack, zonedParts, type RouteMode, type SimSpeed } from '@build101/shared';
+import { leaveInMin, synthesizeTrack, zonedParts, type RouteMode, type SimSpeed } from '@build101/shared';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useNow } from '../../../../features/now/clock';
+import { appNow, useNow } from '../../../../features/now/clock';
 import { blockWindow, hasCoords, resolveToday, tripTimeZone } from '../../../../features/now/selectors';
 import { useMe, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import {
   defaultMode,
+  EXTERNAL_LABEL,
   hasTransitTimes,
   headline,
   nextInstruction,
   transitTimeline,
 } from '../../../../features/route/model';
 import { openInApp } from '../../../../features/route/nav';
-import { useRouteDetails } from '../../../../features/route/queries';
+import { useRouteDetail, useRouteMinutes } from '../../../../features/route/queries';
 import { RouteMap } from '../../../../features/route/RouteMap';
 import {
   ArrivedCard,
@@ -63,21 +64,35 @@ function KeepAwake() {
   return null;
 }
 
+/** departure_time del transporte: ISO al minuto. */
+const isoMinute = (ms: number) => new Date(Math.floor(ms / 60_000) * 60_000).toISOString();
+
 /**
- * La ruta es una tab oculta y las tabs quedan montadas: cada vez que se abre (o cambia el destino) arranca de cero,
- * así el origen es donde estás ahora y no donde estabas la vez anterior.
+ * La ruta es una tab oculta y las tabs quedan montadas: sin foco no se renderiza nada (así no queda la pantalla
+ * encendida, ni GPS → recálculos → Google, ni el mapa moviéndose detrás de Ahora). Cada vez que se abre (o cambia el
+ * destino) arranca de cero, así el origen es donde estás ahora y no donde estabas la vez anterior.
  */
 export default function RouteScreen() {
   const params = useLocalSearchParams<Params>();
-  const [visit, setVisit] = useState(0);
-  useFocusEffect(useCallback(() => setVisit((v) => v + 1), []));
-  return <RouteView key={`${visit}:${params.block_id ?? ''}:${params.lat ?? ''}:${params.lng ?? ''}:${params.sim ?? ''}`} />;
+  const focused = useIsFocused();
+  if (!focused) return null;
+  return <RouteView key={`${params.block_id ?? ''}:${params.lat ?? ''}:${params.lng ?? ''}:${params.sim ?? ''}`} />;
 }
 
 function RouteView() {
   const tripId = useTripId();
   // Volver siempre a Ahora: la ruta es una tab oculta y el "atrás" de las tabs iría a Planificación.
   const goBack = () => router.navigate({ pathname: '/trip/[tripId]/now', params: { tripId } });
+  // El atrás de Android también vuelve a Ahora (el de las tabs iría a Planificación).
+  const goBackRef = useRef(goBack);
+  goBackRef.current = goBack;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      goBackRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
   const params = useLocalSearchParams<Params>();
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
@@ -108,13 +123,13 @@ function RouteView() {
     tried.current = location.kind;
     void location.start().then(setLocError);
   }, [location]);
-  // Si en 15 s no llega ningún fix (sin señal, GPS apagado), no dejamos el "Buscando…" para siempre.
+  // Si en 8 s no llega ningún fix (sin señal, GPS apagado), no dejamos el "Buscando…" para siempre.
   const [fixSlow, setFixSlow] = useState(false);
   const hasFix = !!fix;
   useEffect(() => {
     setFixSlow(false);
     if (hasFix) return;
-    const t = setTimeout(() => setFixSlow(true), 15_000);
+    const t = setTimeout(() => setFixSlow(true), 8_000);
     return () => clearTimeout(t);
   }, [hasFix]);
   const askLocation = () => {
@@ -122,29 +137,36 @@ function RouteView() {
     void location.start().then(setLocError);
   };
 
-  // Origen fijo (primer fix); cambia solo al recalcular por salirte de la ruta.
+  // Origen fijo (primer fix); cambia solo al recalcular por salirte de la ruta. `startOrigin` (el de la apertura) es
+  // el de los minutos de los otros modos: un recálculo no los vuelve a pedir.
   const [origin, setOrigin] = useState<LatLng | null>(null);
+  const [startOrigin, setStartOrigin] = useState<LatLng | null>(null);
   useEffect(() => {
-    if (!origin && fix) setOrigin({ lat: fix.lat, lng: fix.lng });
+    if (origin || !fix) return;
+    setOrigin({ lat: fix.lat, lng: fix.lng });
+    setStartOrigin({ lat: fix.lat, lng: fix.lng });
   }, [origin, fix]);
 
-  // ───────── Rutas (las 3) y modo
-  const routes = useRouteDetails(origin, dest);
+  // Salida para los horarios del transporte, con el reloj del viaje (no el del servidor). Arranca en "ahora" y, si el
+  // destino es un bloque con "Salí en X", se corre una vez a esa salida para que la línea sea la que vas a tomar.
+  const [depart, setDepart] = useState(() => isoMinute(appNow()));
+
+  // ───────── Ruta del modo elegido (con detalle) y minutos de los otros (sin detalle)
   const [picked, setPicked] = useState<RouteMode | null>(__DEV__ && params.sim === 'walk' ? 'walk' : null);
-  const walkMin = routes.walk.data?.duration_min;
-  const mode: RouteMode = picked ?? (routes.walk.isError ? 'transit' : defaultMode(walkMin));
-  const current = routes[mode];
+  const [known, setKnown] = useState<Partial<Record<RouteMode, number>>>({});
+  const [walkFailed, setWalkFailed] = useState(false);
+  const mode: RouteMode = picked ?? (walkFailed ? 'transit' : defaultMode(known.walk));
+  const current = useRouteDetail(origin, dest, mode, depart);
   const detail = current.data ?? null;
-  const etas = useMemo(
-    () =>
-      Object.fromEntries(
-        (['walk', 'transit', 'car'] as const).map((m) => [
-          m,
-          { min: routes[m].data?.duration_min ?? null, loading: routes[m].isPending, failed: routes[m].isError } satisfies ModeEta,
-        ]),
-      ) as Record<RouteMode, ModeEta>,
-    [routes],
-  );
+  useEffect(() => {
+    if (current.isError && mode === 'walk' && !picked) setWalkFailed(true);
+    if (!current.data || current.isPlaceholderData) return;
+    const min = current.data.duration_min;
+    setKnown((k) => (k[mode] === min ? k : { ...k, [mode]: min }));
+  }, [current.data, current.isPlaceholderData, current.isError, mode, picked]);
+  // Los otros modos recién cuando el modo inicial está decidido (si no, se pedirían de más).
+  const settled = picked != null || walkFailed || known.walk != null;
+  const minutes = useRouteMinutes(startOrigin, dest, (m) => !settled || m === mode || known[m] != null, depart);
   const onMode = (m: RouteMode) => {
     if (m === mode) return;
     void Haptics.selectionAsync().catch(() => {});
@@ -175,6 +197,23 @@ function RouteView() {
     return blockWindow(block)?.start ?? null;
   }, [block, overview.data, me, now, trip.data]);
   const etaMin = progress?.remainingMin ?? detail?.duration_min ?? null;
+  // En el selector, el modo activo muestra lo mismo que el encabezado (lo que falta); los otros, su duración.
+  const etas = Object.fromEntries(
+    (['walk', 'transit', 'car'] as const).map((m) => [
+      m,
+      (m === mode
+        ? { min: etaMin, loading: current.isPending, failed: current.isError }
+        : { min: known[m] ?? minutes[m].data ?? null, loading: minutes[m].isPending, failed: minutes[m].isError }) satisfies ModeEta,
+    ]),
+  ) as Record<RouteMode, ModeEta>;
+
+  const refined = useRef(false);
+  useEffect(() => {
+    if (refined.current || mode !== 'transit' || !detail || current.isPlaceholderData || startMin == null) return;
+    refined.current = true;
+    const leaveIn = Math.round(leaveInMin(startMin, nowMin, detail.duration_min));
+    if (leaveIn >= 5) setDepart(isoMinute(now + leaveIn * 60_000));
+  }, [mode, detail, current.isPlaceholderData, startMin, nowMin, now]);
   const distM = progress ? progress.remainingM : (detail?.distance_m ?? 0);
   // Ya en camino (más de 50 m recorridos), "Salí en X" deja de tener sentido: queda solo "Llegás".
   const underway = (progress?.alongM ?? 0) > 50;
@@ -200,8 +239,9 @@ function RouteView() {
 
   const onOpen = (app: Parameters<typeof openInApp>[0]) => {
     if (!dest) return;
-    void openInApp(app, mode, dest).then((ok) => {
-      if (!ok) showToast({ text: 'No pudimos abrir esa app.', tone: 'info' });
+    void openInApp(app, mode, dest).then((how) => {
+      if (!how) showToast({ text: 'No pudimos abrir esa app.', tone: 'info' });
+      else if (how === 'web' && app !== 'apple') showToast({ text: `${EXTERNAL_LABEL[app]} no está instalada: la abrimos en el navegador.`, tone: 'info' });
     });
   };
 
@@ -263,8 +303,8 @@ function RouteView() {
         contentContainerStyle={[styles.sheetContent, { paddingBottom: insets.bottom + space.xl }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.toName} numberOfLines={1}>
-          Hacia {name}
+        <Text style={styles.toName} numberOfLines={2} accessibilityLabel={`Hacia ${name}`}>
+          {name}
         </Text>
 
         {arrived ? (
@@ -279,23 +319,29 @@ function RouteView() {
             </Text>
             <Button label={locError ? 'Activar ubicación' : 'Reintentar'} onPress={askLocation} style={styles.boxBtn} />
           </View>
-        ) : waitingFix || current.isPending ? (
-          <View style={styles.loading} accessibilityLabel={waitingFix ? 'Buscando tu ubicación' : 'Calculando la ruta'}>
+        ) : waitingFix ? (
+          // Corto a propósito: "Abrir en" queda a la vista por si el GPS tarda.
+          <View style={styles.loading} accessibilityLabel="Buscando tu ubicación">
+            <Skeleton width="55%" height={34} />
+            <Text style={styles.muted}>Buscando tu ubicación…</Text>
+          </View>
+        ) : current.isPending ? (
+          <View style={styles.loading} accessibilityLabel="Calculando la ruta">
             <Skeleton width="55%" height={34} />
             <Skeleton width="35%" height={18} />
             <Skeleton height={52} style={{ marginTop: space.sm }} />
             <Skeleton height={84} style={{ marginTop: space.sm }} />
-            <Text style={styles.muted}>{waitingFix ? 'Buscando tu ubicación…' : 'Calculando la ruta…'}</Text>
+            <Text style={styles.muted}>Calculando la ruta…</Text>
           </View>
         ) : (
           <>
             {head ? (
               <View accessibilityRole="header">
                 <View style={styles.headRow}>
-                  <Text style={styles.arrive}>{head.arrive}</Text>
+                  <Text style={styles.arrive}>{head.title}</Text>
                   {head.leave ? (
-                    <View style={[styles.leave, head.leave.tone === 'late' ? styles.leaveLate : head.leave.tone === 'soon' ? styles.leaveSoon : null]}>
-                      <Text style={[styles.leaveText, head.leave.tone !== 'ok' && styles.leaveTextStrong]}>{head.leave.text}</Text>
+                    <View style={[styles.leave, head.leave.tone === 'late' ? styles.leaveLate : styles.leaveSoon]}>
+                      <Text style={[styles.leaveText, styles.leaveTextStrong]}>{head.leave.text}</Text>
                     </View>
                   ) : null}
                 </View>
@@ -370,7 +416,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radius.lg,
   },
   sheetContent: { padding: space.lg, gap: space.md },
-  toName: { fontSize: font.small, fontWeight: '600', color: colors.textMuted },
+  toName: { fontSize: font.h3, fontWeight: '700', color: colors.text },
   headRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: space.sm },
   arrive: { fontSize: font.title, fontWeight: '700', color: colors.text },
   sub: { fontSize: font.body, color: colors.textMuted, marginTop: 2 },

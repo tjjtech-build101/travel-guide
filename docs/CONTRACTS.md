@@ -357,7 +357,10 @@ implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDe
 - **`route_eta`** acepta `detail?: boolean`. Con `detail: true` y **exactamente 2 paradas con `lat/lng`** devuelve,
   además de lo de siempre (`segments`, `total_min`, `estimated?`, `transit?`), `data.detail: RouteDetail`.
   Sin `detail` (o con > 2 paradas, o con `google_place_id` sin coords) la respuesta es idéntica a antes (la voz y
-  Ahora dependen de eso). La consulta de detalle corre en paralelo con la de siempre.
+  Ahora dependen de eso). Con `detail` se hace **una sola** consulta a Google: `segments`/`total_min` y, en transporte,
+  `transit` (líneas, caminata antes/después) se derivan del detalle. La caché de `routeDetail` redondea origen/destino a
+  4 decimales (~10 m). La app pide el detalle solo del modo elegido y, para los otros modos del selector, `route_eta`
+  sin `detail`; en transporte manda `departure_time` con el reloj del viaje.
 - **`RouteDetail`** `{ mode: walk|transit|car, duration_min, distance_m, polyline: string | null, steps: RouteStepDetail[], estimated: boolean }`.
   `polyline`: polilínea codificada de Google (precisión 5) de toda la ruta; `null` si es estimada.
 - **`RouteStepDetail`** `{ instruction, maneuver: string | null, distance_m, duration_min, start {lat,lng}, end {lat,lng}, mode?, transit? }`.
@@ -366,7 +369,8 @@ implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDe
     corto puede dar 0).
   - Transporte: los pasos a pie seguidos se **agrupan** en uno: `"Caminá 4 min hasta la parada Ciudadela"` (o
     `"… hasta tu destino"` al final), `maneuver: null`, `mode: 'walk'`. Cada tramo en vehículo es un paso
-    `"Tomá el bus 121 hacia Pocitos"` (bus / subte / tren / tranvía / ferry / "la línea"), `mode: 'transit'`,
+    `"Tomá el bus 121 hacia Pocitos"` (bus / subte / tren / tranvía / ferry / "la línea"), `mode: 'transit'`
+    (un tramo `TRANSIT` sin nombre de línea igual es vehículo: `line` = "Bus" / "Tren"… y `"Tomá el tren"`),
     `transit { line, vehicle, from_stop?, to_stop?, departure?, arrival?, headsign?, stops? }` con `departure`/`arrival`
     en hora local `HH:MM` (de `localizedValues`, como `transitPlan`). Si Google resuelve el transporte caminando
     (distancia corta), vienen los pasos a pie sin agrupar.

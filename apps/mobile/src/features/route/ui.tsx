@@ -1,8 +1,8 @@
 // Piezas de la pantalla "Cómo llego": selector de modo, próxima indicación, pasos, transporte, "Abrir en" y llegada.
 // Una mano: botones ≥ 48 pt, texto grande, poco ruido.
 import type { RouteMode, RouteStepDetail } from '@build101/shared';
-import { useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { Button } from '../../ui/Button';
 import {
@@ -22,6 +22,7 @@ import {
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import {
+  announceKey,
   EXTERNAL_LABEL,
   externalApps,
   formatDistance,
@@ -95,8 +96,21 @@ export function ModeSelector({ mode, etas, onChange }: { mode: RouteMode; etas: 
 
 // ───────── Próxima indicación
 
+/** VoiceOver no tiene accessibilityLiveRegion (solo Android): en iOS se anuncia a mano. */
+function useAnnounce(text: string, key: string) {
+  const textRef = useRef(text);
+  textRef.current = text;
+  useEffect(() => {
+    if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(textRef.current);
+    // Solo cuando cambia `key` (el texto cambia con cada metro).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+}
+
 export function NextInstructionCard({ next }: { next: NextInstruction }) {
   const Icon = MANEUVER_ICON[next.kind];
+  // Al cambiar de paso o al llegar a la maniobra; no con cada fix.
+  useAnnounce(next.text, announceKey(next));
   return (
     <View style={styles.nextCard} accessibilityRole="summary" accessibilityLiveRegion="polite" accessibilityLabel={next.text}>
       <View style={styles.nextIcon}>
@@ -194,7 +208,7 @@ function TimelineRow({ icon, children, last, dashed }: { icon: React.ReactNode; 
 // ───────── Abrir en otra app
 
 export function OpenInRow({ mode, onOpen }: { mode: RouteMode; onOpen: (app: ExternalApp) => void }) {
-  const apps = externalApps(Platform.OS);
+  const apps = externalApps(Platform.OS, mode);
   return (
     <View style={[styles.openIn, mode === 'car' && styles.openInCar]}>
       {mode === 'car' ? (
@@ -224,6 +238,7 @@ export function OpenInRow({ mode, onOpen }: { mode: RouteMode; onOpen: (app: Ext
 // ───────── Llegada
 
 export function ArrivedCard({ name, onDone }: { name: string; onDone: () => void }) {
+  useAnnounce(`Llegaste ${toPlace(name)}`, name);
   return (
     <View style={styles.arrived} accessibilityLiveRegion="assertive">
       <FlagIcon color={colors.success} size={36} />

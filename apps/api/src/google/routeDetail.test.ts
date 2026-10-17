@@ -241,11 +241,43 @@ describe('routeDetail (Google Routes)', () => {
     expect(d.steps[0]).toMatchObject({ maneuver: 'DEPART', mode: 'walk' });
   });
 
+  it('transporte: un tramo TRANSIT sin nombre de línea sigue siendo vehículo (no se suma a la caminata)', async () => {
+    const step = TRANSIT.routes![0].legs![0].steps![2];
+    const unnamed: GDetailResponse = structuredClone(TRANSIT);
+    unnamed.routes![0].legs![0].steps![2] = {
+      ...step,
+      transitDetails: { ...step.transitDetails, transitLine: { vehicle: { type: 'HEAVY_RAIL' } } },
+    };
+    mockFetch(() => unnamed);
+    const d = await routeDetail(A, B, 'transit');
+    expect(d.steps.map((s) => s.mode)).toEqual(['walk', 'transit', 'walk']);
+    expect(d.steps[1]).toMatchObject({ instruction: 'Tomá el tren hacia Pocitos', duration_min: 18, transit: { line: 'Tren', vehicle: 'train' } });
+    expect(d.steps[2]).toMatchObject({ instruction: 'Caminá 3 min hasta tu destino', duration_min: 3 });
+
+    // Y sin transitDetails: igual es un tramo en vehículo.
+    const bare: GDetailResponse = structuredClone(TRANSIT);
+    delete bare.routes![0].legs![0].steps![2].transitDetails;
+    clearCache();
+    mockFetch(() => bare);
+    const d2 = await routeDetail(A, B, 'transit');
+    expect(d2.steps.map((s) => s.mode)).toEqual(['walk', 'transit', 'walk']);
+    expect(d2.steps[1]).toMatchObject({ instruction: 'Tomá la línea', transit: { line: 'Línea', vehicle: 'other' } });
+  });
+
   it('cachea la misma consulta', async () => {
     mockFetch(() => WALK);
     await routeDetail(A, B, 'walk');
     await routeDetail(A, B, 'walk');
     expect(calls).toHaveLength(1);
+  });
+
+  it('cachea aunque el GPS se mueva unos metros (clave redondeada a ~10 m)', async () => {
+    mockFetch(() => WALK);
+    await routeDetail(A, B, 'walk');
+    await routeDetail({ lat: A.lat + 0.00001, lng: A.lng - 0.00002 }, B, 'walk');
+    expect(calls).toHaveLength(1);
+    await routeDetail({ lat: A.lat + 0.001, lng: A.lng }, B, 'walk');
+    expect(calls).toHaveLength(2);
   });
 });
 

@@ -33,18 +33,19 @@ export function openRoute(router: Pick<typeof appRouter, 'push'>, tripId: string
 /**
  * Abre el destino en otra app con el modo elegido. Primero el esquema de la app (sin canOpenURL: pediría
  * LSApplicationQueriesSchemes y un rebuild); si no está instalada, el link web (que abre la app o el navegador).
+ * Devuelve cómo se abrió ('app' | 'web') o null si no se pudo.
  */
-export async function openInApp(app: ExternalApp, mode: RouteMode, dest: { lat: number; lng: number }): Promise<boolean> {
+export async function openInApp(app: ExternalApp, mode: RouteMode, dest: { lat: number; lng: number }): Promise<'app' | 'web' | null> {
   const { scheme, web } = externalUrls(app, mode, dest);
   try {
     await Linking.openURL(scheme);
-    return true;
+    return 'app';
   } catch {
     try {
       await Linking.openURL(web);
-      return true;
+      return 'web';
     } catch {
-      return false;
+      return null;
     }
   }
 }

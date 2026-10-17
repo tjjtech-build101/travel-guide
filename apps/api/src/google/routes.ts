@@ -163,15 +163,19 @@ const secs = (d: string | undefined) => Number.parseFloat((d ?? '0s').replace('s
 function transitLine(t: NonNullable<GStep['transitDetails']>): TransitPlan['lines'][number] | null {
   const name = t.transitLine?.nameShort || t.transitLine?.name;
   if (!name) return null;
+  return rideFields(t, name);
+}
+
+function rideFields(t: GStep['transitDetails'], name: string): TransitPlan['lines'][number] {
   return {
     name,
-    vehicle: VEHICLE[t.transitLine?.vehicle?.type ?? ''] ?? 'other',
-    from_stop: t.stopDetails?.departureStop?.name,
-    to_stop: t.stopDetails?.arrivalStop?.name,
-    departure: hhmm(t.localizedValues?.departureTime?.time?.text, t.stopDetails?.departureTime),
-    arrival: hhmm(t.localizedValues?.arrivalTime?.time?.text, t.stopDetails?.arrivalTime),
-    headsign: t.headsign,
-    stops: t.stopCount,
+    vehicle: VEHICLE[t?.transitLine?.vehicle?.type ?? ''] ?? 'other',
+    from_stop: t?.stopDetails?.departureStop?.name,
+    to_stop: t?.stopDetails?.arrivalStop?.name,
+    departure: hhmm(t?.localizedValues?.departureTime?.time?.text, t?.stopDetails?.departureTime),
+    arrival: hhmm(t?.localizedValues?.arrivalTime?.time?.text, t?.stopDetails?.arrivalTime),
+    headsign: t?.headsign,
+    stops: t?.stopCount,
   };
 }
 
@@ -311,9 +315,28 @@ export function estimatedDetail(a: Pt, b: Pt, mode: RouteMode, destName?: string
   };
 }
 
-/** Instrucción de un paso en vehículo: "Tomá el bus 121 hacia Pocitos". */
+/** Nombre de un vehículo sin línea ("Bus", "Tren"): así igual se ve como tramo en vehículo y no como caminata. */
+const VEHICLE_NAME: Record<NonNullable<RouteStepDetail['transit']>['vehicle'], string> = {
+  bus: 'Bus',
+  subway: 'Subte',
+  train: 'Tren',
+  tram: 'Tranvía',
+  ferry: 'Ferry',
+  other: 'Línea',
+};
+
+/** Instrucción de un paso en vehículo: "Tomá el bus 121 hacia Pocitos" ("Tomá el bus" si la línea no tiene nombre). */
 function rideInstruction(t: NonNullable<RouteStepDetail['transit']>): string {
-  return `Tomá ${VEHICLE_LABEL[t.vehicle]} ${t.line}${t.headsign ? ` hacia ${t.headsign}` : ''}`;
+  const line = t.line === VEHICLE_NAME[t.vehicle] ? '' : ` ${t.line}`;
+  return `Tomá ${VEHICLE_LABEL[t.vehicle]}${line}${t.headsign ? ` hacia ${t.headsign}` : ''}`;
+}
+
+/** Paso TRANSIT de Google → línea; siempre devuelve una (sin nombre, el tipo de vehículo). */
+function rideLine(t: GStep['transitDetails']): TransitPlan['lines'][number] {
+  const named = t ? transitLine(t) : null;
+  if (named) return named;
+  const vehicle = VEHICLE[t?.transitLine?.vehicle?.type ?? ''] ?? 'other';
+  return rideFields(t, VEHICLE_NAME[vehicle]);
 }
 
 /**
@@ -325,7 +348,7 @@ export function parseRouteDetail(res: GDetailResponse, a: Pt, mode: RouteMode, d
   if (!r) return null;
   const raw = (r.legs ?? []).flatMap((l) => l.steps ?? []);
   const steps: RouteStepDetail[] = [];
-  const usesTransit = mode === 'transit' && raw.some((s) => s.travelMode === 'TRANSIT' && s.transitDetails);
+  const usesTransit = mode === 'transit' && raw.some((s) => s.travelMode === 'TRANSIT');
   let prevEnd = a;
 
   if (!usesTransit) {
@@ -366,7 +389,8 @@ export function parseRouteDetail(res: GDetailResponse, a: Pt, mode: RouteMode, d
       const start = pt(s.startLocation, prevEnd);
       const end = pt(s.endLocation, start);
       prevEnd = end;
-      const line = s.travelMode === 'TRANSIT' && s.transitDetails ? transitLine(s.transitDetails) : null;
+      // Todo tramo TRANSIT es vehículo, tenga o no nombre de línea: nunca se suma a la caminata.
+      const line = s.travelMode === 'TRANSIT' ? rideLine(s.transitDetails) : null;
       if (line) {
         flushWalk(line.from_stop ? `la parada ${line.from_stop}` : 'la parada');
         const { name, ...rest } = line;
@@ -424,7 +448,9 @@ export async function routeDetail(a: Pt, b: Pt, mode: RouteMode, departure_time?
     body.departureTime = departure_time;
   }
   try {
-    const detail = await cached(`route_detail:${dest(destName)}:${JSON.stringify(body)}`, async () => {
+    // Clave con origen/destino redondeados a 4 decimales (~10 m): el GPS casi nunca repite la coordenada exacta.
+    const key = { ...body, origin: roundedPt(a), destination: roundedPt(b) };
+    const detail = await cached(`route_detail:${dest(destName)}:${JSON.stringify(key)}`, async () => {
       const res = await googleFetch<GDetailResponse>(ROUTES_URL, { method: 'POST', fieldMask: DETAIL_MASK, body });
       return parseRouteDetail(res, a, mode, destName);
     });
@@ -433,4 +459,31 @@ export async function routeDetail(a: Pt, b: Pt, mode: RouteMode, departure_time?
     console.warn('[routeDetail]', (e as Error).message);
     return estimatedDetail(a, b, mode, destName);
   }
+}
+
+const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+const roundedPt = (p: Pt) => ({ lat: round4(p.lat), lng: round4(p.lng) });
+
+/**
+ * Plan de transporte (líneas, caminata antes/después) desde un RouteDetail de transit, para no pedirle a Google la
+ * misma ruta dos veces. null si no hay tramos en vehículo.
+ */
+export function transitPlanFromDetail(d: RouteDetail): TransitPlan | null {
+  const lines: TransitPlan['lines'] = [];
+  let walk = 0;
+  let before = 0;
+  let after = 0;
+  for (const s of d.steps) {
+    if (s.transit) {
+      const { line, ...rest } = s.transit;
+      lines.push({ name: line, ...rest });
+      after = 0;
+    } else {
+      walk += s.duration_min;
+      if (!lines.length) before += s.duration_min;
+      else after += s.duration_min;
+    }
+  }
+  if (!lines.length) return null;
+  return { duration_min: d.duration_min, walk_min: walk, walk_before_min: before, walk_after_min: after, lines };
 }

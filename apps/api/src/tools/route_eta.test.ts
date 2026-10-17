@@ -78,6 +78,65 @@ describe('route_eta', () => {
     expect(data.detail.steps).toHaveLength(1);
   });
 
+  it('con detail: una sola consulta a Google y segments/total_min salen del detalle', async () => {
+    withGoogle();
+    const r = await route_eta({ stops: [A, B], mode: 'walk', detail: true }, ctx);
+    expect(masks).toHaveLength(1);
+    expect(masks[0]).toContain('navigationInstruction');
+    expect((r.data as { segments: unknown[] }).segments).toEqual([
+      { from_idx: 0, to_idx: 1, duration_min: 17, distance_m: 1240, polyline: 'detail_poly' },
+    ]);
+  });
+
+  it('con detail en transporte: las líneas salen del detalle, sin transitPlan aparte', async () => {
+    process.env.GOOGLE_MAPS_API_KEY = 'test-key';
+    const TRANSIT = {
+      routes: [
+        {
+          duration: '1500s',
+          distanceMeters: 6000,
+          polyline: { encodedPolyline: 'tp' },
+          legs: [
+            {
+              steps: [
+                { travelMode: 'WALK', staticDuration: '240s', distanceMeters: 300, startLocation: ll(A), endLocation: ll(A) },
+                {
+                  travelMode: 'TRANSIT',
+                  staticDuration: '1080s',
+                  distanceMeters: 5500,
+                  startLocation: ll(A),
+                  endLocation: ll(B),
+                  transitDetails: {
+                    stopDetails: { departureStop: { name: 'Ciudadela' }, arrivalStop: { name: 'Bvar. España' } },
+                    localizedValues: { departureTime: { time: { text: '18:05' } } },
+                    headsign: 'Pocitos',
+                    stopCount: 9,
+                    transitLine: { nameShort: '121', vehicle: { type: 'BUS' } },
+                  },
+                },
+                { travelMode: 'WALK', staticDuration: '180s', distanceMeters: 200, startLocation: ll(B), endLocation: ll(B) },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        masks.push((init.headers as Record<string, string>)['X-Goog-FieldMask']);
+        return new Response(JSON.stringify(TRANSIT), { status: 200 });
+      }),
+    );
+    const r = await route_eta({ stops: [A, B], mode: 'transit', detail: true }, ctx);
+    expect(masks).toHaveLength(1);
+    const data = r.data as { total_min: number; transit: { lines: { name: string; from_stop: string }[]; walk_before_min: number; walk_after_min: number; summary: string } };
+    expect(data.total_min).toBe(25);
+    expect(data.transit).toMatchObject({ walk_before_min: 4, walk_after_min: 3 });
+    expect(data.transit.lines).toEqual([expect.objectContaining({ name: '121', from_stop: 'Ciudadela', departure: '18:05' })]);
+    expect(data.transit.summary).toBeTruthy();
+  });
+
   it('con detail y más de 2 paradas: no agrega detail', async () => {
     withGoogle();
     const r = await route_eta({ stops: [A, B, A], mode: 'walk', detail: true }, ctx);

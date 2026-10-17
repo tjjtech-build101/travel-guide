@@ -58,11 +58,13 @@ Nada de textos de ayuda tipo "Mantené apretada…". Las acciones se ven (botone
 - **Cómo llego embebido**: todos los "Cómo llego" de Ahora (botón primario de `HeroLeave`, ícono del dock, `LateSheet`)
   abren `/trip/[tripId]/route` (`features/route/nav.openRoute`) hacia el próximo bloque (o el actual si no hay próximo).
   La ruta sale de Google Routes por `route_eta { detail: true }`: mapa con la ruta y tu posición en vivo, selector
-  A pie · Transporte · Auto, "Llegás 15:52" (+ "Salí en X" hasta que arrancás), la próxima indicación grande (a pie/auto)
-  o la línea de tiempo del transporte, y "Abrir en" Apple Maps · Google Maps · Waze. En Auto, "Abrir en" sube arriba de
-  todo ("¿Vas manejando? Abrilo y seguí en CarPlay"). Sin Google: ruta estimada en línea recta y, en transporte,
-  "Sin líneas por ahora". Sin ubicación (permiso o 15 s sin fix): aviso + Abrir en. La llamada con el Scout no se corta.
-  "Volver" vuelve a Ahora. Deep link dev: `build101://trip/<id>/route?block_id=..&lat=..&lng=..&sim=walk&x=10`.
+  A pie · Transporte · Auto, el destino en grande, "Salí en X · llegás 15:55" mientras falta para salir o "Llegás 15:52"
+  (+ "Salí ya" / "Vas X tarde"), la próxima indicación grande (a pie/auto; VoiceOver la anuncia al cambiar de paso)
+  o la línea de tiempo del transporte, y "Abrir en" Apple Maps · Google Maps (+ Waze solo en Auto). En Auto, "Abrir en"
+  sube arriba de todo ("¿Vas manejando? Abrilo y seguí en CarPlay"). Sin Google: ruta estimada en línea recta y, en
+  transporte, "Sin líneas por ahora". Sin ubicación (permiso o 8 s sin fix): aviso + Abrir en. La llamada con el Scout no
+  se corta. "Volver" (y el atrás de Android) vuelve a Ahora; sin foco la pantalla no queda activa (ni pantalla encendida
+  ni recálculos). Deep link dev: `build101://trip/<id>/route?block_id=..&lat=..&lng=..&sim=walk&x=10`.
 - **Plan B por lluvia**: si `weather` da lluvia (prob ≥ 60 %) en la franja de un bloque al aire libre del día y existe
   variante `rain` del día, aviso con "Ver plan de lluvia".
 

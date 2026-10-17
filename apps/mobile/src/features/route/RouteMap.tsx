@@ -142,8 +142,10 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
               id="route-line-casing"
               style={{ lineColor: '#FFFFFF', lineWidth: estimated ? 0 : 9, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.9 }}
             />
+            {/* key/id distintos: Mapbox no borra lineDasharray al cambiar el estilo (la ruta real quedaba punteada). */}
             <LineLayer
-              id="route-line-l"
+              key={estimated ? 'est' : 'real'}
+              id={estimated ? 'route-line-est' : 'route-line-l'}
               style={
                 estimated
                   ? { lineColor: colors.primary, lineWidth: 4, lineDasharray: [1.5, 1.5], lineOpacity: 0.85 }

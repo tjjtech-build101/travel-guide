@@ -3,6 +3,7 @@ import type { RouteStepDetail } from '@build101/shared';
 
 import {
   defaultMode,
+  announceKey,
   externalApps,
   externalUrls,
   formatDistance,
@@ -63,15 +64,32 @@ test('formatDistance', () => {
 
 test('headline: Llegás + min · m; sin bloque no hay "Salí en"', () => {
   const h = headline({ nowMin: 15 * 60 + 40, etaMin: 12, distanceM: 900 });
-  eq(h.arrive, 'Llegás 15:52');
+  eq(h.title, 'Llegás 15:52');
   eq(h.sub, '12 min · 900 m');
   eq(h.leave, null);
 });
 
-test('headline: "Salí en", "Salí ya" y "Vas X tarde" con la misma cuenta que Ahora (−5 min)', () => {
-  eq(headline({ nowMin: 600, etaMin: 10, distanceM: 0, startMin: 640 }).leave, { text: 'Salí en 25 min', tone: 'ok' });
-  eq(headline({ nowMin: 600, etaMin: 10, distanceM: 0, startMin: 615 }).leave, { text: 'Salí ya', tone: 'soon' });
+test('headline: "Salí en" es el título y la llegada se cuenta desde esa salida (no desde ahora)', () => {
+  // 15:30, 6 min a pie, empieza 16:00 → salí en 19 min (15:49) y llegás 15:55.
+  const h = headline({ nowMin: 15 * 60 + 30, etaMin: 6, distanceM: 450, startMin: 16 * 60 });
+  eq(h.title, 'Salí en 19 min');
+  eq(h.sub, '6 min · 450 m · llegás 15:55');
+  eq(h.leave, null);
+});
+
+test('headline: "Salí ya" y "Vas X tarde" junto a "Llegás" (misma cuenta que Ahora, −5 min)', () => {
+  eq(headline({ nowMin: 600, etaMin: 10, distanceM: 0, startMin: 615 }), { title: 'Llegás 10:10', sub: '10 min', leave: { text: 'Salí ya', tone: 'soon' } });
   eq(headline({ nowMin: 600, etaMin: 10, distanceM: 0, startMin: 610 }).leave, { text: 'Vas 5 min tarde', tone: 'late' });
+});
+
+test('announceKey: no cambia con la distancia, sí al llegar a la maniobra y al cambiar de paso', () => {
+  const a = announceKey({ text: 'En 230 m, doblá a la derecha', kind: 'right', distanceM: 230 });
+  const b = announceKey({ text: 'En 180 m, doblá a la derecha', kind: 'right', distanceM: 180 });
+  const c = announceKey({ text: 'Ahora, doblá a la derecha', kind: 'right', distanceM: 10 });
+  const d = announceKey({ text: 'En 300 m, doblá a la izquierda', kind: 'left', distanceM: 300 });
+  eq(a, b);
+  eq(a === c, false);
+  eq(a === d, false);
 });
 
 test('voseo: imperativos de Google → rioplatense, idempotente', () => {
@@ -172,8 +190,11 @@ test('externalUrls: esquema + fallback web por modo; Waze siempre maneja', () =>
     web: 'https://www.google.com/maps/dir/?api=1&destination=-34.9,-56.2&travelmode=transit',
   });
   eq(externalUrls('waze', 'walk', P), { scheme: 'waze://?ll=-34.9,-56.2&navigate=yes', web: 'https://waze.com/ul?ll=-34.9,-56.2&navigate=yes' });
-  eq(externalApps('ios'), ['apple', 'google', 'waze']);
-  eq(externalApps('android'), ['google', 'waze']);
+  eq(externalApps('ios', 'car'), ['apple', 'google', 'waze']);
+  eq(externalApps('android', 'car'), ['google', 'waze']);
+  // Waze siempre arma ruta en auto: a pie o en transporte no aparece.
+  eq(externalApps('ios', 'walk'), ['apple', 'google']);
+  eq(externalApps('android', 'transit'), ['google']);
 });
 
 if (failures) {
