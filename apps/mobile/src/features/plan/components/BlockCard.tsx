@@ -117,8 +117,13 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
           ) : null}
           {transfer ? <Text style={styles.meta}>{transfer}</Text> : null}
           <AlertChips alerts={block.alerts} />
-          {block.type === 'tour' && !block.tour_id && onGenerateTour ? (
-            <Button label="Generar tour" variant="secondary" style={styles.genTourBtn} onPress={() => onGenerateTour(block)} />
+          {onGenerateTour ? (
+            <Button
+              label={block.tour_id ? 'Generar de nuevo' : 'Generar tour'}
+              variant="secondary"
+              style={styles.genTourBtn}
+              onPress={() => onGenerateTour(block)}
+            />
           ) : null}
           <View style={styles.footer}>
             <StatusBadge status={block.status} />
