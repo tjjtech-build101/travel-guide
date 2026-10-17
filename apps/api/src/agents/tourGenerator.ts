@@ -737,6 +737,11 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
       })
       .eq('id', tourId);
 
+    // Bloque "tour" del itinerario → se liga al tour recién armado (si no, "Empezar tour" nunca lo encuentra).
+    if (input.block_id) {
+      await admin.from('blocks').update({ tour_id: tourId }).eq('id', input.block_id);
+    }
+
     if (tripId) {
       await insertFeed(ctx, {
         trip_id: tripId,

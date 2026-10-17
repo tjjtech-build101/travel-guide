@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { AvatarStack, type AvatarPerson } from '../../../ui/Avatar';
+import { Button } from '../../../ui/Button';
 import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 import { ALERT_COLORS, ALERT_FALLBACK, STATUS_COLORS, STATUS_LABEL, TRANSFER_MODE_LABEL, TYPE_LABEL } from '../labels';
@@ -67,9 +68,11 @@ type CardProps = {
   people: Map<string, AvatarPerson>;
   onPress?: (b: PlanBlock) => void;
   onLongPress?: (b: PlanBlock) => void;
+  /** Bloque tipo "tour" sin tour_id todavía: ofrece armarlo (PRD 06/18). */
+  onGenerateTour?: (b: PlanBlock) => void;
 };
 
-export const BlockCard = memo(function BlockCard({ block, me, legColor, people, onPress, onLongPress }: CardProps) {
+export const BlockCard = memo(function BlockCard({ block, me, legColor, people, onPress, onLongPress, onGenerateTour }: CardProps) {
   if (block.masked) return <BusyCard block={block} legColor={legColor} />;
   const s = hhmm(block.start_time);
   const e = hhmm(block.end_time);
@@ -114,6 +117,9 @@ export const BlockCard = memo(function BlockCard({ block, me, legColor, people, 
           ) : null}
           {transfer ? <Text style={styles.meta}>{transfer}</Text> : null}
           <AlertChips alerts={block.alerts} />
+          {block.type === 'tour' && !block.tour_id && onGenerateTour ? (
+            <Button label="Generar tour" variant="secondary" style={styles.genTourBtn} onPress={() => onGenerateTour(block)} />
+          ) : null}
           <View style={styles.footer}>
             <StatusBadge status={block.status} />
             {participants.length ? <AvatarStack people={participants} size={24} max={3} /> : null}
@@ -224,6 +230,7 @@ const styles = StyleSheet.create({
   title: { flexShrink: 1, fontSize: font.body, fontWeight: '600', color: colors.text },
   meta: { fontSize: font.tiny + 1, color: colors.textMuted },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  genTourBtn: { alignSelf: 'flex-start', paddingHorizontal: space.md, paddingVertical: space.xs, minHeight: 0, marginTop: space.xs },
   badge: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
   badgeText: { fontSize: font.tiny - 1, fontWeight: '700' },
   alerts: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs, marginTop: 2 },

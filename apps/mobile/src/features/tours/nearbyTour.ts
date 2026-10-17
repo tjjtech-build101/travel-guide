@@ -69,6 +69,40 @@ export async function startNearbyTour(input: StartNearbyTourInput): Promise<Near
   return { ok: false, code: 'error', message: res.error.message };
 }
 
+/**
+ * "Generar tour" desde un bloque del Itinerario (mode: 'planned'). Reusa el mismo job-tracking
+ * (useNearbyTourJob) que "Tour acá, ahora": la tarjeta de progreso de Ahora sirve para los dos casos,
+ * no hace falta una UI de progreso nueva.
+ */
+export async function generateTourForBlock(block: {
+  id: string;
+  trip_id: string;
+  lat: number | null;
+  lng: number | null;
+  duration_min: number | null;
+}): Promise<NearbyTourResult> {
+  if (block.lat == null || block.lng == null) {
+    return { ok: false, code: 'no_location', message: 'Este bloque no tiene una ubicación cargada.' };
+  }
+  const duration_min = block.duration_min ?? 60;
+  const res = await callTool<'generate_tour', GenerateTourStart>('generate_tour', {
+    mode: 'planned',
+    block_id: block.id,
+    trip_id: block.trip_id,
+    start_lat: block.lat,
+    start_lng: block.lng,
+    duration_min,
+    storyline: false,
+    language: 'es',
+  });
+  if (res.ok) {
+    useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: block.trip_id });
+    return { ok: true, job_id: res.data.job_id, tour_id: res.data.tour_id };
+  }
+  if (res.error.code === 'unknown_tool') return { ok: false, code: 'not_available', message: 'Generar tour llega muy pronto.' };
+  return { ok: false, code: 'error', message: res.error.message };
+}
+
 // ---------- job en curso ----------
 
 export type NearbyJob = { jobId: string; tourId: string; durationMin: number; tripId: string | null; at: number };

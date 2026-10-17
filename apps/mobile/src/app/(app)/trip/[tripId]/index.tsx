@@ -4,7 +4,7 @@ import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-lis
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
@@ -44,6 +44,7 @@ import {
   type PlanningSection,
 } from '../../../../features/planning/sections';
 import { ToursTab } from '../../../../features/planning/ToursTab';
+import { generateTourForBlock } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
@@ -157,6 +158,15 @@ function ItineraryView() {
       openBlock(tripId, b.id);
     },
     [select, tripId],
+  );
+
+  const onGenerateTour = useCallback(
+    async (b: PlanBlock) => {
+      const res = await generateTourForBlock({ id: b.id, trip_id: tripId, lat: b.lat, lng: b.lng, duration_min: b.duration_min });
+      if (!res.ok) Alert.alert('No pude generar el tour', res.message);
+      else Alert.alert('Generando el tour', 'El Scout está armando el recorrido con paradas verificadas. Lo vas a ver en la pestaña Tours cuando esté listo.');
+    },
+    [tripId],
   );
 
   const addAt = useCallback(
@@ -307,6 +317,7 @@ function ItineraryView() {
             legColor={legColors.get(item.leg.id) ?? colors.primary}
             people={people}
             onPress={onPressBlock}
+            onGenerateTour={onGenerateTour}
           />
         );
       case 'ghost':
