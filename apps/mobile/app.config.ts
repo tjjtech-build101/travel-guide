@@ -1,3 +1,4 @@
+import { withEntitlementsPlist, type ConfigPlugin } from 'expo/config-plugins';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 // Config nativa de la app. Todo plugin nativo del finde va acá desde el primer dev build
@@ -17,6 +18,18 @@ function googleIosUrlScheme(): string {
   return IOS_URL_SCHEME_PLACEHOLDER;
 }
 
+// Build en un iPhone con un Apple ID gratis (Personal Team): no soporta Push Notifications y el bundle id del
+// equipo puede estar registrado en otro team. IOS_PERSONAL_TEAM=1 saca aps-environment; IOS_BUNDLE_ID lo cambia.
+//   IOS_PERSONAL_TEAM=1 IOS_BUNDLE_ID=dev.build101.companion.tomas npx expo run:ios --device
+const PERSONAL_TEAM = process.env.IOS_PERSONAL_TEAM === '1';
+const BUNDLE_ID = process.env.IOS_BUNDLE_ID || 'dev.build101.companion';
+
+const withoutPush: ConfigPlugin = (cfg) =>
+  withEntitlementsPlist(cfg, (c) => {
+    delete c.modResults['aps-environment'];
+    return c;
+  });
+
 const PERMS = {
   locationWhenInUse: 'Usamos tu ubicación para mostrarte en el mapa y que el guía sepa dónde estás.',
   locationAlways:
@@ -27,7 +40,7 @@ const PERMS = {
   motion: 'Usamos el sensor de movimiento para saber si estás caminando durante el tour.',
 };
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
+const appConfig = ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Compañero',
   slug: 'build101',
@@ -37,7 +50,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
   ios: {
-    bundleIdentifier: 'dev.build101.companion',
+    bundleIdentifier: BUNDLE_ID,
     supportsTablet: false,
     infoPlist: {
       NSLocationWhenInUseUsageDescription: PERMS.locationWhenInUse,
@@ -127,3 +140,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ...config.extra,
   },
 });
+
+// withoutPush se aplica por fuera de `plugins`: los mods corren en orden inverso al registro y, adentro de la lista,
+// expo-notifications volvía a agregar aps-environment después.
+export default (ctx: ConfigContext): ExpoConfig => {
+  const cfg = appConfig(ctx);
+  return PERSONAL_TEAM ? withoutPush(cfg) : cfg;
+};
