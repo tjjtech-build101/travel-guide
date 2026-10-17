@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+apps/mobile/ios
+apps/mobile/android
+apps/mobile/.expo
+apps/mobile/assets
+supabase/.temp
+supabase/.branches
+**/.env
+**/.env.local
+apps/api/.vercel

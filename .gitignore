@@ -11,3 +11,5 @@ apps/mobile/android/
 supabase/.temp/
 supabase/.branches/
 coverage/
+.vercel
+.env*
