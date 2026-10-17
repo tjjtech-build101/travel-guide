@@ -13,7 +13,8 @@
     "db:bundle": "node scripts/db-bundle.mjs",
     "track:make": "tsx scripts/make-track.ts",
     "track:smooth": "tsx scripts/track-smooth.ts",
-    "track:check": "tsx scripts/track-check.ts"
+    "track:check": "tsx scripts/track-check.ts",
+    "scout:build": "tsx scripts/scout-avatar/build.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.0",
