@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { useAuth } from '../../features/auth/AuthProvider';
+import { ClockDevSection } from '../../features/now/ClockDevSection';
 import { env } from '../../lib/env';
 import { useLocationFix, useLocationProvider } from '../../location/LocationContext';
 import { useConnectionStore } from '../../realtime/connectionStore';
@@ -57,6 +58,8 @@ export default function DevMenu() {
           {fix ? JSON.stringify({ ...fix, t: new Date(fix.t).toISOString() }, null, 2) : 'Sin LocationFix todavía'}
         </Text>
       </Section>
+
+      <ClockDevSection />
 
       <Section title="Conexión">
         <Row label="Realtime" value={realtime + (realtimeError ? ` (${realtimeError})` : '')} />
