@@ -55,8 +55,9 @@
     "typecheck": "tsc --noEmit",
     "test:plan": "tsx src/features/plan/selectors.test.ts",
     "test:now": "tsx src/features/now/selectors.test.ts",
-    "lint": "expo lint",
-    "test:map": "tsx src/features/map/model.test.ts"
+    "test:profile": "tsx src/features/profile/model.test.ts",
+    "test:map": "tsx src/features/map/model.test.ts",
+    "lint": "expo lint"
   },
   "private": true,
   "expo": {

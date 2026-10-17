@@ -245,3 +245,11 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - `activity_feed.payload.inverse` de `trip_planned` usa además la op `{ op: 'remove_leg', leg_id }` (borra el tramo en cascada: días, miembros, bloques).
 - Excepción de plan: `ctx.plan` (solo dentro del job, nunca por HTTP) + `PolicyFacts.planEmptyLeg` en `writeMode`; los bloques del plan no escriben `block_added`, solo la fila `trip_planned`.
 - Sin `GOOGLE_MAPS_API_KEY`, `search_places` / `place_details` usan OpenStreetMap (Photon / Nominatim) y el id va como `osm:<N|W|R><id>` en `google_place_id` (desactivable con `PLACES_OSM_FALLBACK=false`).
+
+---
+
+## Cambios PRD 10 (onboarding mínimo con chips) — en código
+
+- Sin cambios de esquema. Formas de los jsonb/enums de `profiles` en `packages/shared/src/profile.ts`: `INTEREST_TAGS`, `Pace`, `Chronotype`, `BudgetLevel` (`low|mid|high|no_limit`), `TravelStyle`, `Interests` (pesos 1–5), `Mobility`, `InferredTrait`, `QuietHours`, `NotificationPrefs` y `ProfilePreferencesPatch` (lo que escribe el onboarding/Perfil).
+- La app escribe `profiles` directo con Supabase (RLS: cada uno el suyo) y pone `onboarded_at = now()` en la misma actualización. `avoid` guarda etiquetas en español ("multitudes", "caminar mucho", …); `languages` en ISO 639-1.
+- Estrellas de los chips → peso: ★ = 2, ★★ = 4, ★★★ = 5.
