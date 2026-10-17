@@ -62,7 +62,8 @@
     "test:profile": "tsx src/features/profile/model.test.ts",
     "test:map": "tsx src/features/map/model.test.ts",
     "test:fresh": "tsx src/location/freshPositionTools.test.ts",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:schedule": "tsx src/schedule/delivery.test.ts"
   },
   "private": true,
   "expo": {

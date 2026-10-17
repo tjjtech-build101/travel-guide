@@ -95,6 +95,7 @@ export function NextCard({
   members,
   onPress,
   onLongPress,
+  alertNote,
 }: {
   next: NowNext;
   nowMin: number;
@@ -103,6 +104,8 @@ export function NextCard({
   farAway?: boolean;
   onEnableLocation: () => void;
   members: Map<string, AvatarPerson>;
+  /** Último aviso del vigilante de horarios para este bloque ("Te avisé a las 15:33 · Salí en 8 min"). */
+  alertNote?: string | null;
 } & CardActions) {
   const b = next.block;
   const leaveIn = eta ? leaveInMin(next.start, nowMin, eta.minutes) : null;
@@ -148,6 +151,11 @@ export function NextCard({
             <Text style={styles.link}>Activar ubicación para calcular cuándo salir</Text>
           </Pressable>
         ) : null
+      ) : null}
+      {alertNote ? (
+        <Text style={styles.alertNote} accessibilityLabel={alertNote}>
+          {alertNote}
+        </Text>
       ) : null}
       <View style={styles.footer}>
         <View />
@@ -345,6 +353,7 @@ const styles = StyleSheet.create({
   leaveText: { fontSize: font.h2, fontWeight: '800' },
   leaveSub: { fontSize: font.small, fontWeight: '600', marginTop: 2 },
   far: { fontSize: font.small, color: colors.textMuted, marginTop: space.sm },
+  alertNote: { fontSize: font.small, fontWeight: '700', color: colors.textMuted, marginTop: space.sm },
   link: { fontSize: font.small, color: colors.primary, fontWeight: '700', marginTop: space.sm },
   later: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, paddingHorizontal: space.lg },
   laterHead: { minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

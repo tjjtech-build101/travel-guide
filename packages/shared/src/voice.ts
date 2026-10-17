@@ -103,7 +103,29 @@ export const VOICE_EVENT_TYPES = [
   'tour_failed',
   // PRD 07: el tour arrancó en medio de una llamada de chat (payload con las reglas del modo tour).
   'tour_started',
+  // Vigilante de horarios (celu): salí ya / vas tarde / por empezar (payload ScheduleAlertPayload).
+  'schedule_alert',
 ] as const;
+
+/** Tipos de aviso del vigilante de horarios. */
+export const SCHEDULE_ALERT_KINDS = ['leave_now', 'running_late', 'starting_soon'] as const;
+export type ScheduleAlertKind = (typeof SCHEDULE_ALERT_KINDS)[number];
+
+/**
+ * Payload de [EVENTO:schedule_alert] (y de la notificación local). Minutos enteros; `start_time` en "HH:MM" local.
+ * - leave_now: `leave_in_min` = inicio − ETA − 5 − ahora (≤ 10, puede ser negativo); `late_by_min` null.
+ * - running_late: `late_by_min` = llegada estimada − inicio (> 5); `leave_in_min` negativo.
+ * - starting_soon: ya estás a ≤ 150 m; `leave_in_min` y `late_by_min` null.
+ */
+export type ScheduleAlertPayload = {
+  kind: ScheduleAlertKind;
+  block_id: string;
+  title: string;
+  start_time: string;
+  eta_min: number | null;
+  leave_in_min: number | null;
+  late_by_min: number | null;
+};
 
 /** Payload de [EVENTO:tour_ready]. */
 export type TourReadyEvent = {

@@ -26,6 +26,10 @@ export type InstructionsInput = {
   extraRules?: string[];
 };
 
+/** Vigilante de horarios (celu → [EVENTO:schedule_alert]). */
+export const SCHEDULE_ALERT_RULE =
+  'schedule_alert: avisá en UNA frase con el número exacto del json (leave_now: "salí en {leave_in_min} min para {title}", o "salí ya" si es 0 o menos; running_late: "vas {late_by_min} min tarde a {title}"; starting_soon: "{title} empieza a las {start_time}") y ofrecé indicaciones a pie ("¿te llevo?"). Si es running_late, ofrecé avisarle al grupo o mover el bloque, pero no apliques nada sin que la persona te lo pida.';
+
 const bullets = (xs: string[]) => xs.map((x) => `- ${x}`).join('\n');
 
 /** Todo menos la línea de idioma (ver voiceLangLine). */
@@ -73,6 +77,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     'Eventos: te llegan mensajes de sistema "[EVENTO:tipo] json". No los leas en voz alta. proposal_decided: contá en una frase qué se decidió.',
     'look_at_photo abre la cámara: decí algo cortito ("Dale, mostrame") y esperá; no describas nada hasta [EVENTO:photo_result]. photo_result: contá narration con tus palabras (≤60 palabras); si viene question, respondela primero; si place.confidence < 0.6 decí que no estás seguro y no afirmes nombres ni datos; leé las inscriptions si las hay.',
     'tour_ready: anunciá en 2 frases que el tour está listo: título, cuántas paradas, cuánto dura y cuál es la primera; preguntá si arrancan. tour_failed: decí que no salió y ofrecé probar de nuevo.',
+    SCHEDULE_ALERT_RULE,
   );
   if (i.extraRules?.length) lines.push(...i.extraRules);
   lines.push(

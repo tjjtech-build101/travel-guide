@@ -278,3 +278,13 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - `POST /voice/session` con `mode:'tour'` suma las reglas del modo tour (`apps/api/src/voice/tourRules.ts`) y la lista de paradas con sus `stop_id`.
 - Evento de voz nuevo `[EVENTO:tour_started] {tour_id, title, rules[], stops:[{sort_order,name,stop_id}]}`: el tour arrancó en medio de una llamada de **chat** (p. ej. "dale, arrancamos" después de `tour_ready`); trae las reglas del modo tour (`TOUR_RULES` en `packages/shared/src/tourVoice.ts`, las mismas que usa la API) porque la sesión no se creó con `mode:'tour'`. En modo chat las instrucciones suman `TOUR_STARTED_RULE`.
 - Motor del tour en el celu: `packages/shared/src/tourEngine.ts` (puro). Usa `[EVENTO:dwell]` (v1.1) para la permanencia, no `arrived_stop` repetido.
+
+---
+
+## Cambios vigilante de horarios — en código
+
+- Evento de voz nuevo `[EVENTO:schedule_alert] {kind, block_id, title, start_time, eta_min, leave_in_min, late_by_min}` en `VOICE_EVENT_TYPES` (`packages/shared/src/voice.ts`; tipos `ScheduleAlertPayload`, `ScheduleAlertKind`, `SCHEDULE_ALERT_KINDS`). `kind`: `leave_now` | `running_late` | `starting_soon`. `start_time` en `"HH:MM"` local; minutos enteros; `null` cuando no aplica (p. ej. `leave_in_min` y `late_by_min` en `starting_soon`).
+- Lógica pura en `packages/shared/src/scheduleWatcher.ts` (`evaluateSchedule`, `nextWatchTarget`, `shouldRefreshEta`, `inQuietHours`, `alertKey`, `scheduleAlertText`). "Salí en X" (`leaveInMin`, `LEAVE_BUFFER_MIN`), `walkEstimateMin` y `FAR_AWAY_M` / `isFarAway` se movieron acá desde la vista Ahora (que los reexporta, sin cambios de comportamiento).
+- Reglas: `leave_now` a ≤ 10 y ≤ 5 min de tener que salir; `running_late` si la llegada estimada supera el inicio por > 5 min; `starting_soon` si empieza en ≤ 15 min y ya estás a ≤ 150 m. Un aviso por bloque y por (tipo, umbral) — la clave incluye la hora de inicio, así un bloque movido se rearma. Solo el próximo bloque con hora fija (`time_flex='fixed'`) y lugar; nada durante un tour activo (manda `time_warning`), en `profiles.quiet_hours` ni para bloques a > 30 km.
+- Instrucciones del scout (`apps/api/src/voice/instructions.ts`, `SCHEDULE_ALERT_RULE`, aditiva en chat y tour): una frase con el número exacto, ofrecer indicaciones a pie ("¿te llevo?"); en `running_late`, ofrecer avisar al grupo o mover el bloque sin aplicar nada solo.
+- Entrega en el celu (`apps/mobile/src/schedule`): con llamada abierta → `voice.injectEvent('schedule_alert', payload)` (espera 3 s de silencio si la persona habla); sin llamada → notificación **local** de `expo-notifications` (`trigger: null`, sin servidor de push, no pasa por la tabla `notifications`), `data.url` = `/trip/<id>/now`. Sin cambios de esquema.

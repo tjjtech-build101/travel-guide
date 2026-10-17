@@ -192,12 +192,8 @@ export function needsSuggestions(plan: Pick<NowPlan, 'current' | 'next'>, horizo
 
 // ───────────────────────── Cuándo salir
 
-export const LEAVE_BUFFER_MIN = 5;
-
-/** "Salí en X min" = inicio − ETA − 5 − ahora. Negativo = ya es tarde. */
-export function leaveInMin(nextStartMin: number, nowMin: number, etaMin: number, bufferMin = LEAVE_BUFFER_MIN): number {
-  return nextStartMin - etaMin - bufferMin - nowMin;
-}
+// "Salí en X" vive en packages/shared (scheduleWatcher.ts): lo usan Ahora y el vigilante de horarios.
+export { LEAVE_BUFFER_MIN, leaveInMin } from '@build101/shared';
 
 export type LeaveUrgency = 'ok' | 'soon' | 'late';
 
@@ -244,17 +240,8 @@ export function distanceM(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-/** Estimación a pie sin red: distancia × 1,3 (calles) a 80 m/min. Se usa mientras route_eta responde o si falla. */
-export function walkEstimateMin(a: LatLng, b: LatLng): number {
-  return Math.max(1, Math.ceil((distanceM(a, b) * 1.3) / 80));
-}
-
-/** Más lejos que esto no tiene sentido "salí en X" (p. ej. el GPS del simulador en California). */
-export const FAR_AWAY_M = 30_000;
-
-export function isFarAway(here: LatLng, target: LatLng): boolean {
-  return distanceM(here, target) > FAR_AWAY_M;
-}
+// Estimación a pie sin red y "muy lejos" (> 30 km): compartidos con el vigilante de horarios (packages/shared).
+export { FAR_AWAY_M, isFarAway, walkEstimateMin } from '@build101/shared';
 
 /** Celda de ~100 m para no recalcular el ETA con cada fix (PRD 19: cada 2 min o 100 m). */
 export function etaCell(p: LatLng): string {
