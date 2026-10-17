@@ -8,6 +8,7 @@ import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
 import { get_trip_overview } from './get_trip_overview';
 import { look_at_photo } from './look_at_photo';
+import { research } from './research';
 import { move_block } from './move_block';
 import { place_details } from './place_details';
 import { plan_trip } from './plan_trip';
@@ -34,6 +35,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   undo,
   plan_trip,
   look_at_photo,
+  research,
   generate_tour,
   weather,
   events_search,

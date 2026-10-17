@@ -6,6 +6,7 @@ import {
   formatVoiceEvent,
   languageSwitchMessage,
   REALTIME_TRANSCRIBE_MODEL,
+  type ResearchResult,
   type TranscriptLine,
   type VoiceEventType,
   type VoiceFocus,
@@ -20,7 +21,7 @@ import { micPermission, requestMic } from './permissions';
 import { setSpeaker, startCallAudio, stopCallAudio } from './audioRoute';
 import { RealtimeConnection, type ServerEvent } from './realtimeClient';
 import { camera, setBeforeCameraOpen } from './camera/cameraStore';
-import { watchTourJob } from './tourWatch';
+import { watchJob, watchTourJob } from './tourWatch';
 import { actionText, registerLocalTool, runFunctionCalls, toModelOutput, type FunctionCall } from './toolBridge';
 
 export type CallStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'ending' | 'summary' | 'error';
@@ -317,6 +318,26 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }));
         setTimeout(() => get().dismissAction(id), ACTION_TTL_MS);
       }
+    }
+    // research es un job: cuando termine, el scout retoma solo el tema ([EVENTO:research_ready]).
+    for (const { call, res, input } of results) {
+      if (call.name !== 'research' || !res.ok) continue;
+      const jobId = (res.data as { job_id?: string } | undefined)?.job_id;
+      if (!jobId) continue;
+      const question = String(input.question ?? '');
+      log('🔧', `research: «${question.slice(0, 60)}» (job ${jobId.slice(0, 8)}…)`);
+      const sessionId = get().session?.voice_session_id;
+      void watchJob(jobId, 'La búsqueda').then((r) => {
+        if (get().session?.voice_session_id !== sessionId) return; // la llamada ya terminó
+        if (r.ok) {
+          const out = r.row.result as ResearchResult | null;
+          log('🔧', `research listo: ${out?.facts.length ?? 0} datos verificados`);
+          get().injectEvent('research_ready', { question, answer: out?.answer ?? '', facts: out?.facts ?? [] });
+        } else {
+          log('⚠️', `research falló: ${r.error}`);
+          get().injectEvent('research_failed', { question, error: r.error });
+        }
+      });
     }
     // generate_tour es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
     for (const { call, res } of results) {
