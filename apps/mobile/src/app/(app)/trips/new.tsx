@@ -3,7 +3,7 @@ import type { PlanTripStart } from '@build101/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type ScrollViewInstance } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -16,6 +16,7 @@ import { callTool } from '../../../lib/api';
 import { formatDay } from '../../../lib/format';
 import { useTripRealtime } from '../../../realtime/useTripRealtime';
 import { Button } from '../../../ui/Button';
+import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../ui/theme';
 
 let demoConsumed = false;

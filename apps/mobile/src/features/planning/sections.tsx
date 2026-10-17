@@ -2,9 +2,10 @@
 // Itinerario es el Plan del PRD 02. Eventos (PRD 16) y Tours (PRD 06/18) son placeholders con estado vacío
 // claro hasta que lleguen sus PRDs. Gastos (PRD 23) queda oculto detrás de FEATURES.expenses.
 import { SCOUT } from '@build101/shared';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { FEATURES } from '../../lib/features';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 import { Segmented } from '../plan/components/Controls';
 

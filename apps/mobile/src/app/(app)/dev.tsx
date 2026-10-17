@@ -2,7 +2,7 @@
 // último fix, Realtime, salir.
 import Constants from 'expo-constants';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../../features/auth/AuthProvider';
 import { SimulatorPanel } from '../../features/gps/SimulatorPanel';
@@ -11,6 +11,7 @@ import { env } from '../../lib/env';
 import { useLocationFix, useLocationProvider } from '../../location/LocationContext';
 import { useConnectionStore } from '../../realtime/connectionStore';
 import { Button } from '../../ui/Button';
+import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
 
 export default function DevMenu() {

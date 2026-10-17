@@ -1,9 +1,10 @@
 // Piezas de la vista Ahora (PRD 19). Modo exterior: títulos ≥ 22 pt, cuerpo ≥ 17 pt, botones ≥ 56 pt.
 import { SCOUT } from '@build101/shared';
 import { useState, type ReactNode } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { AvatarStack, type AvatarPerson } from '../../ui/Avatar';
+import { Text } from '../../ui/Text';
 import { CameraIcon, FlagIcon, RouteIcon } from '../../ui/icons';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { colors, font, radius, space } from '../../ui/theme';
@@ -17,9 +18,9 @@ import type { Eta } from './useEta';
 export const OUTDOOR = { title: 24, body: 17, button: 56 } as const;
 
 const URGENCY_COLORS = {
-  ok: { bg: '#E3ECFB', fg: '#1D4FA8' },
-  soon: { bg: '#FFE8CC', fg: '#9A4A00' },
-  late: { bg: '#FBE4E1', fg: '#A8261B' },
+  ok: { bg: colors.successBg, fg: colors.primary },
+  soon: { bg: '#F7E9C6', fg: colors.bronzeText },
+  late: { bg: colors.dangerBg, fg: colors.danger },
 } as const;
 
 /** Abre Apple Maps (iOS) o Google Maps con indicaciones a pie. */
@@ -325,7 +326,7 @@ const styles = StyleSheet.create({
     padding: space.lg,
     gap: space.xs,
   },
-  cardNow: { borderColor: '#9BCBA6', borderWidth: 2 },
+  cardNow: { borderColor: colors.primary, borderWidth: 2 },
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   kicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1 },
   time: { fontSize: font.small, fontWeight: '700', color: colors.textMuted, fontVariant: ['tabular-nums'] },
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: OUTDOOR.title, fontWeight: '800', color: colors.text },
   place: { fontSize: OUTDOOR.body, color: colors.textMuted },
   progress: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceMuted, marginTop: space.sm, overflow: 'hidden' },
-  progressFill: { height: 8, backgroundColor: '#2F9E55', borderRadius: 4 },
+  progressFill: { height: 8, backgroundColor: colors.primary, borderRadius: 4 },
   footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: space.sm },
   remaining: { fontSize: OUTDOOR.body, fontWeight: '700', color: colors.text },
   leave: { marginTop: space.sm, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.sm },
@@ -388,13 +389,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 60,
     borderRadius: radius.lg,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.scout,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.md,
   },
-  talkActive: { backgroundColor: colors.danger },
-  talkText: { color: '#fff', fontSize: font.h3, fontWeight: '800' },
+  talkActive: { backgroundColor: colors.text },
+  talkText: { color: colors.scoutText, fontSize: font.h3, fontWeight: '800' },
   tiles: { flexDirection: 'row', gap: space.sm },
   tile: {
     flex: 1,

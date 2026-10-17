@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { signInAsDemo, signInWithGoogle, type DemoUserKey } from '../../features/auth/signIn';
 import { missingEnv } from '../../lib/env';
 import { Button } from '../../ui/Button';
+import { Text } from '../../ui/Text';
 import { Toast, useToast } from '../../ui/Toast';
 import { colors, font, radius, space } from '../../ui/theme';
 

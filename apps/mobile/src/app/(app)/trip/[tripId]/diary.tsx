@@ -2,5 +2,5 @@
 import { EmptyState } from '../../../../ui/States';
 
 export default function DiaryTab() {
-  return <EmptyState title="Diario" subtitle="Muy pronto: el diario vivo de cada día del viaje." />;
+  return <EmptyState pose="compass" title="Diario" subtitle="Muy pronto: el diario vivo de cada día del viaje." />;
 }

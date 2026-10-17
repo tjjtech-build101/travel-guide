@@ -65,7 +65,8 @@ export const ALERT_LABEL: Record<string, string> = {
  * TODO(shared): el PRD pide LEG_COLORS en packages/shared/src/constants.ts (lo usa también el Mapa);
  * vive acá hasta que se mueva.
  */
-export const LEG_COLORS = ['#1F6FEB', '#C2410C', '#15803D', '#7E22CE', '#BE185D', '#0E7490', '#A16207', '#4338CA'] as const;
+// Del uniforme del Scout (sombrero, pañuelo, lago, bronce, oliva, cinta); todos se leen con texto blanco.
+export const LEG_COLORS = ['#8A6236', '#D33B2D', '#3567A0', '#B07A16', '#6E7744', '#5A3921'] as const;
 
 /**
  * Color del tramo por su posición en el viaje (sort_order, fecha, id). Los tramos paralelos comparten

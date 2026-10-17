@@ -1,10 +1,11 @@
 // Filas y piezas del encabezado del Plan.
 import { SCOUT, type DayRow } from '@build101/shared';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { formatDateRange, formatDay } from '../../../lib/format';
 import { AvatarStack, type AvatarPerson } from '../../../ui/Avatar';
 import { Skeleton } from '../../../ui/States';
+import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../ui/theme';
 import type { LegGroup, ParallelColumn, PlanBlock, PlanFilter, PlanLeg } from '../selectors';
 import { CompactBlockCard } from './BlockCard';
@@ -25,46 +26,61 @@ export function LegStrip({
   activeLegIds: Set<string>;
   onPress: (leg: PlanLeg, group: LegGroup) => void;
 }) {
+  // Recorrido entre ciudades: número de orden, fondo suave del color de la ciudad y puntitos entre tramos.
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-      {groups.map((g) => (
-        <View key={g.id} style={g.parallel ? styles.stack : undefined}>
-          {g.legs.map((l) => {
-            const c = legColors.get(l.id) ?? colors.primary;
-            const dim = g.parallel && !activeLegIds.has(l.id);
-            return (
-              <Pressable
-                key={l.id}
-                onPress={() => onPress(l, g)}
-                accessibilityRole="button"
-                accessibilityLabel={`Ir a ${l.city}, ${formatDateRange(l.start_date, l.end_date)}`}
-                style={({ pressed }) => [
-                  styles.legChip,
-                  g.parallel && styles.legChipStacked,
-                  { borderColor: c, opacity: pressed ? 0.7 : dim ? 0.55 : 1 },
-                ]}
-              >
-                <View style={[styles.dot, { backgroundColor: c }]} />
-                <View>
-                  <Text style={styles.legCity} numberOfLines={1}>
-                    {l.city}
-                  </Text>
-                  <Text style={styles.legDates}>{shortRange(l.start_date, l.end_date)}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
+      {groups.map((g, gi) => (
+        <View key={g.id} style={styles.stripItem}>
+          {gi > 0 ? (
+            <View style={styles.trail} importantForAccessibility="no">
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={styles.trailDot} />
+              ))}
+            </View>
+          ) : null}
+          <View style={g.parallel ? styles.stack : undefined}>
+            {g.legs.map((l) => {
+              const c = legColors.get(l.id) ?? colors.primary;
+              const dim = g.parallel && !activeLegIds.has(l.id);
+              return (
+                <Pressable
+                  key={l.id}
+                  onPress={() => onPress(l, g)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ir a ${l.city}, ${formatDateRange(l.start_date, l.end_date)}`}
+                  style={({ pressed }) => [
+                    styles.legChip,
+                    g.parallel && styles.legChipStacked,
+                    { backgroundColor: `${c}1F`, opacity: pressed ? 0.7 : dim ? 0.5 : 1 },
+                  ]}
+                >
+                  <View style={[styles.legNum, g.parallel && styles.legNumSmall, { backgroundColor: c }]}>
+                    <Text style={styles.legNumText}>{gi + 1}</Text>
+                  </View>
+                  <View style={styles.legText}>
+                    <Text style={styles.legCity} numberOfLines={2}>
+                      {l.city}
+                    </Text>
+                    <Text style={styles.legDates}>{shortRange(l.start_date, l.end_date)}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       ))}
     </ScrollView>
   );
 }
 
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** "17–19 oct" · "30 oct – 2 nov" · "18 oct". */
 function shortRange(a: string, b: string): string {
   const [, am, ad] = a.split('-').map(Number);
   const [, bm, bd] = b.split('-').map(Number);
-  if (a === b) return `${ad}/${am}`;
-  return am === bm ? `${ad}–${bd}/${am}` : `${ad}/${am}–${bd}/${bm}`;
+  if (a === b) return `${ad} ${MONTHS[am - 1]}`;
+  return am === bm ? `${ad}–${bd} ${MONTHS[am - 1]}` : `${ad} ${MONTHS[am - 1]} – ${bd} ${MONTHS[bm - 1]}`;
 }
 
 // ───────────────────────── Barra (filtros + menú)
@@ -366,21 +382,28 @@ export function PlanSkeleton() {
 }
 
 const styles = StyleSheet.create({
-  strip: { paddingHorizontal: space.lg, gap: space.sm, alignItems: 'center', paddingVertical: space.xs },
+  strip: { paddingHorizontal: space.lg, alignItems: 'center', paddingVertical: space.xs },
+  stripItem: { flexDirection: 'row', alignItems: 'center' },
   stack: { gap: 4 },
+  trail: { flexDirection: 'row', gap: 3, marginHorizontal: space.xs },
+  trailDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.khaki },
   legChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    borderWidth: 1.5,
-    borderRadius: radius.md,
-    paddingHorizontal: space.md,
+    borderRadius: radius.lg,
+    paddingLeft: space.sm,
+    paddingRight: space.md,
+    paddingVertical: space.xs + 2,
     minHeight: MIN_TOUCH,
-    backgroundColor: colors.surface,
+    maxWidth: 190,
   },
-  legChipStacked: { minHeight: 36, paddingVertical: 2 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  legCity: { fontSize: font.small, fontWeight: '700', color: colors.text, maxWidth: 150 },
+  legChipStacked: { minHeight: 38, paddingVertical: 3 },
+  legNum: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  legNumSmall: { width: 20, height: 20, borderRadius: 10 },
+  legNumText: { color: '#FFFFFF', fontSize: font.tiny, fontWeight: '800' },
+  legText: { flexShrink: 1 },
+  legCity: { fontSize: font.small, fontWeight: '700', color: colors.text },
   legDates: { fontSize: font.tiny - 1, color: colors.textMuted },
   iconBtn: { minWidth: MIN_TOUCH - 4, minHeight: MIN_TOUCH - 4, alignItems: 'center', justifyContent: 'center' },
   banner: {

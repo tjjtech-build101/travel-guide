@@ -14,7 +14,8 @@
     "track:make": "tsx scripts/make-track.ts",
     "track:smooth": "tsx scripts/track-smooth.ts",
     "track:check": "tsx scripts/track-check.ts",
-    "scout:build": "tsx scripts/scout-avatar/build.ts"
+    "scout:build": "tsx scripts/scout-avatar/build.ts",
+    "map:vintage": "tsx scripts/map-style/build-vintage.ts"
   },
   "devDependencies": {
     "typescript": "^5.9.0",

@@ -1,14 +1,19 @@
 // Mapa 2D con @rnmapbox/maps (PRD 03). Solo se monta si hay EXPO_PUBLIC_MAPBOX_TOKEN (ver map.tsx).
 // Pines y líneas con ShapeSource + CircleLayer/SymbolLayer/LineLayer (nada de vistas nativas por pin).
 // Mi posición: puck propio alimentado por el LocationProvider (funciona igual con el simulado), no el nativo.
+// Estilo "mapa viejo": Mapbox Streets recoloreado en sepia (vintageStyle.json, `pnpm map:vintage`).
 import Mapbox, { Camera, CircleLayer, LineLayer, MapView, ShapeSource, SymbolLayer } from '@rnmapbox/maps';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { env } from '../../lib/env';
 import { useLocationFix } from '../../location/LocationContext';
+import { Text } from '../../ui/Text';
 import { colors, font, space } from '../../ui/theme';
 import { linesGeoJSON, type MapModel, type MapPoint, pointsGeoJSON } from './model';
+import vintageStyle from './vintageStyle.json';
+
+const VINTAGE_STYLE = JSON.stringify(vintageStyle);
 
 let tokenSet = false;
 function ensureToken() {
@@ -22,9 +27,11 @@ type Props = {
   selectedId: string | null;
   onSelect: (p: MapPoint) => void;
   onLongPress: (lat: number, lng: number) => void;
+  /** Alto (pt) que tapa la hoja de la lista desde abajo: encuadra y centra arriba de ella. */
+  bottomInset?: number;
 };
 
-export function TripMapView({ model, selectedId, onSelect, onLongPress }: Props) {
+export function TripMapView({ model, selectedId, onSelect, onLongPress, bottomInset = 0 }: Props) {
   ensureToken();
   const camera = useRef<Camera>(null);
   const fix = useLocationFix();
@@ -33,14 +40,18 @@ export function TripMapView({ model, selectedId, onSelect, onLongPress }: Props)
   const points = useMemo(() => pointsGeoJSON(model.points), [model.points]);
   const lines = useMemo(() => linesGeoJSON(model.lines), [model.lines]);
   const byId = useMemo(() => new Map(model.points.map((p) => [p.id, p])), [model.points]);
+  const inset = useRef(bottomInset);
+  inset.current = bottomInset;
+  const padding = () => ({ paddingTop: 0, paddingLeft: 0, paddingRight: 0, paddingBottom: inset.current });
 
   // Encuadrar todo al cambiar de alcance.
   useEffect(() => {
     const b = model.bounds;
     if (!b) return;
     const t = setTimeout(() => {
-      if (b.ne[0] === b.sw[0] && b.ne[1] === b.sw[1]) camera.current?.setCamera({ centerCoordinate: b.ne, zoomLevel: 15, animationDuration: 500 });
-      else camera.current?.fitBounds(b.ne, b.sw, [80, 48, 80, 48], 500);
+      if (b.ne[0] === b.sw[0] && b.ne[1] === b.sw[1])
+        camera.current?.setCamera({ centerCoordinate: b.ne, zoomLevel: 15, padding: padding(), animationDuration: 500 });
+      else camera.current?.fitBounds(b.ne, b.sw, [64, 48, 48 + inset.current, 48], 500);
     }, 50);
     return () => clearTimeout(t);
   }, [model.bounds]);
@@ -48,7 +59,7 @@ export function TripMapView({ model, selectedId, onSelect, onLongPress }: Props)
   // Centrar en el elemento elegido desde la lista.
   useEffect(() => {
     const p = selectedId ? byId.get(selectedId) : null;
-    if (p) camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], animationDuration: 500 });
+    if (p) camera.current?.setCamera({ centerCoordinate: [p.lng, p.lat], padding: padding(), animationDuration: 500 });
   }, [selectedId, byId]);
 
   const puck = useMemo(
@@ -70,7 +81,7 @@ export function TripMapView({ model, selectedId, onSelect, onLongPress }: Props)
   return (
     <MapView
       style={styles.flex}
-      styleURL={Mapbox.StyleURL.Street}
+      styleJSON={VINTAGE_STYLE}
       pitchEnabled={false}
       scaleBarEnabled={false}
       logoEnabled

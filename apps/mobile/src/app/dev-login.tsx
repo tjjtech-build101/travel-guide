@@ -3,10 +3,11 @@
 import type { DEMO_USER_EMAILS } from '@build101/shared';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 
 import { signInAsDemo } from '../features/auth/signIn';
 import { supabase } from '../lib/supabase';
+import { Text } from '../ui/Text';
 import { colors } from '../ui/theme';
 
 export default function DevLogin() {
