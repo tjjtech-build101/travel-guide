@@ -275,7 +275,7 @@ function Building({ job }: { job: PlanTripStart }) {
           label="Empezar otro viaje"
           variant="ghost"
           onPress={reset}
-          accessibilityHint="El viaje que se está armando sigue en Mis viajes"
+          accessibilityHint="El viaje que se está armando sigue en el inicio"
           style={{ marginTop: space.xs }}
         />
       </View>
