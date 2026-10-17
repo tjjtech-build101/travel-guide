@@ -544,10 +544,42 @@ export async function startGenerateTour(input: ToolInput<'generate_tour'>, ctx: 
   };
 }
 
-/** Deps por defecto, creadas recién cuando el job las usa (el setup síncrono no necesita la key de Anthropic). */
+/**
+ * Deps por defecto, creadas recién cuando el job las usa (el setup síncrono no necesita la key de Anthropic).
+ * Getters reales (no un Proxy): `{ ...defaultDepsLazy(), ...deps }` necesita own keys enumerables para que el
+ * spread los copie — un Proxy solo con trap `get` spreadea a `{}` y perdíamos TODAS las deps default (incluido `now`).
+ */
 function defaultDepsLazy(admin: ToolCtx['admin'], userId: string): TourDeps {
   let d: TourDeps | null = null;
-  return new Proxy({} as TourDeps, { get: (_t, prop) => (d ??= defaultDeps(admin, userId))[prop as keyof TourDeps] });
+  const get = () => (d ??= defaultDeps(admin, userId));
+  return {
+    get llm() {
+      return get().llm;
+    },
+    get config() {
+      return get().config;
+    },
+    now: () => get().now(),
+    weather: (a) => get().weather(a),
+    reverseGeocode: (lat, lng) => get().reverseGeocode(lat, lng),
+    nearbyPlaceLibrary: (a) => get().nearbyPlaceLibrary(a),
+    searchGoogle: (a) => get().searchGoogle(a),
+    searchByName: (a) => get().searchByName(a),
+    searchWikipedia: (a) => get().searchWikipedia(a),
+    searchOverpass: (a) => get().searchOverpass(a),
+    searchEvents: (a) => get().searchEvents(a),
+    wikidataInfo: (ids) => get().wikidataInfo(ids),
+    wikipediaIntros: (titles, lang) => get().wikipediaIntros(titles, lang),
+    wikipediaArticle: (title, lang) => get().wikipediaArticle(title, lang),
+    fetchPageText: (url) => get().fetchPageText(url),
+    computeWalk: (stops) => get().computeWalk(stops),
+    get heartbeatMs() {
+      return get().heartbeatMs;
+    },
+    get budgetMs() {
+      return get().budgetMs;
+    },
+  };
 }
 
 // ───────────────────────── Utilidades del job
