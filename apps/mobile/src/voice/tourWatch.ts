@@ -6,7 +6,9 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { supabase } from '../lib/supabase';
 
-const TIMEOUT_MS = 4 * 60_000;
+const TIMEOUT_MS = 6 * 60_000;
+/** El job escribe progreso cada ~10 s (heartbeat). Sin novedades en este tiempo, la función murió (p. ej. límite de Vercel). */
+const STALE_MS = 45_000;
 
 export type TourWatchResult = { ok: true; event: TourReadyEvent } | { ok: false; error: string };
 
@@ -40,8 +42,22 @@ export function watchTourJob(jobId: string, tourId: string): Promise<TourWatchRe
   return new Promise((resolve) => {
     let channel: RealtimeChannel | null = null;
     let finished = false;
+    let stale: ReturnType<typeof setTimeout> | null = null;
+    const armStale = () => {
+      if (stale) clearTimeout(stale);
+      stale = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (channel) void supabase.removeChannel(channel);
+        resolve({ ok: false, error: 'El armado del tour se cortó a mitad de camino' });
+      }, STALE_MS);
+    };
+    armStale();
     const finish = async (row: AgentJobRow | null) => {
-      if (finished || !row || (row.status !== 'done' && row.status !== 'failed')) return;
+      if (finished || !row) return;
+      if (row.status !== 'done' && row.status !== 'failed') return armStale(); // progreso: sigue vivo
+      if (stale) clearTimeout(stale);
       finished = true;
       clearTimeout(timer);
       if (channel) void supabase.removeChannel(channel);
