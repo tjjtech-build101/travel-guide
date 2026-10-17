@@ -51,7 +51,12 @@ export function transferLabel(b: Pick<PlanBlock, 'transfer' | 'duration_min'>): 
   if (!b.transfer) return '';
   const mode = TRANSFER_MODE_LABEL[b.transfer.mode] ?? b.transfer.mode;
   const dur = durationLabel(b.transfer.duration_min ?? b.duration_min);
-  return dur ? `${mode} · ${dur}` : mode;
+  // Traslados con transporte público: "Bus 121 · sale 18:05 · 26 min".
+  const lines = b.transfer.lines?.map((l) => l.name).join(' + ');
+  const dep = b.transfer.lines?.[0]?.departure;
+  const head = lines ? `${mode} ${lines}${dep ? ` · sale ${dep}` : ''}` : mode;
+  const est = b.transfer.estimated ? ' (estimado)' : '';
+  return dur ? `${head} · ${dur}${est}` : `${head}${est}`;
 }
 
 export function a11yTime(b: Pick<PlanBlock, 'start_time' | 'end_time' | 'time_flex'>): string {

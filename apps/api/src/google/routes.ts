@@ -102,3 +102,126 @@ export async function travelMinutes(a: { lat: number; lng: number }, b: { lat: n
     return estimateMinutes(a, b, 'walk').duration_min;
   }
 }
+
+// ───────── Transporte público con detalle (traslados del itinerario, PRD 01/02)
+
+const TRANSIT_MASK =
+  'routes.duration,routes.distanceMeters,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.transitDetails';
+
+type GStep = {
+  travelMode?: string;
+  staticDuration?: string;
+  transitDetails?: {
+    stopDetails?: { departureStop?: { name?: string }; arrivalStop?: { name?: string }; departureTime?: string; arrivalTime?: string };
+    localizedValues?: { departureTime?: { time?: { text?: string } }; arrivalTime?: { time?: { text?: string } } };
+    headsign?: string;
+    stopCount?: number;
+    transitLine?: { name?: string; nameShort?: string; vehicle?: { type?: string } };
+  };
+};
+export type GTransitResponse = { routes?: { duration?: string; distanceMeters?: number; legs?: { steps?: GStep[] }[] }[] };
+
+export type TransitPlan = {
+  duration_min: number;
+  walk_min: number;
+  lines: {
+    name: string;
+    vehicle: 'bus' | 'subway' | 'train' | 'tram' | 'ferry' | 'other';
+    from_stop?: string;
+    to_stop?: string;
+    departure?: string;
+    arrival?: string;
+    headsign?: string;
+    stops?: number;
+  }[];
+};
+
+const VEHICLE: Record<string, TransitPlan['lines'][number]['vehicle']> = {
+  BUS: 'bus',
+  INTERCITY_BUS: 'bus',
+  TROLLEYBUS: 'bus',
+  SHARE_TAXI: 'bus',
+  SUBWAY: 'subway',
+  METRO_RAIL: 'subway',
+  HEAVY_RAIL: 'train',
+  COMMUTER_TRAIN: 'train',
+  HIGH_SPEED_TRAIN: 'train',
+  LONG_DISTANCE_TRAIN: 'train',
+  RAIL: 'train',
+  TRAM: 'tram',
+  LIGHT_RAIL: 'tram',
+  MONORAIL: 'tram',
+  FERRY: 'ferry',
+};
+
+const secs = (d: string | undefined) => Number.parseFloat((d ?? '0s').replace('s', '')) || 0;
+
+/** "18:05" desde el texto localizado ("6:05 p.m." / "18:05") o el ISO (en la zona de Montevideo/BA, UTC−3). */
+export function hhmm(localized: string | undefined, iso: string | undefined): string | undefined {
+  const m = localized?.match(/(\d{1,2}):(\d{2})\s*(a|p)?/i);
+  if (m) {
+    let h = Number(m[1]);
+    const ap = m[3]?.toLowerCase();
+    if (ap === 'p' && h < 12) h += 12;
+    if (ap === 'a' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m[2]}`;
+  }
+  if (!iso) return undefined;
+  const d = new Date(Date.parse(iso) - 3 * 3600_000);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString().slice(11, 16);
+}
+
+/** Respuesta de computeRoutes TRANSIT → plan con líneas. null si la ruta no usa transporte (o no hay ruta). */
+export function parseTransit(res: GTransitResponse): TransitPlan | null {
+  const r = res.routes?.[0];
+  if (!r) return null;
+  const steps = (r.legs ?? []).flatMap((l) => l.steps ?? []);
+  const lines: TransitPlan['lines'] = [];
+  let walkS = 0;
+  for (const s of steps) {
+    if (s.travelMode === 'TRANSIT' && s.transitDetails) {
+      const t = s.transitDetails;
+      const name = t.transitLine?.nameShort || t.transitLine?.name;
+      if (!name) continue;
+      lines.push({
+        name,
+        vehicle: VEHICLE[t.transitLine?.vehicle?.type ?? ''] ?? 'other',
+        from_stop: t.stopDetails?.departureStop?.name,
+        to_stop: t.stopDetails?.arrivalStop?.name,
+        departure: hhmm(t.localizedValues?.departureTime?.time?.text, t.stopDetails?.departureTime),
+        arrival: hhmm(t.localizedValues?.arrivalTime?.time?.text, t.stopDetails?.arrivalTime),
+        headsign: t.headsign,
+        stops: t.stopCount,
+      });
+    } else if (s.travelMode === 'WALK') {
+      walkS += secs(s.staticDuration);
+    }
+  }
+  if (!lines.length) return null;
+  return { duration_min: Math.max(1, Math.round(secs(r.duration) / 60)), walk_min: Math.round(walkS / 60), lines };
+}
+
+/** Transporte público con líneas (requiere GOOGLE_MAPS_API_KEY). departure_time: ISO con zona. */
+export async function transitPlan(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+  departure_time?: string,
+): Promise<TransitPlan | null> {
+  if (!env().GOOGLE_MAPS_API_KEY) return null;
+  const body: Record<string, unknown> = {
+    origin: waypoint(a),
+    destination: waypoint(b),
+    travelMode: 'TRANSIT',
+    languageCode: 'es',
+    ...(departure_time ? { departureTime: departure_time } : {}),
+  };
+  return cached(`transit:${JSON.stringify(body)}`, async () => {
+    const res = await googleFetch<GTransitResponse>(ROUTES_URL, { method: 'POST', fieldMask: TRANSIT_MASK, body });
+    return parseTransit(res);
+  });
+}
+
+/** Link de Google Maps en modo transporte público (botón "Cómo llego"). */
+export function mapsTransitUrl(a: { lat: number; lng: number }, b: { lat: number; lng: number }, mode: 'transit' | 'walking' = 'transit'): string {
+  return `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=${mode}`;
+}

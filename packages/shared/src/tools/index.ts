@@ -11,6 +11,7 @@ import {
   ResearchInput,
   MoveBlockInput,
   PlaceDetailsInput,
+  PlanTransfersInput,
   PlanTripInput,
   RemoveBlockInput,
   RouteEtaInput,
@@ -71,6 +72,11 @@ export const toolDefs = {
   undo: {
     description: 'Deshace una acción anterior a partir de su undo_token.',
     input: UndoInput,
+  },
+  plan_transfers: {
+    description:
+      'Calcula cómo ir entre los bloques de un día: si a pie es más de 20 min, busca transporte público (líneas, paradas, horario de salida) y agrega bloques de traslado al plan. Sin day_id/leg_id, todo el viaje.',
+    input: PlanTransfersInput,
   },
   research: {
     description:

@@ -13,11 +13,36 @@ export const TimeOfDay = z
 export const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato YYYY-MM-DD');
 export const LatLng = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
 
+/** Un tramo en transporte público de un traslado (Google Routes TRANSIT). */
+export const TransitLine = z.object({
+  /** "121", "D1", "Línea A" (nameShort o name de la línea). */
+  name: z.string().max(80),
+  vehicle: z.enum(['bus', 'subway', 'train', 'tram', 'ferry', 'other']),
+  from_stop: z.string().max(200).optional(),
+  to_stop: z.string().max(200).optional(),
+  /** HH:MM local de salida / llegada según el horario de Google. */
+  departure: z.string().max(5).optional(),
+  arrival: z.string().max(5).optional(),
+  headsign: z.string().max(200).optional(),
+  stops: z.number().int().nonnegative().optional(),
+});
+export type TransitLine = z.infer<typeof TransitLine>;
+
 export const Transfer = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   mode: z.enum(TRANSFER_MODES),
   duration_min: z.number().int().positive().optional(),
+  // Traslados dentro del día (plan_trip): detalle de transporte público. Todos opcionales (jsonb).
+  lines: z.array(TransitLine).max(6).optional(),
+  /** Minutos caminando en total (hasta la parada, transbordos y desde la parada). */
+  walk_min: z.number().int().nonnegative().optional(),
+  /** "Bus 121 en Ciudadela → Pocitos (sale 18:05)". */
+  summary: z.string().max(300).optional(),
+  /** Link a Google Maps en modo transporte (Cómo llego). */
+  maps_url: z.string().url().optional(),
+  /** true = sin Google: duración estimada por distancia, sin líneas. */
+  estimated: z.boolean().optional(),
 });
 
 export const BlockAlertInput = z.object({
@@ -249,4 +274,12 @@ export const ResearchInput = z.object({
   lng: z.number().min(-180).max(180).optional(),
   trip_id: Id.optional(),
   language: z.string().min(2).max(8).optional(),
+});
+
+// ---------- plan_transfers (traslados dentro del día) ----------
+
+export const PlanTransfersInput = z.object({
+  trip_id: Id,
+  leg_id: Id.optional().describe('Solo ese tramo'),
+  day_id: Id.optional().describe('Solo ese día'),
 });

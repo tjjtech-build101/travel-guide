@@ -11,6 +11,7 @@ import { look_at_photo } from './look_at_photo';
 import { research } from './research';
 import { move_block } from './move_block';
 import { place_details } from './place_details';
+import { plan_transfers } from './plan_transfers';
 import { plan_trip } from './plan_trip';
 import { remove_block } from './remove_block';
 import { route_eta } from './route_eta';
@@ -34,6 +35,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   route_eta,
   undo,
   plan_trip,
+  plan_transfers,
   look_at_photo,
   research,
   generate_tour,
