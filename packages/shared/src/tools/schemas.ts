@@ -44,6 +44,8 @@ export const Transfer = z.object({
   maps_url: z.string().url().optional(),
   /** true = sin Google: duración estimada por distancia, sin líneas. */
   estimated: z.boolean().optional(),
+  /** true = lo calculó el sistema: se recalcula solo cuando cambia el día (uno cargado a mano nunca se toca). */
+  auto: z.boolean().optional(),
 });
 
 export const BlockAlertInput = z.object({
