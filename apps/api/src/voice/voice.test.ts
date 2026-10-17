@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { composeVoiceInstructions, SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
 import { topInterests, upcomingLines } from './context';
-import { buildInstructions, nowHHMM, nowText, type InstructionsInput } from './instructions';
+import { buildInstructions, nowHHMM, nowText, SCHEDULE_ALERT_RULE, type InstructionsInput } from './instructions';
 import { buildRealtimeSession, createCall, createClientSecret, turnDetection, vadConfig, voiceToolNames } from './openai';
 import { runVoiceSummary, transcriptText } from './summary';
 import type { Db } from '../supabase';
@@ -46,6 +46,16 @@ describe('instrucciones del scout', () => {
     expect(b).toContain('abrió la llamada desde el bloque «Teatro Solís» del plan');
     expect(b).not.toContain('saludá en una frase');
     expect(b).toContain('No hay un viaje abierto');
+  });
+
+  it('schedule_alert: una frase con el número exacto, "¿te llevo?" y sin aplicar nada solo (chat y tour)', () => {
+    for (const mode of ['chat', 'tour'] as const) {
+      const { base: b } = buildInstructions({ ...base, mode });
+      expect(b).toContain(SCHEDULE_ALERT_RULE);
+    }
+    expect(SCHEDULE_ALERT_RULE).toContain('número exacto');
+    expect(SCHEDULE_ALERT_RULE).toContain('¿te llevo?');
+    expect(SCHEDULE_ALERT_RULE).toContain('no apliques nada');
   });
 
   it('reglas extra (modo tour) entran antes de la apertura', () => {
