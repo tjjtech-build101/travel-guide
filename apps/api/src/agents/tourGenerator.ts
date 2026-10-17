@@ -27,12 +27,14 @@ import type { ToolCtx } from '../tools/types';
 import { runEventsSearch } from './eventsSearch';
 import { JobError } from './llm';
 import { addUsage, emptyUsage, estimateCostUsd, type Usage } from './schemas';
+import { appendFacts, type LibraryFact } from '../places/library';
 import { anthropicTourLlm, type TourLLM, type TourLlmConfig } from './tourLlm';
 import { ALT_SOURCE_SYSTEM, GENERATE_SYSTEM, RESEARCH_SYSTEM, VERIFY_SYSTEM, renderAltSourceUser, renderGenerateUser, renderResearchUser, renderVerifyUser } from './tourPrompts';
 
 // ───────────────────────── Candidatos (puro, testeable sin red)
 
-export type Fact = { text: string; source_url: string; verified: boolean };
+/** Ver LibraryFact (places/library.ts): quote / verified_at / origin se agregaron para la memoria de lugares. */
+export type Fact = { text: string; source_url: string; verified: boolean; quote?: string; verified_at?: string; origin?: LibraryFact['origin'] };
 
 export type RawCandidate = {
   source: 'place_library' | 'google' | 'osm' | 'wikipedia' | 'event';
@@ -577,7 +579,8 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
     const verifyOneFact = async (f: { text: string; source_url: string }): Promise<Fact | null> => {
       const v1 = await deps.llm.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(f), config: deps.config });
       addUsage(usage, v1.usage as never);
-      if (v1.result?.supported && v1.result.quote.trim()) return { text: f.text, source_url: f.source_url, verified: true };
+      if (v1.result?.supported && v1.result.quote.trim())
+        return { text: f.text, source_url: f.source_url, verified: true, quote: v1.result.quote.trim(), verified_at: new Date().toISOString(), origin: 'tour' };
       if (timeLeftMs() < 20_000) return null; // sin tiempo para una segunda vuelta
       const alt = await deps.llm.findAlternateSource({ system: ALT_SOURCE_SYSTEM, user: renderAltSourceUser(f), config: deps.config });
       addUsage(usage, alt.usage as never);
@@ -589,7 +592,9 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         config: deps.config,
       });
       addUsage(usage, v2.usage as never);
-      return v2.result?.supported && v2.result.quote.trim() ? { text: f.text, source_url: alt.source_url, verified: true } : null;
+      return v2.result?.supported && v2.result.quote.trim()
+        ? { text: f.text, source_url: alt.source_url, verified: true, quote: v2.result.quote.trim(), verified_at: new Date().toISOString(), origin: 'tour' }
+        : null;
     };
 
     const enrichOnePlace = async (c: RawCandidate): Promise<RawCandidate> => {
@@ -677,7 +682,8 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         if (existing) {
           placeId = existing.id as string;
           if (existing.tier !== 'curated') {
-            await admin.from('place_library').update({ facts: verifiedFacts, updated_at: new Date().toISOString() }).eq('id', placeId);
+            // Sumar, no reemplazar: el lugar puede tener facts de research o de la cámara (memoria de lugares).
+            await appendFacts(admin, placeId, verifiedFacts);
           }
         } else {
           const { data: inserted, error: eIns } = await admin

@@ -76,6 +76,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
   lines.push(
     'Eventos: te llegan mensajes de sistema "[EVENTO:tipo] json". No los leas en voz alta. proposal_decided: contá en una frase qué se decidió.',
     'look_at_photo abre la cámara: decí algo cortito ("Dale, mostrame") y esperá; no describas nada hasta [EVENTO:photo_result]. photo_result: contá narration con tus palabras (≤60 palabras); si viene question, respondela primero; si place.confidence < 0.6 decí que no estás seguro y no afirmes nombres ni datos; leé las inscriptions si las hay.',
+    '- research puede responder al toque si ya lo sabíamos (cached: true con answer): contalo en ese momento, sin decir que lo averiguaste.',
     'research_ready: retomá solo, en 1-2 frases, empezando por el tema ("Che, sobre lo que me preguntaste de…") y contá answer como algo que ya sabés, natural (sin "verificado", "me devolvieron", "la fuente dice"). Si answer está vacío, decí que no encontraste nada confiable. Si answer no responde la pregunta, decilo. research_failed: decí que no pudiste averiguarlo.',
     'tour_ready: anunciá en 2 frases que el tour está listo: título, cuántas paradas, cuánto dura y cuál es la primera; preguntá si arrancan. tour_failed: decí que no salió y ofrecé probar de nuevo.',
     SCHEDULE_ALERT_RULE,
