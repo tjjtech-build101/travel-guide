@@ -21,6 +21,7 @@
 | Tours | 06, 18 (API), 16 | #8 | `generate_tour` (investigación + verificador), `weather`, `events_search` |
 | Cámara | 08 | #11 | `look_at_photo`: foto + GPS + orientación → qué estás mirando |
 | Caminar | 07 | #9, #10, #12, #13 | Herramientas del tour, motor de caminata (llegada, desvío, reloj, permanencia, silencio), tour en vivo dentro de Ahora, plan B sin voz, GPS en segundo plano, "Tour acá, ahora", posición fresca en las herramientas de la voz |
+| Horarios | — | #14 | Vigilante de horarios: "salí en X / vas tarde / por empezar" por notificación local (tocarla abre Ahora) o, con llamada abierta, `[EVENTO:schedule_alert]` al scout |
 
 ## Infra
 - Repo: github.com/tjjtech-build101/travel-guide · API: https://travel-guide-api-ten.vercel.app (21 herramientas) · Supabase nube: `veavkvhxmzzkgxhkqrub` (sa-east-1).
@@ -28,7 +29,7 @@
 
 ## Pendiente
 - 🚨 **Key de Anthropic con crédito** (Vercel + `.env`).
-- **Vigilante de horarios** (este PR): avisar "salí ya / vas tarde / por empezar" por notificación local o, en llamada, con `[EVENTO:schedule_alert]`.
+- Vigilante de horarios: en segundo plano solo corre si hay muestras de ubicación (hoy la task arranca solo durante un tour, y ahí el vigilante calla); fuera del tour avisa con la app abierta o al volver a primer plano.
 - Probar en un celu real: llamada con el scout hablando solo al llegar, pantalla bloqueada, batería.
 - Tour real generado cerca del venue + grabar el paseo de la demo (quién camina: pendiente).
 - Dormir/despertar al scout y botón del auricular (PRD 07, no hecho).
