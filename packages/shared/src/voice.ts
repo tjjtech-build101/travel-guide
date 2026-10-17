@@ -101,6 +101,8 @@ export const VOICE_EVENT_TYPES = [
   // generate_tour es un job: la app escucha agent_jobs y avisa al scout cuando termina (PRD 06/18 → 05).
   'tour_ready',
   'tour_failed',
+  // PRD 07: el tour arrancó en medio de una llamada de chat (payload con las reglas del modo tour).
+  'tour_started',
 ] as const;
 
 /** Payload de [EVENTO:tour_ready]. */
