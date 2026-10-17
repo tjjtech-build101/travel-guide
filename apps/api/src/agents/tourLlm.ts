@@ -1,19 +1,28 @@
-// Llamadas a Claude del generador de tours (PRD 06): investigar, verificar, generar paradas.
+// Llamadas a Claude del generador de tours (PRD 06 · tour director): extraer/investigar/verificar datos,
+// dirigir el arco, escribir cada parada y criticar el resultado.
 // Interfaz chica (TourLLM) para poder mockearla en tests, igual que PlannerLLM en llm.ts.
-// Investigar/verificar: Tool Runner con web_search/web_fetch + una herramienta local "report_*" que
-// captura la respuesta estructurada (evita la duda de mezclar server tools con output_config.format).
-// Generar: output_config.format directo (sin tools), igual que skeleton() en llm.ts.
+// Investigar/verificar en la web: Tool Runner con web_search/web_fetch + una herramienta local "report_*" que
+// captura la respuesta estructurada (evita mezclar server tools con output_config.format).
+// El resto: output_config.format directo (sin tools), igual que skeleton() en llm.ts.
 import { betaZodOutputFormat, betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { anthropicClient, fallbackParams, textOf, type AnyBlock, type Effort, JobError, PLANNER_MODEL } from './llm';
 import { addUsage, emptyUsage, type Usage } from './schemas';
 import {
-  GenerateStopsOutput,
-  type GenerateStopsOutputT,
+  CriticOutput,
+  type CriticOutputT,
+  DirectorOutput,
+  type DirectorOutputT,
+  ExtractOutput,
+  type ExtractOutputT,
+  JudgeOutput,
+  type JudgeOutputT,
   ResearchOutput,
   type ResearchOutputT,
   VerifyOutput,
   type VerifyOutputT,
+  WrittenStop,
+  type WrittenStopT,
 } from './tourSchemas';
 
 export type TourLlmConfig = {
@@ -94,25 +103,68 @@ export async function captureViaTool<T>(args: {
   return { value: captured, usage, web_search_calls: webSearchCalls, stop_reason: lastStopReason };
 }
 
+export type LlmCall = { system: string; user: string; config: TourLlmConfig };
+
 export interface TourLLM {
-  /** Pasada 1: investiga un lugar con web_search + web_fetch. */
-  research(args: { system: string; user: string; config: TourLlmConfig }): Promise<{ facts: ResearchOutputT['facts']; usage: Usage; web_search_calls: number }>;
-  /** Pasada 2: verifica un fact puntual contra su URL con web_fetch. */
-  verifyFact(args: { system: string; user: string; config: TourLlmConfig }): Promise<{ result: VerifyOutputT | null; usage: Usage }>;
-  /** Busca una segunda fuente para un fact que no se pudo verificar (1 reintento, PRD 06 paso 6). */
-  findAlternateSource(args: { system: string; user: string; config: TourLlmConfig }): Promise<{ source_url: string | null; usage: Usage; web_search_calls: number }>;
-  /** Pasada 3: genera las paradas (narraciones en 3 capas) a partir de facts ya verificados. */
-  generateStops(args: { system: string; user: string; config: TourLlmConfig }): Promise<{ stops: GenerateStopsOutputT; usage: Usage }>;
+  /** Datos atómicos + cita textual desde un artículo que ya bajamos (Wikipedia). Sin herramientas. */
+  extractFacts(args: LlmCall): Promise<{ facts: ExtractOutputT['facts']; usage: Usage }>;
+  /** Investigación web (web_search + web_fetch) de lo que falta. */
+  research(args: LlmCall): Promise<{ facts: ResearchOutputT['facts']; usage: Usage; web_search_calls: number }>;
+  /** Fallback: verifica un dato contra su URL con web_fetch (cuando no pudimos bajar la página nosotros). */
+  verifyFact(args: LlmCall): Promise<{ result: VerifyOutputT | null; usage: Usage }>;
+  /** Juez: ¿cada cita respalda su dato? Una llamada por lugar. */
+  judgeFacts(args: LlmCall): Promise<{ verdicts: JudgeOutputT['verdicts']; usage: Usage }>;
+  /** Director: tesis, título, swaps y papel de cada parada. */
+  direct(args: LlmCall): Promise<{ plan: DirectorOutputT; usage: Usage }>;
+  /** Escritor: las capas de UNA parada, con citas [fN]. */
+  writeStop(args: LlmCall): Promise<{ stop: WrittenStopT; usage: Usage }>;
+  /** Crítico: rúbrica sobre el tour completo. */
+  critique(args: LlmCall): Promise<{ review: CriticOutputT; usage: Usage }>;
+}
+
+/** Llamada con salida estructurada (output_config.format), sin herramientas. Prompt de sistema cacheado. */
+async function structured<S extends Parameters<typeof betaZodOutputFormat>[0]>(
+  schema: S,
+  { system, user, config }: LlmCall,
+  what: string,
+): Promise<{ value: z.infer<S>; usage: Usage }> {
+  const client = anthropicClient();
+  const format = betaZodOutputFormat(schema);
+  const params = {
+    model: PLANNER_MODEL,
+    max_tokens: config.maxTokens,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: config.effort, format: { type: 'json_schema', schema: format.schema } },
+    ...fallbackParams(config),
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: user }],
+  };
+  const msg = (await client.beta.messages.create(
+    params as unknown as Parameters<typeof client.beta.messages.create>[0],
+  )) as unknown as { stop_reason: string | null; content: AnyBlock[]; usage: Parameters<typeof addUsage>[1] };
+  const usage = addUsage(emptyUsage(), msg.usage);
+  if (msg.stop_reason === 'refusal') throw new JobError('generate_failed', `Claude no quiso ${what} (refusal).`);
+  if (msg.stop_reason === 'max_tokens') throw new JobError('generate_failed', `${what}: la respuesta quedó cortada (max_tokens).`);
+  try {
+    return { value: format.parse(textOf(msg.content)) as z.infer<S>, usage };
+  } catch (err) {
+    throw new JobError('generate_failed', `No pude leer ${what}: ${(err as Error).message.slice(0, 200)}`);
+  }
 }
 
 export function anthropicTourLlm(): TourLLM {
   return {
+    async extractFacts(call) {
+      const r = await structured(ExtractOutput, call, 'los datos del artículo');
+      return { facts: r.value.facts, usage: r.usage };
+    },
+
     async research({ system, user, config }) {
       const r = await captureViaTool<ResearchOutputT>({
         system,
         user,
         captureName: 'report_facts',
-        captureDescription: 'Reportá los datos atómicos que encontraste, cada uno con su URL exacta.',
+        captureDescription: 'Reportá los datos atómicos que encontraste, cada uno con su URL exacta, título de la fuente y cita textual.',
         captureSchema: ResearchOutput,
         serverTools: ['web_search', 'web_fetch'],
         config,
@@ -133,44 +185,24 @@ export function anthropicTourLlm(): TourLLM {
       return { result: r.value, usage: r.usage };
     },
 
-    async findAlternateSource({ system, user, config }) {
-      const r = await captureViaTool<{ source_url: string | null }>({
-        system,
-        user,
-        captureName: 'report_source',
-        captureDescription: 'Reportá una URL alternativa que respalde el dato, o null si no encontraste ninguna.',
-        captureSchema: z.object({ source_url: z.string().nullable() }),
-        serverTools: ['web_search'],
-        config,
-      });
-      return { source_url: r.value?.source_url ?? null, usage: r.usage, web_search_calls: r.web_search_calls };
+    async judgeFacts(call) {
+      const r = await structured(JudgeOutput, call, 'la verificación');
+      return { verdicts: r.value.verdicts, usage: r.usage };
     },
 
-    async generateStops({ system, user, config }) {
-      const client = anthropicClient();
-      const format = betaZodOutputFormat(GenerateStopsOutput);
-      const params = {
-        model: PLANNER_MODEL,
-        max_tokens: config.maxTokens,
-        thinking: { type: 'adaptive' },
-        output_config: { effort: config.effort, format: { type: 'json_schema', schema: format.schema } },
-        ...fallbackParams(config),
-        system: [{ type: 'text', text: system }],
-        messages: [{ role: 'user', content: user }],
-      };
-      const msg = (await client.beta.messages.create(
-        params as unknown as Parameters<typeof client.beta.messages.create>[0],
-      )) as unknown as { stop_reason: string | null; content: AnyBlock[]; usage: Parameters<typeof addUsage>[1] };
-      const usage = addUsage(emptyUsage(), msg.usage);
-      if (msg.stop_reason === 'refusal') throw new JobError('generate_failed', 'Claude no quiso generar las paradas (refusal).');
-      if (msg.stop_reason === 'max_tokens') throw new JobError('generate_failed', 'La generación quedó cortada (max_tokens).');
-      let stops: GenerateStopsOutputT;
-      try {
-        stops = format.parse(textOf(msg.content));
-      } catch (err) {
-        throw new JobError('generate_failed', `No pude leer las paradas: ${(err as Error).message.slice(0, 200)}`);
-      }
-      return { stops, usage };
+    async direct(call) {
+      const r = await structured(DirectorOutput, call, 'el plan del tour');
+      return { plan: r.value, usage: r.usage };
+    },
+
+    async writeStop(call) {
+      const r = await structured(WrittenStop, call, 'la parada');
+      return { stop: r.value, usage: r.usage };
+    },
+
+    async critique(call) {
+      const r = await structured(CriticOutput, call, 'la revisión');
+      return { review: r.value, usage: r.usage };
     },
   };
 }

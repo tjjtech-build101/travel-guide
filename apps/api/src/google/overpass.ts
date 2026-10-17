@@ -4,7 +4,12 @@ import { upstream } from '../errors';
 import { cached } from './cache';
 import { interestsForOsmTags, type InterestTag } from '@build101/shared';
 
-const ENDPOINT = 'https://overpass-api.de/api/interpreter';
+// El servidor principal se satura seguido: probamos espejos públicos en orden.
+const ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
 const UA = 'build101-hackathon/0.1 (travel app; tour generator)';
 
 export type OverpassCandidate = {
@@ -46,19 +51,27 @@ export async function overpassCandidates(args: { lat: number; lng: number; radiu
       );
       out center tags;
     `;
-    let res: Response;
-    try {
-      res = await fetch(ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(15_000),
-      });
-    } catch (err) {
-      throw upstream(`Overpass no respondió: ${(err as Error).message}`);
+    let body: OverpassResponse | null = null;
+    let lastErr = '';
+    for (const endpoint of ENDPOINTS) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': UA, Accept: 'application/json' },
+          body: `data=${encodeURIComponent(query)}`,
+          signal: AbortSignal.timeout(9000),
+        });
+        if (!res.ok) {
+          lastErr = `${endpoint} respondió ${res.status}`;
+          continue;
+        }
+        body = (await res.json()) as OverpassResponse;
+        break;
+      } catch (err) {
+        lastErr = `${endpoint}: ${(err as Error).message}`;
+      }
     }
-    if (!res.ok) throw upstream(`Overpass respondió ${res.status}`);
-    const body = (await res.json()) as OverpassResponse;
+    if (!body) throw upstream(`Overpass no respondió (${lastErr})`);
     const seen = new Set<string>();
     const out: OverpassCandidate[] = [];
     for (const el of body.elements ?? []) {

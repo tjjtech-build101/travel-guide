@@ -55,6 +55,13 @@ export type GenerateTourResult = {
     places_new: number;
     facts_verified: number;
     facts_rejected: number;
+    /** Director/escritores (tour director): datos citados en narraciones y oraciones borradas por no tener respaldo. */
+    facts_cited?: number;
+    sentences_dropped?: number;
+    critic_rewrites?: number;
+    duration_ms?: number;
   };
+  title?: string | null;
+  thesis?: string | null;
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
 };
