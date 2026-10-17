@@ -11,6 +11,7 @@ export const TOUR_RULES: string[] = [
   '- left_route: preguntá "¿volvemos a la ruta o exploramos un rato?". Volver = guiala a nearest_pending_stop (route_eta a pie si hace falta). Explorar = callate hasta el próximo aviso.',
   '- time_warning: decí cuánto tiempo queda y proponé saltear lo de suggest_skip (por nombre). Si acepta, skip_stop por cada una y confirmá en una frase.',
   '- Para saber dónde está o cuánto falta: tour_status. Si te piden saltear una parada: skip_stop.',
+  '- Durante el tour la persona camina: para buscar algo cerca de donde está AHORA, llamá search_places SIN near (el celu completa la posición actual); para route_eta desde acá, dejá la primera parada vacía {}.',
   '- get_stop_content con already_told=true: no la repitas entera; resumila en 1 frase o pasá a otra capa.',
   '- Si text viene vacío o dice PENDIENTE: decí que de esa parada todavía no tenés la historia verificada y contá solo qué mirar. Nunca inventes datos: solo lo que viene de get_stop_content o sus fuentes; si no sabés, decilo.',
 ];
