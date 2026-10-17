@@ -98,4 +98,11 @@ export const PlanDayInput = z.object({
   lng: z.number().min(-180).max(180).optional(),
   reason: z.string().max(300).optional(),
 });
-export type PlanDayOutput = { proposal_id: string; summary: string; count: number };
+export type PlanDayOutput = {
+  mode: 'proposed';
+  proposal_id: string;
+  summary: string;
+  count: number;
+  /** Vista previa de lo propuesto (la propuesta completa está en agent_proposals.ops). */
+  blocks: { title: string; start_time: string; end_time: string; from_idea: boolean }[];
+};

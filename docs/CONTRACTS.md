@@ -288,3 +288,44 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - Reglas: `leave_now` a ≤ 10 y ≤ 5 min de tener que salir; `running_late` si la llegada estimada supera el inicio por > 5 min; `starting_soon` si empieza en ≤ 15 min y ya estás a ≤ 150 m. Un aviso por bloque y por (tipo, umbral) — la clave incluye la hora de inicio, así un bloque movido se rearma. Solo el próximo bloque con hora fija (`time_flex='fixed'`) y lugar; nada durante un tour activo (manda `time_warning`), en `profiles.quiet_hours` ni para bloques a > 30 km.
 - Instrucciones del scout (`apps/api/src/voice/instructions.ts`, `SCHEDULE_ALERT_RULE`, aditiva en chat y tour): una frase con el número exacto, ofrecer indicaciones a pie ("¿te llevo?"); en `running_late`, ofrecer avisar al grupo o mover el bloque sin aplicar nada solo.
 - Entrega en el celu (`apps/mobile/src/schedule`): con llamada abierta → `voice.injectEvent('schedule_alert', payload)` (espera 3 s de silencio si la persona habla); sin llamada → notificación **local** de `expo-notifications` (`trigger: null`, sin servidor de push, no pasa por la tabla `notifications`), `data.url` = `/trip/<id>/now`. Sin cambios de esquema.
+
+---
+
+## Cambios Ahora v2 — en código
+
+Diseño en `docs/AHORA-V2.md`. Zod en `packages/shared/src/tools/nowTools.ts`, registradas en `toolDefs`. Sin migraciones:
+`activity_feed.kind` no tiene CHECK (el valor nuevo `running_late` ya está en `FEED_KINDS`) y la RLS de privados
+(`20261017000007_feed_private.sql`) cubre el aviso.
+
+- `APP_ONLY_TOOLS = ['now_brief', 'gap_suggestions']` (`packages/shared/src/tools/index.ts`): la voz no las ve
+  (`VOICE_HIDDEN_TOOLS`). `report_late` y `plan_day` sí están en la voz y en `toClaudeTools`.
+- **`now_brief`** (lectura, sin feed) `{trip_id, language='es', snapshot}` → `{text, source: 'llm' | 'rules'}`.
+  Claude `BRIEF_MODEL` (env, default `claude-haiku-5-5`), sin thinking, `max_tokens` 120, sin reintentos, timeout 4 s,
+  persona de `SCOUT`. Caché en memoria 10 min por hash de `(language, snapshot)`. La frase se descarta (→ reglas) si
+  está vacía, pasa de 110 caracteres o trae un número que no está en el snapshot. Cualquier error (sin key, sin saldo,
+  timeout) → `nowBriefRules(snapshot)` y 2 min de enfriamiento (responde reglas sin volver a llamar). 403 si no sos
+  miembro. `nowBriefRules` / `clampBrief` / `NOW_BRIEF_MAX` en `packages/shared/src/nowBrief.ts`.
+- **`gap_suggestions`** (lectura) `{trip_id, leg_id, lat, lng, minutes, date, local_time, limit≤3}` → `{items: GapSuggestion[]}`.
+  Solo reglas, sin Claude. Fuentes: banco de ideas del tramo (`blocks.day_id is null`, sin privados ajenos, con coords,
+  plan `main`), lugares abiertos ahora (Google Places `searchNearby`, filtrado a tipos de ocio; solo si hay
+  `GOOGLE_MAPS_API_KEY`, sin fallback OSM; corte a 3 s) y eventos de hoy **solo desde la caché** de `events_search`
+  (no dispara Claude; corte a 1,5 s). Caminata máx. = `minutes/3` (entre 5 y 25 min), `walk_min` con `walkEstimateMin`.
+  Ranking: ideas > lugares (rating suma) > eventos, menos caminata primero; primero el mejor de cada fuente, después
+  el resto. `why`: "De tu banco de ideas · 4 min a pie" / "Abierto ahora · 6 min a pie · ★ 4.6" / "Hoy a las 19:00 · Sala".
+  `id`: el `block_id` (idea), `place:{google_place_id}` o `event:{url}`.
+- **`report_late`** (escritura) `{trip_id, block_id, late_by_min, note?}` → `data {feed_id, summary}` + `undo_token`.
+  `activity_feed` kind `running_late`, payload `{summary, block_id, day_id, late_by_min, note?, inverse: []}`. Summary con
+  el nombre de la persona aunque lo mande Scout (`"Juan llega 10 min tarde a Almuerzo"`; `actor_agent` sí refleja
+  x-actor). Un aviso por persona y bloque: uno nuevo borra el anterior. Bloque privado → `payload.private: true`;
+  privado ajeno o seguidor → 403. **Deshacer** (`undo`) borra la fila `running_late` y deja la fila `undo` de siempre.
+- **`plan_day`** (propone) `{trip_id, day_id, from_time, to_time?, lat?, lng?, reason?}` →
+  `data {mode: 'proposed', proposal_id, summary, count, blocks: [{title, start_time, end_time, from_idea}]}` + `undo_token`
+  (el de `proposal_created`). Hueco: `[from_time, to_time)`; sin `to_time`, hasta el próximo bloque con hora o 22:00
+  (mín. 30 min, si no 400). Una llamada a Claude (`claude-opus-5-5`, effort `low` — env `PLAN_DAY_EFFORT` —, salida
+  estructurada, timeout 45 s) con lo ocupado (privados ajenos como "Ocupado"), el banco de ideas y hasta 10 lugares
+  abiertos cerca. Saneo por reglas: horas dentro del hueco, sin superposición, ids/refs que existan, máx. 6.
+  Crea **una** `agent_proposals` (`by_agent: true`) siempre, también con `x-actor: user`: ideas del banco como op
+  `move` (patch `{day_id, start_time, end_time, duration_min, status: 'confirmed'}`, no se duplican) y lo nuevo como
+  op `add` (participantes = miembros del tramo, `created_by_agent: true`). Permisos = los de proponer en el tramo.
+  Sin `ANTHROPIC_API_KEY` o si Claude falla → 503 `{code: 'scout_unavailable', message: 'Scout no está disponible ahora.'}`;
+  si no queda nada válido → 422 `empty_plan`.

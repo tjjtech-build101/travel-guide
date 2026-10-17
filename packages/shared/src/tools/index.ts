@@ -19,6 +19,7 @@ import {
   WeatherInput,
 } from './schemas';
 import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, TourStatusInput } from './tour';
+import { GapSuggestionsInput, NowBriefInput, PlanDayInput, ReportLateInput } from './nowTools';
 
 export * from './schemas';
 export * from './tour';
@@ -120,9 +121,30 @@ export const toolDefs = {
     description: 'Saltea una parada del tour (p. ej. si la persona acepta recortar por tiempo).',
     input: SkipStopInput,
   },
+  // Ahora v2 (docs/AHORA-V2.md). now_brief y gap_suggestions son solo de la app (APP_ONLY_TOOLS).
+  now_brief: {
+    description: 'Una frase de Scout para la vista Ahora a partir de una foto del momento. Lectura, sin feed.',
+    input: NowBriefInput,
+  },
+  gap_suggestions: {
+    description: 'Hasta 3 ideas para un hueco libre: del banco de ideas del tramo, lugares abiertos cerca y eventos de hoy.',
+    input: GapSuggestionsInput,
+  },
+  report_late: {
+    description:
+      'Avisa al grupo que la persona llega tarde a un bloque (activity_feed running_late). No mueve nada; se puede deshacer.',
+    input: ReportLateInput,
+  },
+  plan_day: {
+    description:
+      'Scout arma bloques para un hueco del día (desde from_time hasta to_time) con el banco de ideas y lugares cerca. Siempre queda como UNA propuesta para aceptar; nunca aplica solo.',
+    input: PlanDayInput,
+  },
 } as const satisfies Record<string, ToolDef>;
 
 export type ToolName = keyof typeof toolDefs;
+/** Herramientas que solo usa la app (la voz y los agentes no las ven). */
+export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestions'];
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 
