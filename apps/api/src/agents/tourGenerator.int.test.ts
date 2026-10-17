@@ -24,7 +24,7 @@ function localSupabase(): { url: string; service: string } | null {
 const local = localSupabase();
 
 describe.skipIf(!local)('tour director (integración, Supabase local + fakes)', () => {
-  const admin = createClient(local!.url, local!.service, { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
+  const admin = createClient(local?.url ?? 'http://127.0.0.1:0', local?.service ?? 'anon', { auth: { persistSession: false, autoRefreshToken: false } }) as unknown as Db;
   const ctx: ToolCtx = { userId: DEMO_USERS.juan, actor: 'user', db: admin, admin };
   const created = { tours: [] as string[], places: [] as string[], jobs: [] as string[] };
 
