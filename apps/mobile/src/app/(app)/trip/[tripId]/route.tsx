@@ -6,8 +6,8 @@
 import { synthesizeTrack, zonedParts, type RouteMode, type SimSpeed } from '@build101/shared';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -51,11 +51,6 @@ type LatLng = { lat: number; lng: number };
 const NO_DEST: LatLng = { lat: 0, lng: 0 };
 const SIM_X: Record<string, SimSpeed> = { '1': 1, '2': 2, '5': 5, '10': 10 };
 
-function goBack() {
-  if (router.canGoBack()) router.back();
-  else router.replace('/');
-}
-
 function num(v: string | undefined): number | null {
   if (v == null || v === '') return null;
   const n = Number(v);
@@ -68,8 +63,21 @@ function KeepAwake() {
   return null;
 }
 
+/**
+ * La ruta es una tab oculta y las tabs quedan montadas: cada vez que se abre (o cambia el destino) arranca de cero,
+ * así el origen es donde estás ahora y no donde estabas la vez anterior.
+ */
 export default function RouteScreen() {
+  const params = useLocalSearchParams<Params>();
+  const [visit, setVisit] = useState(0);
+  useFocusEffect(useCallback(() => setVisit((v) => v + 1), []));
+  return <RouteView key={`${visit}:${params.block_id ?? ''}:${params.lat ?? ''}:${params.lng ?? ''}:${params.sim ?? ''}`} />;
+}
+
+function RouteView() {
   const tripId = useTripId();
+  // Volver siempre a Ahora: la ruta es una tab oculta y el "atrás" de las tabs iría a Planificación.
+  const goBack = () => router.navigate({ pathname: '/trip/[tripId]/now', params: { tripId } });
   const params = useLocalSearchParams<Params>();
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
@@ -100,7 +108,19 @@ export default function RouteScreen() {
     tried.current = location.kind;
     void location.start().then(setLocError);
   }, [location]);
-  const askLocation = () => void location.start().then(setLocError);
+  // Si en 15 s no llega ningún fix (sin señal, GPS apagado), no dejamos el "Buscando…" para siempre.
+  const [fixSlow, setFixSlow] = useState(false);
+  const hasFix = !!fix;
+  useEffect(() => {
+    setFixSlow(false);
+    if (hasFix) return;
+    const t = setTimeout(() => setFixSlow(true), 15_000);
+    return () => clearTimeout(t);
+  }, [hasFix]);
+  const askLocation = () => {
+    setFixSlow(false);
+    void location.start().then(setLocError);
+  };
 
   // Origen fijo (primer fix); cambia solo al recalcular por salirte de la ruta.
   const [origin, setOrigin] = useState<LatLng | null>(null);
@@ -156,7 +176,9 @@ export default function RouteScreen() {
   }, [block, overview.data, me, now, trip.data]);
   const etaMin = progress?.remainingMin ?? detail?.duration_min ?? null;
   const distM = progress ? progress.remainingM : (detail?.distance_m ?? 0);
-  const head = detail && etaMin != null ? headline({ nowMin, etaMin, distanceM: distM, startMin }) : null;
+  // Ya en camino (más de 50 m recorridos), "Salí en X" deja de tener sentido: queda solo "Llegás".
+  const underway = (progress?.alongM ?? 0) > 50;
+  const head = detail && etaMin != null ? headline({ nowMin, etaMin, distanceM: distM, startMin: underway ? null : startMin }) : null;
 
   const next =
     detail && progress && mode !== 'transit'
@@ -183,7 +205,7 @@ export default function RouteScreen() {
     });
   };
 
-  const mapH = Math.round(winH * 0.55);
+  const mapH = Math.round(winH * 0.46);
   const routeKey = `${mode}:${origin?.lat ?? ''},${origin?.lng ?? ''}:${detail ? 1 : 0}`;
 
   // ───────── Sin destino
@@ -206,8 +228,10 @@ export default function RouteScreen() {
     );
   }
 
-  const noLocation = !fix && !!locError;
-  const waitingFix = !fix && !locError;
+  const noLocation = !fix && (!!locError || fixSlow);
+  const waitingFix = !fix && !noLocation;
+  /** Se ve el contenido principal (modo, indicación…), no un estado de carga/llegada/sin ubicación. */
+  const showMain = !arrived && !noLocation && !(waitingFix || current.isPending);
 
   return (
     <View style={styles.flex}>
@@ -247,9 +271,13 @@ export default function RouteScreen() {
           <ArrivedCard name={name} onDone={goBack} />
         ) : noLocation ? (
           <View style={styles.box}>
-            <Text style={styles.boxTitle}>Activá la ubicación</Text>
-            <Text style={styles.boxText}>La necesitamos para armarte la ruta desde donde estás.</Text>
-            <Button label="Activar ubicación" onPress={askLocation} style={styles.boxBtn} />
+            <Text style={styles.boxTitle}>{locError ? 'Activá la ubicación' : 'No encontramos dónde estás'}</Text>
+            <Text style={styles.boxText}>
+              {locError
+                ? 'La necesitamos para armarte la ruta desde donde estás.'
+                : 'Probá de nuevo en un rato o abrí la ruta en otra app.'}
+            </Text>
+            <Button label={locError ? 'Activar ubicación' : 'Reintentar'} onPress={askLocation} style={styles.boxBtn} />
           </View>
         ) : waitingFix || current.isPending ? (
           <View style={styles.loading} accessibilityLabel={waitingFix ? 'Buscando tu ubicación' : 'Calculando la ruta'}>
@@ -280,11 +308,20 @@ export default function RouteScreen() {
 
             <ModeSelector mode={mode} etas={etas} onChange={onMode} />
 
+            {/* En auto lo primero es pasar a la app de mapas (CarPlay): arriba, a mano. */}
+            {mode === 'car' ? <OpenInRow mode={mode} onOpen={onOpen} /> : null}
+
             {current.isError ? (
               <View style={styles.box}>
                 <Text style={styles.boxTitle}>No pudimos calcular la ruta</Text>
                 <Text style={styles.boxText}>Probá de nuevo o abrila en otra app.</Text>
                 <Button label="Reintentar" onPress={() => void current.refetch()} style={styles.boxBtn} />
+              </View>
+            ) : mode === 'transit' && detail?.estimated ? (
+              // Sin Google no hay líneas ni horarios: mejor decirlo que inventar un "Caminá 3 km".
+              <View style={styles.box}>
+                <Text style={styles.boxTitle}>Sin líneas por ahora</Text>
+                <Text style={styles.boxText}>No pudimos traer las líneas y horarios. Abrilo en Google Maps para verlos.</Text>
               </View>
             ) : mode === 'transit' && detail ? (
               <TransitTimeline items={timeline} estimatedTimes={!hasTransitTimes(detail.steps)} />
@@ -297,7 +334,8 @@ export default function RouteScreen() {
           </>
         )}
 
-        <OpenInRow mode={mode} onOpen={onOpen} />
+        {/* Ya llegaste: "Abrir en" sería ruido. */}
+        {arrived || (mode === 'car' && showMain) ? null : <OpenInRow mode={mode} onOpen={onOpen} />}
       </ScrollView>
     </View>
   );

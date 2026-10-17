@@ -37,7 +37,7 @@ export function HeroLeave({ countdown, faces, title, placeName, startLabel, onDi
       </HeroHead>
       {faces ? <View>{faces}</View> : null}
       <HeroActions
-        primary={{ label: 'Cómo llego', onPress: onDirections, hint: 'Abre el mapa con indicaciones' }}
+        primary={{ label: 'Cómo llego', onPress: onDirections, hint: 'Abre la ruta con indicaciones' }}
         secondary={onLate ? { label: 'Voy tarde', onPress: onLate, hint: 'Avisá al grupo o mové el bloque' } : null}
       />
     </HeroCard>

@@ -109,7 +109,8 @@ export function NextInstructionCard({ next }: { next: NextInstruction }) {
 
 export function StepsList({ steps, current }: { steps: RouteStepDetail[]; current: number }) {
   const [open, setOpen] = useState(false);
-  if (!steps.length) return null;
+  // Un solo paso ya está en la tarjeta grande: la lista sería ruido.
+  if (steps.length <= 1) return null;
   return (
     <View>
       <Pressable
@@ -196,8 +197,11 @@ export function OpenInRow({ mode, onOpen }: { mode: RouteMode; onOpen: (app: Ext
   const apps = externalApps(Platform.OS);
   return (
     <View style={[styles.openIn, mode === 'car' && styles.openInCar]}>
-      {mode === 'car' ? <Text style={styles.carplay}>Para CarPlay, seguí en Maps, Google Maps o Waze</Text> : null}
-      <Text style={styles.openLabel}>Abrir en</Text>
+      {mode === 'car' ? (
+        <Text style={styles.carplay}>¿Vas manejando? Abrilo y seguí en CarPlay</Text>
+      ) : (
+        <Text style={styles.openLabel}>Abrir en</Text>
+      )}
       <View style={styles.openRow}>
         {apps.map((a) => (
           <Pressable

@@ -9,9 +9,9 @@ import { toRouteDetail } from './model';
 type LatLng = { lat: number; lng: number };
 
 export async function fetchRouteDetail(from: LatLng, to: LatLng, mode: RouteMode, signal?: AbortSignal): Promise<RouteDetail> {
-  // `detail` es el input nuevo de route_eta (contrato RouteDetail); si la API todavía no lo conoce, lo ignora y
-  // toRouteDetail arma el detalle con la polilínea y las líneas de siempre.
-  const input = { stops: [from, to], mode, detail: true } as ToolInput<'route_eta'>;
+  // detail: true → la API devuelve data.detail (RouteDetail). Si una API vieja no lo trae, toRouteDetail arma el
+  // detalle con la polilínea y las líneas de siempre.
+  const input: ToolInput<'route_eta'> = { stops: [from, to], mode, detail: true };
   const res = await callTool<'route_eta', Parameters<typeof toRouteDetail>[0]>('route_eta', input, { signal });
   if (!res.ok) throw new ToolCallError(res.error.code, res.error.message);
   return toRouteDetail(res.data, mode, from, to);

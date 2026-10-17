@@ -86,8 +86,17 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
-          {/* "Cómo llego" embebido: pantalla completa sin tab ni header (se abre con features/route/nav.openRoute). */}
-          <Tabs.Screen name="route" options={{ href: null, headerShown: false, tabBarStyle: { display: 'none' } }} />
+          {/* "Cómo llego" embebido: pantalla completa sin tab ni header (se abre con features/route/nav.openRoute).
+              Sin `href: null`: en expo-router 58 eso marca la tab como `hidden` y navegar a ella redirige a la primera. */}
+          <Tabs.Screen
+            name="route"
+            options={{
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+              tabBarButton: () => null,
+              tabBarItemStyle: { display: 'none' },
+            }}
+          />
           {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"

@@ -53,6 +53,8 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
   const camera = useRef<Camera>(null);
   const [failed, setFailed] = useState(false);
   const [follow, setFollow] = useState(false);
+  /** Moviste el mapa con el dedo: aparece "Recentrar". */
+  const [panned, setPanned] = useState(false);
 
   const line = useMemo(
     () => ({
@@ -75,6 +77,7 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
   fixRef.current = fix;
   useEffect(() => {
     setFollow(false);
+    setPanned(false);
     const all = [...points, dest, ...(fixRef.current ? [fixRef.current] : [])];
     const lats = all.map((p) => p.lat);
     const lngs = all.map((p) => p.lng);
@@ -86,17 +89,18 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
       camera.current?.fitBounds(
         [Math.max(...lngs), Math.max(...lats)],
         [Math.min(...lngs), Math.min(...lats)],
-        [56 + topInset, 40, 40, 40],
+        [64 + topInset, 64, 48 + 16, 64],
         500,
       );
     }, 80);
-    const toFollow = setTimeout(() => setFollow(true), FIT_THEN_FOLLOW_MS);
+    // Con ruta estimada (línea recta, sin giros) no hay nada que seguir de cerca: queda el encuadre con el destino.
+    const toFollow = estimated ? null : setTimeout(() => setFollow(true), FIT_THEN_FOLLOW_MS);
     return () => {
       clearTimeout(fit);
-      clearTimeout(toFollow);
+      if (toFollow) clearTimeout(toFollow);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeKey]);
+  }, [routeKey, estimated]);
 
   // Siguiéndome: centrar en cada fix.
   useEffect(() => {
@@ -124,7 +128,9 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
         attributionEnabled={false}
         onDidFailLoadingMap={() => setFailed(true)}
         onCameraChanged={(s) => {
-          if (s.gestures.isGestureActive && follow) setFollow(false);
+          if (!s.gestures.isGestureActive) return;
+          if (follow) setFollow(false);
+          if (!panned) setPanned(true);
         }}
         accessibilityLabel="Mapa con la ruta"
       >
@@ -156,9 +162,12 @@ function MapInner({ points, estimated, fix, dest, mode, routeKey, height, topIns
           </ShapeSource>
         ) : null}
       </MapView>
-      {!follow && fix ? (
+      {panned && fix ? (
         <Pressable
-          onPress={() => setFollow(true)}
+          onPress={() => {
+            setPanned(false);
+            setFollow(true);
+          }}
           accessibilityRole="button"
           accessibilityLabel="Recentrar en mi ubicación"
           style={({ pressed }) => [styles.recenter, pressed && styles.pressed]}

@@ -17,7 +17,6 @@ import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-nativ
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { isStale, useLatestPlanJob } from '../../../../features/jobs/queries';
 import { useClockStore, useNow } from '../../../../features/now/clock';
-import { openDirections } from '../../../../features/now/components';
 import {
   buildNowPlan,
   clock,
@@ -63,6 +62,7 @@ import { WeatherChip } from '../../../../features/now/v2/ui/WeatherChip';
 import { ActionToast } from '../../../../features/plan/components/ActionToast';
 import { useMoveBlock } from '../../../../features/plan/mutations';
 import { openBlock, openProposals } from '../../../../features/plan/nav';
+import { openRoute } from '../../../../features/route/nav';
 import { useMe, usePendingProposals, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import type { PlanBlock } from '../../../../features/plan/selectors';
 import { showToast } from '../../../../features/plan/store';
@@ -324,8 +324,14 @@ export default function NowTab() {
   const onCamera = () => void showToScout({ tripId });
 
   // Cómo llego: al próximo bloque; si no hay, al actual.
+  // Abre la ruta embebida (Google Routes) adentro de la app; desde ahí se puede pasar a Apple Maps / Google Maps / Waze.
+  // No toca la llamada con el Scout: si está activa, sigue.
+  const goRoute = (b: PlanBlock) => {
+    if (!hasCoords(b)) return;
+    openRoute(router, tripId, { block_id: b.id, lat: b.lat, lng: b.lng, name: b.place_name ?? b.title });
+  };
   const directionsTarget = [next?.block, plan?.current?.block].find((b): b is PlanBlock => !!b && hasCoords(b)) ?? null;
-  const onDirections = directionsTarget && hasCoords(directionsTarget) ? () => openDirections(directionsTarget) : null;
+  const onDirections = directionsTarget ? () => goRoute(directionsTarget) : null;
 
   // ───────── Voy tarde
   const [lateOpen, setLateOpen] = useState(false);
@@ -529,6 +535,13 @@ export default function NowTab() {
     void blocks.refetch();
     void proposals.refetch();
   };
+  // El spinner de arriba solo para el "tirar para actualizar" del usuario: los refetch de fondo (p. ej. al volver de
+  // "Cómo llego") no lo muestran, y así no queda trabado en iOS.
+  const [pulling, setPulling] = useState(false);
+  const onPull = () => {
+    setPulling(true);
+    void Promise.allSettled([overview.refetch(), blocks.refetch(), proposals.refetch()]).finally(() => setPulling(false));
+  };
 
   const dock = (
     <DockV2
@@ -605,7 +618,7 @@ export default function NowTab() {
         title={b.title}
         placeName={b.place_name}
         startLabel={clock(hero.next.start)}
-        onDirections={() => (hasCoords(b) ? openDirections(b) : undefined)}
+        onDirections={() => goRoute(b)}
         onLate={hero.urgency !== 'ok' ? () => setLateOpen(true) : undefined}
         onPress={() => openBlock(tripId, b.id)}
         onLongPress={talkShortcut(b)}
@@ -691,7 +704,7 @@ export default function NowTab() {
       <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: DOCK_SPACE + space.xl }]}
-          refreshControl={<RefreshControl refreshing={overview.isRefetching || blocks.isRefetching} onRefresh={retry} />}
+          refreshControl={<RefreshControl refreshing={pulling} onRefresh={onPull} />}
         >
           <View style={styles.header}>
             <Text style={styles.headerText} numberOfLines={1}>
@@ -736,8 +749,7 @@ export default function NowTab() {
             onShift={onShiftLate}
             onDirections={() => {
               setLateOpen(false);
-              const b = hero.next.block;
-              if (hasCoords(b)) openDirections(b);
+              goRoute(hero.next.block);
             }}
             onClose={() => setLateOpen(false)}
             notifying={notify === 'notifying'}
