@@ -3,6 +3,7 @@ import { isToolName, toolDefs, type ToolName, type ToolResponse } from '@build10
 import { ToolFailure } from '../errors';
 import { add_block } from './add_block';
 import { add_idea } from './add_idea';
+import { events_search } from './events_search';
 import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
 import { get_trip_overview } from './get_trip_overview';
@@ -15,6 +16,7 @@ import { search_places } from './search_places';
 import type { Handler, ToolCtx } from './types';
 import { undo } from './undo';
 import { update_block } from './update_block';
+import { weather } from './weather';
 
 export const handlers: { [N in ToolName]: Handler<N> } = {
   get_trip_overview,
@@ -30,6 +32,8 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   undo,
   plan_trip,
   generate_tour,
+  weather,
+  events_search,
 };
 
 export type ToolRun = { status: number; body: ToolResponse };

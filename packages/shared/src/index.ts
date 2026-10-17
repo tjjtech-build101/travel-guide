@@ -6,5 +6,6 @@ export * from './interests';
 export * from './jobs';
 export * from './tools';
 export * from './scout';
+export * from './weather';
 export * from './track';
 export * from './profile';

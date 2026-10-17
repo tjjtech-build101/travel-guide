@@ -29,8 +29,9 @@ type RunnerResult<T> = { value: T | null; usage: Usage; web_search_calls: number
  * Corre un Tool Runner con web_search/web_fetch (según `serverTools`) + una herramienta local que
  * captura la salida estructurada. Devuelve `value: null` si el modelo nunca la llamó (no tira: el
  * caller decide qué hacer, normalmente tratar el lugar/fact como "sin datos" y seguir).
+ * Exportado: lo reusa también eventsSearch.ts (PRD 16) para no duplicar el Tool Runner.
  */
-async function captureViaTool<T>(args: {
+export async function captureViaTool<T>(args: {
   system: string;
   user: string;
   captureSchema: Parameters<typeof betaZodTool>[0]['inputSchema'];

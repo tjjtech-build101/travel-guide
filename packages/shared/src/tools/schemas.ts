@@ -178,3 +178,22 @@ export const GenerateTourInput = z.object({
   radius_m: z.number().int().positive().max(2000).optional().describe('Default: min(1200, duration_min*20)'),
   extend_tour_id: Id.optional().describe('Explorador: agrega paradas nuevas a un tour ya generado, sin duplicar place_id'),
 });
+
+// ---------- PRD 16 · weather / events_search ----------
+
+export const WeatherInput = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  date_from: IsoDate,
+  date_to: IsoDate,
+  day_id: Id.optional().describe('Si viene, persiste el resultado en days.weather'),
+});
+
+export const EventsSearchInput = z.object({
+  city: z.string().min(1),
+  country: z.string().optional(),
+  date_from: IsoDate,
+  date_to: IsoDate,
+  interests: z.array(z.string()).optional(),
+  lang: z.string().default('es'),
+});
