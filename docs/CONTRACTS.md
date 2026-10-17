@@ -307,3 +307,16 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - **`GenerateTourResult`** suma `title`, `thesis` y en `stats`: `facts_cited`, `sentences_dropped`, `critic_rewrites`, `duration_ms`.
 - Voz: el Scout llama `tour_brief`, hace como mucho 2 preguntas en una frase y después `generate_tour` con las respuestas (`apps/api/src/voice/instructions.ts`).
 - Env opcionales de la API: `TOUR_DIRECTOR_EFFORT` (default `high`), `TOUR_WRITER_EFFORT` (`medium`), `TOUR_RESEARCH_EFFORT` (`medium`), `TOUR_CRITIC` (`true`).
+
+## Cambios PRD 31 (planificador colaborativo) — en código
+
+- **Migración `20261017000010_planner_colaborativo.sql`** (aditiva):
+  - `destination_catalog` (global por ciudad, escribe solo la API): `city_key` único (`"buenos aires|argentina"`), `city`, `country`, `lat`, `lng`, `items jsonb` (`CatalogItem[]`), `lodging_zones jsonb`, `model`, timestamps. Lectura para cualquier autenticado. TTL lógico 30 días.
+  - `leg_options` (menú del tramo): `trip_id`, `leg_id`, `item jsonb` (`CatalogItem`), `section` ∈ `must|for_you|gems|food|day_trips|events`, `score`, `for_user_ids uuid[]`, `reason`, `preselected`, `sort_order`. Cae en cascada con el tramo.
+  - `leg_option_reactions`: PK `(option_id, user_id)`, `trip_id`, `reaction` ∈ `love|no|must`. Escribe solo la API (`react_option`).
+  - `blocks.choice_group uuid` (nullable): bloques con el mismo valor son opciones de un mismo lugar del día ("elegí 1 de N", status `proposed`; alojamiento `idea`). `blocks_visible` suma la columna al final.
+  - Realtime: se publican `leg_options` y `leg_option_reactions` (`REALTIME_TABLES`).
+- **Tipos** en `packages/shared/src/planner.ts`: `CatalogItem`, `LegOptionRow`, `LegOptionReactionRow`, `optionIncluded()` (regla de grupo: entra si alguien dijo "sí o sí", o si está preseleccionada / tiene "me copa" y no hay más "paso" que "me copa"), `TripBriefResult`, `TripQuestion`, `TripUnderstanding`, `TripShape`, `PlanCoverage`, `ComposeDaysResult`.
+- **`plan_trip`** acepta `skeleton` (`TripShapeSkeleton`, la forma elegida en `trip_shapes`: salta el LLM del esqueleto) y `mode` (`auto` default | `menu`). Con `menu` arma tramos + días + traslados + `leg_options` y termina con `result.stage='menu'`; con `auto` además arma los días desde el catálogo (`stage='planned'`). `PlanTripResult` suma `stage`, `options`, `choices`, `coverage`.
+- **Herramientas nuevas**: `trip_brief` (síncrona: lo que entendí + 0-4 preguntas; precalienta el catálogo), `trip_shapes` (síncrona: 2-3 formas del viaje), `react_option` (`{option_id, reaction|null}`), `compose_days` (job `kind='compose_days'`, `{trip_id, leg_ids?, instruction?}` → `{job_id, trip_id}`), `choose_option` (`{block_id}`: confirma esa opción y manda las otras al banco de ideas, con `undo_token`).
+- **`activity_feed.kind`** nuevos: `days_composed` (deshace todo lo armado por `compose_days`), `option_chosen`.

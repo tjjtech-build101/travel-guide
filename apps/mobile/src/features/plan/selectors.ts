@@ -2,6 +2,7 @@
 // Tests: selectors.test.ts (correr con `pnpm --filter mobile test:plan`).
 import type { BlockVisibleRow, DayRow, LegRow, ProposalOp, TimeFlex, TripRole } from '@build101/shared';
 
+import { collapseChoices, pendingChoiceGroups } from './choices';
 import { TIME_FLEX_LABEL, TYPE_LABEL } from './labels';
 
 export type PlanFilter = 'all' | 'group' | 'mine';
@@ -42,6 +43,8 @@ export type PlanRow =
   | { kind: 'group'; key: string; group: LegGroup; activeLegIds: string[]; parallelView: boolean }
   | { kind: 'day'; key: string; leg: PlanLeg; day: DayRow; parallel: boolean }
   | { kind: 'block'; key: string; block: PlanBlock; leg: PlanLeg }
+  /** PRD 31: lugar del día con opciones (mismo choice_group); blocks[0] = la recomendada. */
+  | { kind: 'choice'; key: string; group: string; blocks: PlanBlock[]; leg: PlanLeg }
   | { kind: 'ghost'; key: string; ghost: GhostBlock; proposalId: string; leg: PlanLeg }
   | { kind: 'dayEmpty'; key: string; leg: PlanLeg; day: DayRow; reason: 'empty' | 'filtered' }
   | { kind: 'parallelDay'; key: string; date: string; columns: ParallelColumn[] }
@@ -262,7 +265,18 @@ export function buildPlanSections({
     rows.push({ kind: 'day', key: `day-${day.id}`, leg, day, parallel });
     const all = byDay.get(day.id) ?? [];
     const shown = dayBlocks(day.id);
-    for (const b of shown) rows.push({ kind: 'block', key: b.id, block: b, leg });
+    const choices = pendingChoiceGroups(shown);
+    const emitted = new Set<string>();
+    for (const b of shown) {
+      const options = b.choice_group ? choices.get(b.choice_group) : undefined;
+      if (!options) {
+        rows.push({ kind: 'block', key: b.id, block: b, leg });
+        continue;
+      }
+      if (emitted.has(b.choice_group!)) continue;
+      emitted.add(b.choice_group!);
+      rows.push({ kind: 'choice', key: `choice-${b.choice_group}`, group: b.choice_group!, blocks: options, leg });
+    }
     const gs = visibleGhosts(day.id);
     for (const [i, g] of gs.entries()) rows.push({ kind: 'ghost', key: `ghost-${g.proposalId}-${i}`, ghost: g.ghost, proposalId: g.proposalId, leg });
     if (!shown.length && !gs.length) {
@@ -301,7 +315,7 @@ export function buildPlanSections({
         for (const leg of group.legs) {
           const day = leg.days.find((d) => d.date === date);
           if (!day) continue;
-          columns.push({ leg, day, blocks: dayBlocks(day.id), ghosts: visibleGhosts(day.id).map((g) => g.ghost) });
+          columns.push({ leg, day, blocks: collapseChoices(dayBlocks(day.id)), ghosts: visibleGhosts(day.id).map((g) => g.ghost) });
           dayRowIndex[day.id] = rows.length;
         }
         rows.push({ kind: 'parallelDay', key: `pday-${date}`, date, columns });

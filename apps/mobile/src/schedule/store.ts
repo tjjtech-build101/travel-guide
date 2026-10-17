@@ -21,6 +21,7 @@ import { create } from 'zustand';
 import { appNow } from '../features/now/clock';
 import { etaCell, isMineForNow, resolveToday, type TripDates } from '../features/now/selectors';
 import { fetchEta, type Eta } from '../features/now/useEta';
+import { collapseChoices } from '../features/plan/choices';
 import type { PlanBlock, PlanLeg } from '../features/plan/selectors';
 import { queryClient } from '../lib/queryClient';
 import { useTourStore } from '../tour/store';
@@ -158,7 +159,7 @@ export const useScheduleStore = create<State & Actions>((set, get) => {
           return;
         }
         if (get().date !== today.date) set({ date: today.date, sent: [], last: {}, eta: null });
-        const blocks = c.blocks.filter((b) => b.day_id === today.day.id && isMineForNow(b, c.me));
+        const blocks = collapseChoices(c.blocks.filter((b) => b.day_id === today.day.id && isMineForNow(b, c.me)));
         const here = hereArg ?? c.getHere();
         const tour = useTourStore.getState().phase;
         const tourActive = tour === 'live' || tour === 'starting';

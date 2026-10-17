@@ -42,6 +42,8 @@ export const FEED_KINDS = [
   'member_role_changed',
   'member_legs_changed',
   'tour_generated', // PRD 06
+  'days_composed', // PRD 31
+  'option_chosen', // PRD 31
 ] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 
@@ -56,8 +58,12 @@ export const REALTIME_TABLES = [
   'member_locations',
   'expenses',
   'agent_jobs',
+  'leg_options', // PRD 31
+  'leg_option_reactions', // PRD 31
 ] as const;
 export type RealtimeTable = (typeof REALTIME_TABLES)[number];
+/** PRD 31: van en un canal aparte, así si la migración no está aplicada no tumban el canal principal. */
+export const PLANNER_REALTIME_TABLES: readonly RealtimeTable[] = ['leg_options', 'leg_option_reactions'];
 
 export const ACTOR_HEADER = 'x-actor';
 export type Actor = 'user' | 'agent';

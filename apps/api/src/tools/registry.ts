@@ -4,6 +4,8 @@ import { ToolFailure } from '../errors';
 import { add_block } from './add_block';
 import { add_idea } from './add_idea';
 import { delete_trip } from './delete_trip';
+import { choose_option } from './choose_option';
+import { compose_days } from './compose_days';
 import { events_search } from './events_search';
 import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
@@ -14,11 +16,14 @@ import { move_block } from './move_block';
 import { place_details } from './place_details';
 import { plan_transfers } from './plan_transfers';
 import { plan_trip } from './plan_trip';
+import { react_option } from './react_option';
 import { remove_block } from './remove_block';
 import { route_eta } from './route_eta';
 import { search_places } from './search_places';
 import { should_generate_tour } from './should_generate_tour';
 import { tour_brief } from './tour_brief';
+import { trip_brief } from './trip_brief';
+import { trip_shapes } from './trip_shapes';
 import { get_stop_content, next_stop, skip_stop, start_tour, tour_status } from './tour_live';
 import { scheduleTransferRefresh } from '../agents/dayTransfers';
 import type { Handler, ToolCtx, ToolOk } from './types';
@@ -40,6 +45,11 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   undo,
   plan_trip,
   plan_transfers,
+  trip_brief,
+  trip_shapes,
+  react_option,
+  compose_days,
+  choose_option,
   look_at_photo,
   research,
   tour_brief,

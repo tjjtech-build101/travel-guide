@@ -14,3 +14,4 @@ export * from './tourVoice';
 export * from './profile';
 export * from './scheduleWatcher';
 export * from './tourBrief';
+export * from './planner';

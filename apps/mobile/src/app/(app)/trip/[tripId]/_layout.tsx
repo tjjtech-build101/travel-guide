@@ -86,6 +86,25 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* Menú colaborativo del tramo (PRD 31): pantalla del viaje fuera de la barra de tabs. */}
+          <Tabs.Screen
+            name="menu"
+            options={{
+              title: 'Menú',
+              href: null,
+              tabBarStyle: { display: 'none' },
+              headerLeft: () => (
+                <Pressable
+                  onPress={() => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver al plan"
+                  style={styles.headerBtn}
+                >
+                  <BackIcon color={colors.text} />
+                </Pressable>
+              ),
+            }}
+          />
           {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"

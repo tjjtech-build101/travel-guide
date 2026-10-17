@@ -142,6 +142,8 @@ export interface BlockRow {
   sources: unknown[] | null;
   tour_id: Uuid | null;
   sort_order: number;
+  /** PRD 31: bloques con el mismo choice_group son opciones de un mismo lugar del día ("elegí 1"). */
+  choice_group?: Uuid | null;
   created_by: Uuid | null;
   created_by_agent: boolean;
   created_at: string;

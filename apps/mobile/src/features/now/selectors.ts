@@ -3,6 +3,7 @@
 // Tests: selectors.test.ts (`pnpm --filter mobile test:now`).
 import type { DayRow, TimeFlex } from '@build101/shared';
 
+import { collapseChoices } from '../plan/choices';
 import { compareBlocks, toMin, type PlanBlock, type PlanLeg } from '../plan/selectors';
 
 // ───────────────────────── Zona horaria del tramo
@@ -157,7 +158,8 @@ export type NowPlan = {
 };
 
 export function buildNowPlan(dayBlocks: PlanBlock[], me: string, nowMin: number): NowPlan {
-  const mine = dayBlocks.filter((b) => isMineForNow(b, me)).sort(compareBlocks);
+  // Un lugar "elegí 1 de N" pendiente cuenta una vez: la opción recomendada (PRD 31).
+  const mine = collapseChoices(dayBlocks.filter((b) => isMineForNow(b, me))).sort(compareBlocks);
   const timed: { block: PlanBlock; start: number; end: number }[] = [];
   const flexible: PlanBlock[] = [];
   for (const b of mine) {

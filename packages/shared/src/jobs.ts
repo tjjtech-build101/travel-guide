@@ -1,4 +1,5 @@
 // Jobs de agentes (agent_jobs). Formas de result que comparten la API y la app.
+import type { PlanCoverage, TripUnderstanding } from './planner';
 
 export const JOB_STATUS = ['queued', 'running', 'done', 'failed'] as const;
 export type JobStatus = (typeof JOB_STATUS)[number];
@@ -23,8 +24,22 @@ export type PlanTripResult = {
   /** Tramos que no se pudieron completar (Reintentar los completa). */
   failed_legs?: { leg_id: string; city: string; error: string }[];
   /** Lo que pidió el usuario (para "Reintentar" sin perder la conversación). */
-  request?: { conversation: { role: 'user' | 'assistant'; text: string }[]; start_date?: string; end_date?: string };
+  request?: {
+    conversation: { role: 'user' | 'assistant'; text: string }[];
+    start_date?: string;
+    end_date?: string;
+    /** PRD 31: lo que entendió trip_brief (compose_days lo reusa para el perfil del grupo). */
+    understanding?: Partial<TripUnderstanding>;
+  };
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
+  /** PRD 31: 'menu' = armó tramos + menú de opciones (sigue compose_days); 'planned' = días armados. */
+  stage?: 'menu' | 'planned';
+  /** PRD 31: opciones del menú creadas (todas las secciones). */
+  options?: number;
+  /** PRD 31: lugares del día con "elegí 1 de N". */
+  choices?: number;
+  /** PRD 31: imperdibles cubiertos por tramo. */
+  coverage?: PlanCoverage[];
 };
 
 /** agent_jobs.result de un job kind='research' (voz: "lo averiguo y te cuento"). */
