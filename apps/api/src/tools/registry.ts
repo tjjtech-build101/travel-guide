@@ -3,6 +3,7 @@ import { isToolName, toolDefs, type ToolName, type ToolResponse } from '@build10
 import { ToolFailure } from '../errors';
 import { add_block } from './add_block';
 import { add_idea } from './add_idea';
+import { delete_trip } from './delete_trip';
 import { events_search } from './events_search';
 import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
@@ -41,6 +42,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   weather,
   events_search,
   should_generate_tour,
+  delete_trip,
   start_tour,
   tour_status,
   get_stop_content,

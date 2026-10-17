@@ -1,10 +1,13 @@
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { DotsIcon } from '../../features/plan/components/TypeIcon';
+import { confirm, showMenu } from '../../features/plan/menu';
 import { appNow } from '../../features/now/clock';
 import { isTripInProgress } from '../../features/now/selectors';
 import { errorDetail, useMyTrips, type TripCard } from '../../features/trips/queries';
+import { callTool } from '../../lib/api';
 import { formatDateRange } from '../../lib/format';
 import { AvatarStack } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
@@ -44,12 +47,34 @@ export default function MyTripsScreen() {
       refreshing={trips.isRefetching}
       onRefresh={() => trips.refetch()}
       ListHeaderComponent={<Button label="Nuevo viaje" onPress={openNewTrip} style={styles.newTrip} />}
-      renderItem={({ item }) => <TripCardView trip={item} />}
+      renderItem={({ item }) => <TripCardView trip={item} onDeleted={() => void trips.refetch()} />}
     />
   );
 }
 
-function TripCardView({ trip }: { trip: TripCard }) {
+function TripCardView({ trip, onDeleted }: { trip: TripCard; onDeleted: () => void }) {
+  const onMenu = () => {
+    showMenu(trip.title, [
+      {
+        label: 'Borrar viaje',
+        destructive: true,
+        onPress: () =>
+          confirm(
+            'Borrar viaje',
+            `Se borra "${trip.title}" entero: tramos, días, bloques, tours, gastos. No se puede deshacer.`,
+            'Borrar',
+            () => {
+              void (async () => {
+                const res = await callTool('delete_trip', { trip_id: trip.id });
+                if (res.ok) onDeleted();
+                else Alert.alert('No pude borrar el viaje', res.error.message);
+              })();
+            },
+          ),
+      },
+    ]);
+  };
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -60,9 +85,15 @@ function TripCardView({ trip }: { trip: TripCard }) {
           ? router.push({ pathname: '/trip/[tripId]/now', params: { tripId: trip.id } })
           : router.push({ pathname: '/trip/[tripId]', params: { tripId: trip.id } })
       }
+      onLongPress={onMenu}
       style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
     >
-      <Text style={styles.title}>{trip.title}</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>{trip.title}</Text>
+        <Pressable onPress={onMenu} accessibilityRole="button" accessibilityLabel={`Opciones de ${trip.title}`} hitSlop={8}>
+          <DotsIcon color={colors.textMuted} />
+        </Pressable>
+      </View>
       <Text style={styles.dates}>{formatDateRange(trip.start_date, trip.end_date)}</Text>
       {trip.destinations.length > 0 ? (
         <Text style={styles.destinations} numberOfLines={2}>
@@ -89,7 +120,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  title: { fontSize: font.h2, fontWeight: '700', color: colors.text },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
+  title: { fontSize: font.h2, fontWeight: '700', color: colors.text, flexShrink: 1 },
   dates: { fontSize: font.body, color: colors.textMuted, marginTop: space.xs },
   destinations: { fontSize: font.body, color: colors.text, marginTop: space.sm },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space.lg },

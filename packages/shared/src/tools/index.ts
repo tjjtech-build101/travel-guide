@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AddBlockInput,
   AddIdeaInput,
+  DeleteTripInput,
   EventsSearchInput,
   GenerateTourInput,
   GetDayPlanInput,
@@ -105,6 +106,11 @@ export const toolDefs = {
     description:
       'Decide si tiene sentido ofrecer "Generar tour" para un bloque del itinerario (ej. un museo o una zona histórica: sí; una comida puntual, un traslado o un alojamiento: no). Usa OpenAI Decisions API, responde en milisegundos.',
     input: ShouldGenerateTourInput,
+  },
+  delete_trip: {
+    description:
+      'Borra un viaje entero (tramos, días, bloques, tours, gastos, todo lo que cuelgue de trip_id) de forma IRREVERSIBLE. Solo el organizador puede hacerlo.',
+    input: DeleteTripInput,
   },
   // PRD 07 · tour en vivo
   start_tour: {

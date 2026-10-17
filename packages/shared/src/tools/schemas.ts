@@ -207,6 +207,10 @@ export const ShouldGenerateTourInput = z.object({
   description: z.string().max(2000).optional(),
 });
 
+// ---------- delete_trip (irreversible: borra el viaje y todo lo que cuelga de trip_id) ----------
+
+export const DeleteTripInput = z.object({ trip_id: Id });
+
 // ---------- PRD 08 · look_at_photo ----------
 
 /** ~1,5 MB de base64 (la app manda JPEG 1280 px, calidad 0,6 ≈ 150-400 KB). */
