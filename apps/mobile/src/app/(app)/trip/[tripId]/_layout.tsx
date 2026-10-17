@@ -7,6 +7,7 @@ import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
 import { useTripRealtime } from '../../../../realtime/useTripRealtime';
+import { ScheduleWatcher } from '../../../../schedule/ScheduleWatcher';
 import { Button } from '../../../../ui/Button';
 import { Text } from '../../../../ui/Text';
 import { BackIcon, BookIcon, MapIcon, MoneyIcon, NowIcon, PlanIcon } from '../../../../ui/icons';
@@ -105,6 +106,8 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
         </Tabs>
         {/* Botón flotante de voz (PRD 05): global a todas las tabs del viaje. */}
         <VoiceSlot tripId={tripId} />
+        {/* Vigilante de horarios: "salí ya / vas tarde / por empezar" (notificación local o el Scout en llamada). */}
+        <ScheduleWatcher tripId={tripId} />
       </View>
     </TripIdProvider>
   );

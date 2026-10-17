@@ -12,7 +12,7 @@ type RouteResult = { total_min: number; estimated?: boolean };
 
 const WALK_LIMIT_MIN = 25;
 
-async function fetchEta(from: LatLng, to: LatLng): Promise<Eta> {
+export async function fetchEta(from: LatLng, to: LatLng): Promise<Eta> {
   const walk = await callTool<'route_eta', RouteResult>('route_eta', { stops: [from, to], mode: 'walk' });
   if (!walk.ok) return { minutes: walkEstimateMin(from, to), mode: 'walk', estimated: true };
   const w = Math.ceil(walk.data.total_min);

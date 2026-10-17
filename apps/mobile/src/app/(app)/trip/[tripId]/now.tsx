@@ -3,8 +3,11 @@
 // Fecha/hora simulables para probar con el seed: menú dev o `build101://trip/<id>/now?at=2026-10-18T10:30`
 // (`at=real` vuelve al reloj real). Previsualizar el avatar: `?scout=listening|speaking|thinking|idle`.
 // Tour en vivo (solo __DEV__, para probar sin tocar la pantalla): `?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30`
-// y simulador `?sim=play|pause|x1|x10|stop<N>` (salta a ~15 s de la parada N). `&n=<algo>` para repetir el mismo.
-import { SCOUT } from '@build101/shared';
+// y simulador `?sim=play|pause|x1|x10|stop<N>|t<segundos>` (stop: salta a ~15 s de la parada N; t: a ese segundo del
+// track). `&n=<algo>` para repetir el mismo.
+// Vigilante de horarios (solo dev): `?watch=run` (una pasada ya), `reset` (olvidar los avisos de hoy),
+// `notif-reset` (volver a pedir permiso de notificaciones).
+import { SCOUT, scheduleAlertText } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef } from 'react';
@@ -52,6 +55,8 @@ import { ErrorState, SkeletonCard } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { useTourStore } from '../../../../tour/store';
+import { resetNotificationAsk } from '../../../../schedule/notifications';
+import { useScheduleStore } from '../../../../schedule/store';
 import { showToScout } from '../../../../voice/camera/showToScout';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
 
@@ -76,7 +81,7 @@ export default function NowTab() {
   const nearbyJob = useNearbyTourJob((s) => s.job);
 
   // Deep link de pruebas: ?at=2026-10-18T10:30 | real · ?scout=listening
-  const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string; tour?: string; sim?: string; n?: string }>();
+  const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string; tour?: string; sim?: string; watch?: string; n?: string }>();
   useEffect(() => {
     if (!link.at) return;
     if (link.at === 'real') useClockStore.getState().reset();
@@ -112,6 +117,7 @@ export default function NowTab() {
     else if (cmd === 'pause') simulator.pause();
     else if (cmd === 'x1') simulator.setSpeed(1);
     else if (cmd === 'x10') simulator.setSpeed(10);
+    else if (/^t\d+$/.test(cmd)) simulator.seek(Number(cmd.slice(1)));
     else if (/^stop\d+$/.test(cmd)) {
       const live = useTourStore.getState().live;
       const i = Number(cmd.slice(4));
@@ -120,6 +126,16 @@ export default function NowTab() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link.sim, link.n]);
+
+  // Deep links de pruebas del vigilante de horarios (solo dev).
+  useEffect(() => {
+    if (!__DEV__ || !link.watch) return;
+    const w = useScheduleStore.getState();
+    if (link.watch === 'reset') w.reset();
+    else if (link.watch === 'notif-reset') void resetNotificationAsk();
+    // Un respiro para que el simulador / el reloj del mismo link se apliquen antes de la pasada.
+    setTimeout(() => void useScheduleStore.getState().run({ source: 'deep link' }), 600);
+  }, [link.watch, link.n]);
 
   const members = useMemo(
     () => new Map<string, AvatarPerson>((overview.data?.members ?? []).map((m) => [m.id, m])),
@@ -146,6 +162,12 @@ export default function NowTab() {
   // Muy lejos (otra ciudad, o el GPS por defecto del simulador): no calculamos "salí en X".
   const far = !!here && !!nextTarget && isFarAway(here, nextTarget);
   const eta = useEta(far ? null : here, nextTarget);
+
+  // Último aviso del vigilante de horarios para el próximo bloque.
+  const lastAlert = useScheduleStore((s) => (next ? s.last[next.block.id] : undefined));
+  const alertNote = lastAlert
+    ? `Te avisé a las ${clock(localParts(lastAlert.at, -180).minutes)}${lastAlert.channel === 'notification' ? '' : ` por ${SCOUT.name}`}: ${scheduleAlertText(lastAlert.payload, next?.block.place_name).title}`
+    : null;
 
   // Haptic suave cuando "Salí en X" pasa a naranja.
   const urgency = next && eta.data ? leaveUrgency(leaveInMin(next.start, nowMin, eta.data.minutes)) : null;
@@ -388,6 +410,7 @@ export default function NowTab() {
             farAway={far}
             onEnableLocation={() => void location.start()}
             members={members}
+            alertNote={alertNote}
             onPress={onPressBlock}
             onLongPress={onLongPress}
           />

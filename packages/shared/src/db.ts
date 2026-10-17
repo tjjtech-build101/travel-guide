@@ -31,6 +31,9 @@ export interface ProfileRow {
   guide_name: string | null;
   guide_voice: string | null;
   guide_style: string | null;
+  /** Forma en profile.ts (QuietHours / NotificationPrefs). */
+  quiet_hours: unknown | null;
+  notification_prefs: unknown | null;
   inferred_traits: unknown | null;
   onboarded_at: string | null;
 }

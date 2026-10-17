@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { SimPill } from '../features/gps/SimPill';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
+import { useNotificationTapRouter } from '../schedule/notifications';
 // PRD 07: la task de ubicación en segundo plano se define al cargar el módulo (fuera de cualquier componente).
 import '../tour/backgroundLocation';
 import { TourRunner } from '../tour/TourRunner';
@@ -60,6 +61,8 @@ function RootNavigator() {
   // Si las fuentes fallan seguimos con la del sistema (ui/Text no aplica la familia).
   const [fontsLoaded, fontError] = useFonts(FONT_FILES);
   setFontsReady(fontsLoaded);
+  // Tocar un aviso del vigilante de horarios abre Ahora (data.url).
+  useNotificationTapRouter(!isLoading && (fontsLoaded || !!fontError));
 
   if (isLoading || (!fontsLoaded && !fontError)) {
     return (

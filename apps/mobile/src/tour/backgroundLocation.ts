@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { backgroundFixes } from '../location/backgroundFixes';
+import { runScheduleWatcher } from '../schedule/store';
 import { useTourStore } from './store';
 
 export const TOUR_LOCATION_TASK = 'tour-location';
@@ -40,6 +41,9 @@ if (!TaskManager.isTaskDefined(TOUR_LOCATION_TASK)) {
     }
     // iOS no corre timers de JS en segundo plano: el reloj del tour avanza con cada muestra.
     useTourStore.getState().tick();
+    // Vigilante de horarios: misma razón, corre con cada muestra (durante el tour calla, pero al terminarlo no).
+    const last = data?.locations?.[data.locations.length - 1];
+    if (last) runScheduleWatcher({ lat: last.coords.latitude, lng: last.coords.longitude });
   });
 }
 
