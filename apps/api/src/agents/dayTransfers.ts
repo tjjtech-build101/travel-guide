@@ -16,6 +16,10 @@ const MIN_DISTANCE_M = 400;
 const TRANSIT_GAIN_MIN = 5;
 /** A pie hasta esto (si no hay transporte mejor) se agrega como caminata; más, como traslado estimado. */
 const LONG_WALK_MAX_MIN = 45;
+/** Con un hueco más largo que esto, el traslado se planifica para llegar justo (no al terminar el bloque anterior). */
+const BIG_GAP_MIN = 60;
+/** Margen para llegar antes del bloque siguiente cuando hay hueco. */
+const ARRIVE_EARLY_MIN = 10;
 /** Zona de Montevideo / Buenos Aires (sin horario de verano): para la hora de salida de Google. */
 const TZ_OFFSET = '-03:00';
 
@@ -27,7 +31,8 @@ export type DayBlock = Pick<
 
 export type TransferDeps = {
   walk: (a: Pt, b: Pt) => Promise<number>;
-  transit: (a: Pt, b: Pt, departureIso: string) => Promise<TransitPlan | null>;
+  /** Salir a las (departure) o llegar a las (arrival), ISO con zona. */
+  transit: (a: Pt, b: Pt, when: { departure?: string; arrival?: string }) => Promise<TransitPlan | null>;
 };
 
 export const defaultTransferDeps: TransferDeps = {
@@ -38,9 +43,9 @@ export const defaultTransferDeps: TransferDeps = {
       return estimateMinutes(a, b, 'walk').duration_min;
     }
   },
-  transit: async (a, b, departureIso) => {
+  transit: async (a, b, when) => {
     try {
-      return await transitPlan(a, b, departureIso);
+      return await transitPlan(a, b, when);
     } catch (e) {
       console.warn('[transfers] transit:', (e as Error).message);
       return null;
@@ -105,8 +110,13 @@ export async function planDayTransfers(blocks: DayBlock[], date: string, deps: T
     const walkMin = await deps.walk(a, b);
     if (walkMin <= WALK_MAX_MIN) continue;
 
-    const departIso = `${date}T${fromMin(depart).slice(0, 5)}:00${TZ_OFFSET}`;
-    const plan = await deps.transit(a, b, departIso);
+    // Hueco grande (p. ej. almuerzo en el medio): "llegar a las" (10 min antes del bloque siguiente); si no, "salir al
+    // terminar el bloque anterior". Así el horario del bus es el de ese momento.
+    const gap = arriveBy - depart;
+    const iso = (min: number) => `${date}T${fromMin(min).slice(0, 5)}:00${TZ_OFFSET}`;
+    const bigGap = gap > BIG_GAP_MIN;
+    const plan = await deps.transit(a, b, bigGap ? { arrival: iso(arriveBy - ARRIVE_EARLY_MIN) } : { departure: iso(depart) });
+    let timed: { start: number; end: number } | null = null;
     let mode: TransferMode;
     let duration: number;
     let title: string;
@@ -118,6 +128,12 @@ export async function planDayTransfers(blocks: DayBlock[], date: string, deps: T
       const names = plan.lines.map((l) => l.name).join(' + ');
       title = `${VEHICLE_WORD[plan.lines[0].vehicle] ?? 'Transporte'} ${names} a ${destName(b)}`;
       Object.assign(transfer, { lines: plan.lines, walk_min: plan.walk_min, summary: transitSummary(plan), maps_url: mapsTransitUrl(a, b, 'transit') });
+      // El bloque sigue el horario real: sale caminando hacia el primer bus y llega caminando desde el último.
+      const dep = toMin(plan.lines[0].departure);
+      const arr = toMin(plan.lines.at(-1)!.arrival);
+      if (dep != null && arr != null && arr >= dep) {
+        timed = { start: dep - (plan.walk_before_min ?? 0), end: arr + (plan.walk_after_min ?? 0) };
+      }
     } else if (walkMin <= LONG_WALK_MAX_MIN) {
       mode = 'walk';
       duration = walkMin;
@@ -134,8 +150,9 @@ export async function planDayTransfers(blocks: DayBlock[], date: string, deps: T
     transfer.mode = mode;
     transfer.duration_min = Math.max(1, duration);
 
-    const start = depart;
-    const end = Math.min(start + duration, 24 * 60 - 1);
+    // Horario: el real del transporte si lo hay; si no, con hueco grande se llega 10 min antes, o se sale al terminar.
+    const start = Math.max(depart, timed?.start ?? (bigGap ? arriveBy - duration - ARRIVE_EARLY_MIN : depart));
+    const end = Math.min(timed ? Math.max(timed.end, start + 1) : start + duration, 24 * 60 - 1);
     const late = end - arriveBy;
     out.push({
       after_block_id: a.id,

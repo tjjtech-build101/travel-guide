@@ -37,6 +37,8 @@ describe('parseTransit (Google Routes)', () => {
     expect(p).toEqual({
       duration_min: 26,
       walk_min: 7,
+      walk_before_min: 4,
+      walk_after_min: 3,
       lines: [{ name: '121', vehicle: 'bus', from_stop: 'Ciudadela', to_stop: '21 de Setiembre', departure: '18:05', arrival: '18:23', headsign: 'Pocitos', stops: 14 }],
     });
     expect(transitSummary(p)).toBe('Bus 121 en Ciudadela (sale 18:05) · 7 min a pie');
@@ -68,14 +70,14 @@ const block = (id: string, start: string, end: string, lat: number, lng: number,
   ...o,
 });
 
-const BUS: TransitPlan = { duration_min: 26, walk_min: 7, lines: [{ name: '121', vehicle: 'bus', from_stop: 'Ciudadela', departure: '18:05' }] };
+const BUS: TransitPlan = { duration_min: 26, walk_min: 7, walk_before_min: 4, walk_after_min: 3, lines: [{ name: '121', vehicle: 'bus', from_stop: 'Ciudadela', departure: '18:05', arrival: '18:23' }] };
 
 function deps(walk: number, transit: TransitPlan | null): TransferDeps & { asked: string[] } {
   const asked: string[] = [];
   return {
     asked,
     walk: async () => walk,
-    transit: async (_a, _b, iso) => (asked.push(iso), transit),
+    transit: async (_a, _b, when) => (asked.push(when.arrival ? `llegar ${when.arrival}` : `salir ${when.departure}`), transit),
   };
 }
 
@@ -87,16 +89,26 @@ describe('planDayTransfers', () => {
   it('lejos: bus con líneas, a la hora en que termina el bloque anterior, con link a Maps', async () => {
     const d = deps(70, BUS);
     const out = await planDayTransfers([block('Mercado', '13:00', '18:00', ...CV), block('Rambla', '18:30', '20:00', ...POCITOS)], '2026-10-18', d);
-    expect(d.asked).toEqual(['2026-10-18T18:00:00-03:00']);
+    expect(d.asked).toEqual(['salir 2026-10-18T18:00:00-03:00']);
     expect(out).toHaveLength(1);
-    expect(out[0].input).toMatchObject({ type: 'transfer', title: 'Bus 121 a Rambla', start_time: '18:00:00', end_time: '18:26:00', time_flex: 'fixed' });
+    // Horario real: 18:05 − 4 min a pie → 18:01; llega 18:23 + 3 a pie → 18:26.
+    expect(out[0].input).toMatchObject({ type: 'transfer', title: 'Bus 121 a Rambla', start_time: '18:01:00', end_time: '18:26:00', time_flex: 'fixed' });
     expect(out[0].input.transfer).toMatchObject({ mode: 'bus', duration_min: 26, walk_min: 7, from: 'Mercado', to: 'Rambla' });
     expect(out[0].input.transfer?.maps_url).toContain('travelmode=transit');
     expect(out[0].input.alerts).toBeUndefined();
   });
 
+  it('hueco grande (almuerzo en el medio): sale para llegar 10 min antes, con el horario de ese momento', async () => {
+    const d = deps(70, { ...BUS, lines: [{ ...BUS.lines[0], departure: '14:24', arrival: '14:42' }] });
+    const out = await planDayTransfers([block('Museo', '11:00', '12:30', ...CV), block('Rambla', '15:00', '17:00', ...POCITOS)], '2026-10-19', d);
+    expect(d.asked).toEqual(['llegar 2026-10-19T14:50:00-03:00']);
+    expect(out[0].input).toMatchObject({ start_time: '14:20:00', end_time: '14:45:00' });
+  });
+
   it('si el traslado no entra en el hueco: alerta de llegada tarde', async () => {
-    const out = await planDayTransfers([block('Mercado', '13:00', '18:20', ...CV), block('Rambla', '18:30', '20:00', ...POCITOS)], '2026-10-18', deps(70, BUS));
+    // Sale 18:20: el bus que devuelve Google es el de 18:25 → llega 18:43 + 3 a pie = 18:46 (16 min tarde).
+    const late = { ...BUS, lines: [{ ...BUS.lines[0], departure: '18:25', arrival: '18:43' }] };
+    const out = await planDayTransfers([block('Mercado', '13:00', '18:20', ...CV), block('Rambla', '18:30', '20:00', ...POCITOS)], '2026-10-18', deps(70, late));
     expect(out[0].input.alerts).toEqual([{ kind: 'late', text: 'Con el traslado llegás ~16 min tarde a «Rambla»' }]);
   });
 

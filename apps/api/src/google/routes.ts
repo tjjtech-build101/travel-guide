@@ -124,6 +124,9 @@ export type GTransitResponse = { routes?: { duration?: string; distanceMeters?: 
 export type TransitPlan = {
   duration_min: number;
   walk_min: number;
+  /** Caminata hasta la primera parada y desde la última (para alinear el bloque con el horario real). */
+  walk_before_min?: number;
+  walk_after_min?: number;
   lines: {
     name: string;
     vehicle: 'bus' | 'subway' | 'train' | 'tram' | 'ferry' | 'other';
@@ -178,6 +181,8 @@ export function parseTransit(res: GTransitResponse): TransitPlan | null {
   const steps = (r.legs ?? []).flatMap((l) => l.steps ?? []);
   const lines: TransitPlan['lines'] = [];
   let walkS = 0;
+  let beforeS = 0;
+  let afterS = 0;
   for (const s of steps) {
     if (s.travelMode === 'TRANSIT' && s.transitDetails) {
       const t = s.transitDetails;
@@ -193,27 +198,39 @@ export function parseTransit(res: GTransitResponse): TransitPlan | null {
         headsign: t.headsign,
         stops: t.stopCount,
       });
+      afterS = 0; // lo caminado antes de este tramo ya no es "después"
     } else if (s.travelMode === 'WALK') {
-      walkS += secs(s.staticDuration);
+      const w = secs(s.staticDuration);
+      walkS += w;
+      if (!lines.length) beforeS += w;
+      else afterS += w;
     }
   }
   if (!lines.length) return null;
-  return { duration_min: Math.max(1, Math.round(secs(r.duration) / 60)), walk_min: Math.round(walkS / 60), lines };
+  return {
+    duration_min: Math.max(1, Math.round(secs(r.duration) / 60)),
+    walk_min: Math.round(walkS / 60),
+    walk_before_min: Math.round(beforeS / 60),
+    walk_after_min: Math.round(afterS / 60),
+    lines,
+  };
 }
 
 /** Transporte público con líneas (requiere GOOGLE_MAPS_API_KEY). departure_time: ISO con zona. */
 export async function transitPlan(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
-  departure_time?: string,
+  when?: string | { departure?: string; arrival?: string },
 ): Promise<TransitPlan | null> {
   if (!env().GOOGLE_MAPS_API_KEY) return null;
+  const w = typeof when === 'string' ? { departure: when } : (when ?? {});
   const body: Record<string, unknown> = {
     origin: waypoint(a),
     destination: waypoint(b),
     travelMode: 'TRANSIT',
     languageCode: 'es',
-    ...(departure_time ? { departureTime: departure_time } : {}),
+    // TRANSIT acepta "salir a las" o "llegar a las" (no las dos).
+    ...(w.arrival ? { arrivalTime: w.arrival } : w.departure ? { departureTime: w.departure } : {}),
   };
   return cached(`transit:${JSON.stringify(body)}`, async () => {
     const res = await googleFetch<GTransitResponse>(ROUTES_URL, { method: 'POST', fieldMask: TRANSIT_MASK, body });
