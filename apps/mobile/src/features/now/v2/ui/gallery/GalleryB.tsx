@@ -104,7 +104,6 @@ export function GalleryB() {
       <Section title="HeroLeave · ok">
         <HeroLeave
           countdown={<FakeCountdown text="Salí en 24 min" />}
-          map={<Slot label="MiniRoute" height={96} />}
           faces={<Slot label="GroupFaces" />}
           title="Cena en Café Misterio"
           placeName="Costa Rica 1700"
@@ -116,7 +115,6 @@ export function GalleryB() {
       <Section title="HeroLeave · soon (con Voy tarde)">
         <HeroLeave
           countdown={<FakeCountdown text="6:30" color={colors.bronzeText} />}
-          map={<Slot label="MiniRoute" height={96} />}
           faces={<Slot label="GroupFaces · Ana a 300 m" />}
           title="Museo Torres García"
           placeName="Sarandí 683"
@@ -194,14 +192,14 @@ export function GalleryB() {
           onSuggestionPress={noop}
           onPlanDay={() => pulse(setPlanning)}
           planning={planning}
-          onNearbyTour={noop}
+          nowMin={15 * 60}
         />
       </Section>
       <Section title="HeroFree · cargando">
-        <HeroFree gapMin={90} untilLabel="19:30" suggestions={[]} loading onAdd={noop} onPlanDay={noop} onNearbyTour={noop} />
+        <HeroFree gapMin={90} untilLabel="19:30" suggestions={[]} loading onAdd={noop} onPlanDay={noop} nowMin={15 * 60} />
       </Section>
-      <Section title="HeroFree · vacío (tarde libre)">
-        <HeroFree gapMin={null} suggestions={[]} onAdd={noop} onPlanDay={noop} onNearbyTour={noop} />
+      <Section title="HeroFree · vacío (resto del día libre)">
+        <HeroFree gapMin={null} suggestions={[]} onAdd={noop} onPlanDay={noop} nowMin={15 * 60} />
       </Section>
 
       <Section title="HeroState · before + PreviewChip">

@@ -23,26 +23,34 @@ function rawRules(s: NowBriefSnapshotT): string {
       return `Salí en ${s.leave_in_min} min${toward}${walk}.`;
     }
     case 'tour': {
-      const title = s.current?.title?.trim() || next;
-      return title ? `${title} está listo. Cuando quieras arrancamos.` : `Tu tour está listo. Cuando quieras arrancamos.`;
+      // Tour en curso: es `current`; próximo: es `next` (con su hora).
+      const tour = s.current?.type === 'tour' ? s.current : s.next ?? s.current ?? null;
+      const name = tourName(tour?.title);
+      const ready = name ? `Tu tour por ${name} está listo.` : `Tu tour está listo.`;
+      const startsLater = tour && tour !== s.current && tour.start_time;
+      return startsLater ? `${ready} Arranca a las ${tour.start_time!.slice(0, 5)}.` : `${ready} Cuando quieras arrancamos.`;
     }
     case 'current': {
-      if (!next) return `Disfrutá, no hay apuro.`;
-      if (s.leave_in_min != null && s.leave_in_min > 0 && s.leave_in_min <= 60) {
-        return `Disfrutá. En ${fmt(s.leave_in_min)} salís para ${next}.`;
-      }
-      return `Disfrutá. Después sigue ${next}.`;
+      // La fila "Después" ya dice qué sigue y cuándo salir: acá, algo del lugar.
+      const here = s.current?.place_name?.trim() || s.current?.title?.trim() || null;
+      return here ? `Disfrutá. ¿Te cuento algo de ${here}?` : `Disfrutá, no hay apuro.`;
     }
     case 'free': {
-      const gap = s.gap_min && s.gap_min > 0 ? `Tenés ${fmt(s.gap_min)} libres.` : `Tenés el resto del día libre.`;
+      // El protagonista ya dice cuánto tiempo libre hay: la frase no lo repite.
       const sug = s.suggestions?.[0];
-      if (sug) return `${gap} ${sug.title}${sug.walk_min != null ? ` queda a ${sug.walk_min} min` : ' te puede gustar'}.`;
-      if (rain) return `${gap} Se viene lluvia: ¿te busco algo bajo techo?`;
-      return `${gap} ¿Te armo algo cerca?`;
+      if (rain) return `Se viene lluvia: ¿te busco algo bajo techo?`;
+      if (sug) return sug.walk_min != null ? `${sug.title} queda a ${sug.walk_min} min: ¿lo sumamos?` : `${sug.title} te puede gustar.`;
+      return `¿Te armo algo cerca?`;
     }
     default:
       return `Acá estoy cuando me necesites.`;
   }
+}
+
+/** "Tour por Ciudad Vieja" → "Ciudad Vieja" (para no decir "tu tour por Tour por…"). */
+function tourName(title: string | null | undefined): string | null {
+  const t = title?.trim().replace(/^(tour|recorrido)\s+((por|de|en)\s+)?((la|el|los|las)\s+)?/i, '').trim();
+  return t || null;
 }
 
 /** Corta a NOW_BRIEF_MAX en un límite de palabra (con "…"). */
@@ -52,12 +60,4 @@ export function clampBrief(text: string, max = NOW_BRIEF_MAX): string {
   const cut = t.slice(0, max - 1);
   const sp = cut.lastIndexOf(' ');
   return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,.:;·-]+$/, '')}…`;
-}
-
-/** 45 → "45 min" · 60 → "1 h" · 75 → "1 h 15". */
-function fmt(min: number): string {
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  const r = min % 60;
-  return r ? `${h} h ${String(r).padStart(2, '0')}` : `${h} h`;
 }

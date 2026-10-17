@@ -13,8 +13,6 @@ import type { PlanBlock, PlanOverview } from '../../../plan/selectors';
 import { blockWindow, clock, distanceM, type LatLng } from '../../selectors';
 import type { GapSuggestion, GroupPosition, RainPlanB, WeatherSummary } from '../types';
 
-const round5 = (n: number | null | undefined) => (n == null ? null : Math.round(n / 5) * 5);
-
 function hhmmToMin(t: string | null | undefined): number | null {
   const m = t ? /^(\d{1,2}):(\d{2})/.exec(t) : null;
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
@@ -226,17 +224,39 @@ export function minutesSince(ms: number, nowMs: number): number {
 
 // ───────────────────────── Frase de Scout
 
-/** Key estable del snapshot: minutos redondeados a 5 para no llamar a now_brief en cada tick. */
+/** Tramos de tiempo libre: la key no cambia con cada minuto que pasa, solo al cruzar un umbral. */
+function gapBucket(min: number | null | undefined): number | null {
+  if (min == null) return null;
+  return min < 30 ? 0 : min < 60 ? 1 : min < 120 ? 2 : 3;
+}
+
+function leaveBucket(min: number | null | undefined): string | null {
+  if (min == null) return null;
+  return min < 0 ? 'late' : min <= 10 ? 'soon' : 'ok';
+}
+
+/**
+ * Qué es el momento: protagonista, lo actual y lo próximo. Mientras no cambie, la frase anterior de Claude
+ * sigue valiendo (no se vuelve a las reglas mientras se pide la nueva).
+ */
+export function briefIdentity(s: NowBriefSnapshotT | null): string | null {
+  if (!s) return null;
+  return JSON.stringify([s.hero, s.current?.title ?? null, s.next?.title ?? null]);
+}
+
+/**
+ * Key del snapshot para now_brief: cambia solo cuando cambia algo que se nota (protagonista, actual, próximo,
+ * un umbral de salida o de tiempo libre, lluvia, ideas, grupo). Sin la hora: no se pide una frase nueva cada 5 min.
+ */
 export function briefKey(s: NowBriefSnapshotT | null): string | null {
   if (!s) return null;
   return JSON.stringify([
     s.hero,
-    round5(hhmmToMin(s.local_time)),
     s.current?.title ?? null,
     s.next?.title ?? null,
-    round5(s.leave_in_min),
-    round5(s.walk_min),
-    round5(s.gap_min),
+    leaveBucket(s.leave_in_min),
+    s.walk_min == null ? null : Math.round(s.walk_min / 10),
+    gapBucket(s.gap_min),
     s.weather?.rain_soon ?? null,
     (s.suggestions ?? []).map((x) => x.title),
     (s.group ?? []).map((g) => g.name),

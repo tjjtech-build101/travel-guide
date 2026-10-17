@@ -5,6 +5,7 @@ import { pointNear } from '../../../../location/demo';
 import type { PlanBlock, PlanOverview } from '../../../plan/selectors';
 import { distanceM, walkEstimateMin } from '../../selectors';
 import {
+  briefIdentity,
   briefKey,
   buildGroupPositions,
   gapAction,
@@ -186,11 +187,13 @@ test('errores de red vs. otros', () => {
 });
 
 console.log('Frase de Scout');
-test('key estable dentro de 5 min, cambia con el hero', () => {
-  const s = { local_time: '15:01', hero: 'leave' as const, next: { title: 'Cena' }, leave_in_min: 12 };
-  eq(briefKey({ ...s, local_time: '15:02', leave_in_min: 11 }), briefKey(s));
-  ok(briefKey({ ...s, local_time: '15:08', leave_in_min: 5 }) !== briefKey(s), 'cambia a los 5 min');
+test('key estable con el reloj; cambia con el hero o al cruzar un umbral', () => {
+  const s = { local_time: '15:01', hero: 'free' as const, next: { title: 'Cena' }, gap_min: 100 };
+  eq(briefKey({ ...s, local_time: '15:20', gap_min: 81 }), briefKey(s));
+  ok(briefKey({ ...s, local_time: '15:45', gap_min: 56 }) !== briefKey(s), 'cambia al bajar de 1 h');
   ok(briefKey({ ...s, hero: 'current' }) !== briefKey(s), 'cambia con el hero');
+  eq(briefIdentity({ ...s, gap_min: 20 }), briefIdentity(s));
+  ok(briefIdentity({ ...s, next: { title: 'Otro' } }) !== briefIdentity(s), 'identidad cambia con el próximo');
   eq(briefKey(null), null);
 });
 

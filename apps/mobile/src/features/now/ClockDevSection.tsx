@@ -28,7 +28,7 @@ const STATES: { value: ScoutState; label: string }[] = [
 ];
 
 export function ClockDevSection() {
-  const { now, simulated, preview } = useNow(10_000);
+  const { now, simulated } = useNow(10_000);
   const simulate = useClockStore((s) => s.simulate);
   const reset = useClockStore((s) => s.reset);
   const scoutState = useScoutStore((s) => s.state);
@@ -40,7 +40,7 @@ export function ClockDevSection() {
     <View style={styles.section}>
       <Text style={styles.title}>Fecha y hora (Ahora)</Text>
       <Text style={styles.muted}>
-        {preview ? 'Vista previa del día 1' : simulated ? 'Simulada' : 'Real'} · {local.date} {clock(local.minutes)} (Montevideo)
+        {simulated ? 'Simulada' : 'Real'} · {local.date} {clock(local.minutes)} (Montevideo)
       </Text>
       <View style={styles.chips}>
         <Chip label="Real" selected={!simulated} onPress={reset} />

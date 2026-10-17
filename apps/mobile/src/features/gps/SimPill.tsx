@@ -1,5 +1,6 @@
 // Badge "SIM" + mini controles flotantes del simulador (PRD 09). Solo aparece con la ubicación simulada.
-// Arrastrable; toque largo la achica a solo "SIM" (para grabar pantalla limpia) y un toque la vuelve a abrir.
+// Arrastrable; arranca achicada a solo "SIM" arriba a la derecha, a la altura de la barra de navegación (no tapa
+// el encabezado de Ahora ni el clima). Un toque la abre; toque largo la vuelve a achicar.
 import { SIM_SPEEDS } from '@build101/shared';
 import { useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, View } from 'react-native';
@@ -12,7 +13,7 @@ import { formatClock } from './format';
 export function SimPill() {
   const { sim, state, enabled, start, active } = useSimulator();
   const insets = useSafeAreaInsets();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const responder = useRef(
     PanResponder.create({
@@ -35,7 +36,7 @@ export function SimPill() {
   return (
     <Animated.View
       {...responder.panHandlers}
-      style={[styles.wrap, { top: insets.top + 52, transform: pan.getTranslateTransform() }]}
+      style={[styles.wrap, { top: insets.top + 14, transform: pan.getTranslateTransform() }]}
       pointerEvents="box-none"
     >
       <View style={styles.pill}>

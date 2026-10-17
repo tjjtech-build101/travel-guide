@@ -1,5 +1,11 @@
 // Cuenta regresiva del protagonista "leave": el número manda. Colores por urgencia (los de components.tsx).
+// LiveCountdown tiene su propio reloj (cada 1 s con ≤ 10 min, si no cada 30 s): el resto de la pantalla no se
+// re-renderiza cada segundo.
+import { zonedParts } from '@build101/shared';
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+
+import { countdown } from '../model';
 
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
@@ -31,6 +37,33 @@ export function Countdown({ text, urgency, sub }: Props) {
       {sub ? <Text style={[styles.sub, { color: c.fg }]}>{sub}</Text> : null}
     </View>
   );
+}
+
+type LiveProps = {
+  /** Minuto local (0–1439) en que hay que salir. */
+  leaveAtMin: number;
+  tz: string;
+  /** Desfase del reloj de la pantalla (simulación o vista previa), en ms. */
+  offsetMs: number;
+  urgency: Urgency;
+  /** "6 min a pie": con segundos se le antepone "Para salir · ". */
+  eta: string;
+};
+
+export function LiveCountdown({ leaveAtMin, tz, offsetMs, urgency, eta }: LiveProps) {
+  const read = () => {
+    const p = zonedParts(Date.now() + offsetMs, tz);
+    return countdown(leaveAtMin - p.minutes, p.seconds);
+  };
+  const [cd, setCd] = useState(read);
+  useEffect(() => {
+    setCd(read());
+    const id = setInterval(() => setCd(read()), cd.tickMs);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaveAtMin, tz, offsetMs, cd.tickMs]);
+  const withSeconds = /^\d+:\d\d$/.test(cd.text);
+  return <Countdown text={cd.text} urgency={urgency} sub={`${withSeconds ? 'Para salir · ' : ''}${eta}`} />;
 }
 
 const styles = StyleSheet.create({

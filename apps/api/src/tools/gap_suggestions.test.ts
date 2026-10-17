@@ -10,6 +10,7 @@ const at = (dLat: number) => ({ lat: here.lat + dLat, lng: here.lng });
 
 const idea = (over: Partial<BankIdea> = {}): BankIdea => ({
   id: 'i1',
+  is_private: false,
   title: 'Mercado del Puerto',
   type: 'meal',
   place_name: 'Mercado del Puerto',

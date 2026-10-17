@@ -3,10 +3,13 @@
 //   - 'never', fantasma activo o viaje terminado → no publica y borra mi fila (una vez).
 //   - 'always' → publica.
 //   - 'shared_only' (default) → solo durante un bloque compartido en curso (yo + ≥ 1 persona) o un tour en vivo.
-// Upsert directo a Supabase con mi JWT (RLS: solo mi fila). Consume LocationProvider (real | simulado).
+// Al desmontarse (salir de Ahora) o pasar a segundo plano borra mi fila: no queda una posición vieja a la vista
+// (la RLS igual esconde filas de más de 15 min). Upsert directo a Supabase con mi JWT (RLS: solo mi fila).
+// Consume LocationProvider (real | simulado).
 import type { LocationSharing } from '@build101/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
+import { AppState } from 'react-native';
 
 import { supabase } from '../../../../lib/supabase';
 import { useLocationFix } from '../../../../location/LocationContext';
@@ -73,6 +76,30 @@ export function useShareMyLocation(tripId: string): { sharing: boolean } {
 
   const last = useRef<Published | null>(null);
   const cleared = useRef(false);
+
+  // Fuera de Ahora o en segundo plano: borro mi fila (al volver se publica de nuevo con el próximo fix).
+  useEffect(() => {
+    if (!me) return;
+    const clear = () => {
+      if (!last.current) return; // no publiqué nada desde la última vez
+      last.current = null;
+      void supabase
+        .from('member_locations')
+        .delete()
+        .eq('trip_id', tripId)
+        .eq('user_id', me)
+        .then(({ error }) => {
+          if (error && __DEV__) console.warn('[ahora] borrar member_locations', error.message);
+        });
+    };
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'background') clear();
+    });
+    return () => {
+      sub.remove();
+      clear();
+    };
+  }, [me, tripId]);
 
   useEffect(() => {
     if (!me || !loaded) return;

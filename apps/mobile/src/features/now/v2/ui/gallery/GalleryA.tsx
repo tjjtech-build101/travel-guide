@@ -10,7 +10,6 @@ import { Countdown } from '../Countdown';
 import { DayRail } from '../DayRail';
 import { GroupFaces, type GroupFacesPerson } from '../GroupFaces';
 import { InlineNotice } from '../InlineNotice';
-import { MiniRoute } from '../MiniRoute';
 import { ScoutLine } from '../ScoutLine';
 import { WeatherChip } from '../WeatherChip';
 
@@ -52,8 +51,6 @@ const NOTICES: NoticeKind[] = [
   { kind: 'proposals', count: 1 },
 ];
 
-const DEST = { lat: -34.9068, lng: -56.2109 };
-const ME = { lat: -34.9011, lng: -56.2005 };
 
 export function GalleryA() {
   return (
@@ -82,12 +79,6 @@ export function GalleryA() {
         </View>
       </Section>
 
-      <Section title="MiniRoute · vos → destino">
-        <MiniRoute from={ME} to={DEST} />
-      </Section>
-      <Section title="MiniRoute · sin ubicación (solo destino)">
-        <MiniRoute from={null} to={DEST} height={100} />
-      </Section>
 
       <Section title="WeatherChip · todos los íconos">
         <View style={styles.wrapRow}>

@@ -29,6 +29,8 @@ export function briefSystem(): string {
     `Máximo ${NOW_BRIEF_MAX} caracteres. Sin comillas, sin emojis, sin saludos, sin markdown.`,
     'Usá solo los datos del snapshot (horas, minutos, nombres). No inventes lugares, horarios ni números.',
     'Si escribís en español, usá voseo rioplatense ("salí", "tenés").',
+    'No repitas lo que la pantalla ya muestra con el reloj (cuánto falta para salir, cuánto tiempo libre queda, la hora):',
+    'esos números cambian cada minuto. Aportá otra cosa: una idea concreta, quién del grupo está cerca, el clima.',
     'hero: leave = hay que salir hacia next (leave_in_min negativo = va tarde); tour = un tour listo; current = algo en curso;',
     'free = tiempo libre (gap_min); state = antes/después del viaje o sin plan.',
   ].join('\n');

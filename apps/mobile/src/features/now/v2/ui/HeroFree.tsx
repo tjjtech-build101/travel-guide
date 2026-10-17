@@ -1,4 +1,5 @@
-// Protagonista "libre": cuánto tiempo hay, hasta 3 ideas para el hueco y dos acciones.
+// Protagonista "libre": cuánto tiempo hay, hasta 3 ideas para el hueco y "Armame la mañana/tarde/noche".
+// "Tour acá" vive solo en el dock (no se repite acá).
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { Skeleton } from '../../../../ui/States';
@@ -24,11 +25,17 @@ type Props = {
   onSuggestionPress?: (s: GapSuggestion) => void;
   onPlanDay: () => void;
   planning?: boolean;
-  onNearbyTour: () => void;
+  /** Minuto local de ahora (0–1439): elige "la mañana / la tarde / la noche". */
+  nowMin: number;
 };
 
 export function freeTitle(gapMin: number | null): string {
-  return gapMin == null ? 'Tenés la tarde libre' : `Tenés ${formatMinutes(gapMin)} libres`;
+  return gapMin == null ? 'Tenés el resto del día libre' : `Tenés ${formatMinutes(gapMin)} libres`;
+}
+
+/** Franja del día para el botón: antes de las 13 "la mañana", hasta las 20 "la tarde", después "la noche". */
+export function dayPart(nowMin: number): 'la mañana' | 'la tarde' | 'la noche' {
+  return nowMin < 13 * 60 ? 'la mañana' : nowMin < 20 * 60 ? 'la tarde' : 'la noche';
 }
 
 const SOURCE_LABEL: Record<GapSuggestion['source'], string> = { idea: 'Idea guardada', place: 'Cerca', event: 'Evento de hoy' };
@@ -117,7 +124,7 @@ export function HeroFree({
   onSuggestionPress,
   onPlanDay,
   planning,
-  onNearbyTour,
+  nowMin,
 }: Props) {
   const items = suggestions.slice(0, 3);
   return (
@@ -142,10 +149,7 @@ export function HeroFree({
           ))}
         </View>
       ) : null}
-      <HeroActions
-        primary={{ label: 'Armame la tarde', onPress: onPlanDay, loading: planning, hint: 'El Scout te propone un plan' }}
-        secondary={{ label: 'Tour acá, ahora', onPress: onNearbyTour, hint: 'Un tour corto por donde estás' }}
-      />
+      <HeroActions primary={{ label: `Armame ${dayPart(nowMin)}`, onPress: onPlanDay, loading: planning, hint: 'El Scout te propone un plan' }} />
     </HeroCard>
   );
 }

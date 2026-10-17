@@ -1,5 +1,6 @@
 // Protagonista "estado" de Ahora v2 (antes / después / sin tramos / sin día) y las piezas comunes de
 // todas las tarjetas Hero*: tarjeta, kicker y fila de acciones (máximo 2 botones: primario + secundario).
+import { SCOUT } from '@build101/shared';
 import { useContext, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -11,18 +12,20 @@ export const HERO_BUTTON = 56;
 
 // ───────────────────────── Piezas comunes
 
-/** Tarjeta grande y limpia. Si recibe onPress, toda la tarjeta abre el detalle (pulsación larga: atajo opcional). */
+/**
+ * Tarjeta grande y limpia. Con onPress, tocar la tarjeta abre el detalle (pulsación larga: atajo opcional).
+ * Para VoiceOver la tarjeta NO es un solo elemento (accessible={false}): así se llega a los botones y a la cuenta
+ * regresiva. El "abrir detalle" accesible va en <HeroHead> (título y lugar).
+ */
 export function HeroCard({
   children,
   onPress,
   onLongPress,
-  accessibilityLabel,
   style,
 }: {
   children: ReactNode;
   onPress?: () => void;
   onLongPress?: () => void;
-  accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
 }) {
   // Modo exterior: borde con más contraste.
@@ -36,9 +39,40 @@ export function HeroCard({
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={450}
-      accessibilityLabel={accessibilityLabel}
-      accessibilityHint={onPress ? 'Abre el detalle' : undefined}
+      accessible={false}
       style={({ pressed }) => [card, pressed && styles.pressed, style]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+/** Título y lugar del protagonista: el botón accesible "abrir detalle" (y la acción "hablar de esto"). */
+export function HeroHead({
+  children,
+  label,
+  onPress,
+  onLongPress,
+}: {
+  children: ReactNode;
+  label: string;
+  onPress?: () => void;
+  onLongPress?: () => void;
+}) {
+  if (!onPress) return <View style={styles.head}>{children}</View>;
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={450}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Abre el detalle"
+      accessibilityActions={onLongPress ? [{ name: 'longpress', label: `Hablar con ${SCOUT.name} de esto` }] : undefined}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'longpress') onLongPress?.();
+      }}
+      style={styles.head}
     >
       {children}
     </Pressable>
@@ -175,6 +209,7 @@ const styles = StyleSheet.create({
   },
   cardOutdoor: { borderWidth: 2, borderColor: colors.text },
   pressed: { opacity: 0.85 },
+  head: { gap: 2 },
   kicker: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 1.2 },
   actions: { gap: space.sm, marginTop: space.md },
   actionsRow: { flexDirection: 'row' },

@@ -293,9 +293,20 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 
 ## Cambios Ahora v2 — en código
 
-Diseño en `docs/AHORA-V2.md`. Zod en `packages/shared/src/tools/nowTools.ts`, registradas en `toolDefs`. Sin migraciones:
-`activity_feed.kind` no tiene CHECK (el valor nuevo `running_late` ya está en `FEED_KINDS`) y la RLS de privados
-(`20261017000007_feed_private.sql`) cubre el aviso.
+Diseño en `docs/AHORA-V2.md`. Zod en `packages/shared/src/tools/nowTools.ts`, registradas en `toolDefs`. Una migración,
+solo de RLS (`20261017000010_member_locations_privacy.sql`, ver abajo). `activity_feed.kind` no tiene CHECK (el valor
+nuevo `running_late` ya está en `FEED_KINDS`) y la RLS de privados (`20261017000007_feed_private.sql`) cubre el aviso.
+
+- **RLS de `member_locations`** (`20261017000010_member_locations_privacy.sql`, función `security definer`
+  `member_location_visible(trip_id, user_id)`):
+  - select (`member_locations_select`): siendo miembro del viaje, mi fila siempre; la de otro solo si
+    `updated_at > now() - 15 min`, el viaje no está `finished`, su dueño tiene `location_sharing <> 'never'`, no está en
+    modo fantasma (`ghost_until` nulo o vencido) y, si el que mira es seguidor, el dueño tiene
+    `share_location_with_followers`.
+  - delete (`member_locations_delete`): solo la propia fila. insert/update siguen siendo solo la propia.
+  - `'shared_only'` (default) vs `'always'`: para el server valen igual. Que `'shared_only'` publique solo durante un
+    bloque compartido en curso o un tour lo decide la app (`useShareMyLocation`), que además borra su fila al dejar de
+    compartir, al desmontarse y al pasar a segundo plano; si la app muere sin borrarla, la RLS la esconde a los 15 min.
 
 - `APP_ONLY_TOOLS = ['now_brief', 'gap_suggestions']` (`packages/shared/src/tools/index.ts`): la voz no las ve
   (`VOICE_HIDDEN_TOOLS`). `report_late` y `plan_day` sí están en la voz y en `toClaudeTools`.
@@ -322,7 +333,8 @@ Diseño en `docs/AHORA-V2.md`. Zod en `packages/shared/src/tools/nowTools.ts`, r
   `data {mode: 'proposed', proposal_id, summary, count, blocks: [{title, start_time, end_time, from_idea}]}` + `undo_token`
   (el de `proposal_created`). Hueco: `[from_time, to_time)`; sin `to_time`, hasta el próximo bloque con hora o 22:00
   (mín. 30 min, si no 400). Una llamada a Claude (`claude-opus-5-5`, effort `low` — env `PLAN_DAY_EFFORT` —, salida
-  estructurada, timeout 45 s) con lo ocupado (privados ajenos como "Ocupado"), el banco de ideas y hasta 10 lugares
+  estructurada, timeout 45 s) con lo ocupado (todo bloque privado, propio o ajeno, como "Ocupado"), el banco de ideas **sin privados** (la propuesta
+  y su `proposal_created` los ve todo el viaje) y hasta 10 lugares
   abiertos cerca. Saneo por reglas: horas dentro del hueco, sin superposición, ids/refs que existan, máx. 6.
   Crea **una** `agent_proposals` (`by_agent: true`) siempre, también con `x-actor: user`: ideas del banco como op
   `move` (patch `{day_id, start_time, end_time, duration_min, status: 'confirmed'}`, no se duplican) y lo nuevo como

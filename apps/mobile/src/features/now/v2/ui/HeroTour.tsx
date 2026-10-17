@@ -6,7 +6,7 @@ import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { formatMinutes } from '../../selectors';
-import { HeroActions, HeroCard, heroText, Kicker } from './HeroState';
+import { HeroActions, HeroCard, HeroHead, heroText, Kicker } from './HeroState';
 
 export type TourPreviewProps = {
   stopsCount: number;
@@ -62,12 +62,14 @@ type Props = TourPreviewProps & {
 export function HeroTour({ title, when, startLabel, onStart, starting, error, onPress, onLongPress, ...preview }: Props) {
   const status = when === 'current' ? 'En curso' : startLabel ? `Empieza a las ${startLabel}` : 'Empieza pronto';
   return (
-    <HeroCard onPress={onPress} onLongPress={onLongPress} accessibilityLabel={`Tu tour: ${title}. ${status}`}>
+    <HeroCard onPress={onPress} onLongPress={onLongPress}>
       <Kicker color={colors.scout}>TU TOUR</Kicker>
-      <Text style={heroText.title} numberOfLines={2}>
-        {title}
-      </Text>
-      <Text style={heroText.meta}>{status}</Text>
+      <HeroHead label={`Tu tour: ${title}. ${status}`} onPress={onPress} onLongPress={onLongPress}>
+        <Text style={heroText.title} numberOfLines={2}>
+          {title}
+        </Text>
+        <Text style={heroText.meta}>{status}</Text>
+      </HeroHead>
       <TourPreview {...preview} />
       {error ? (
         <Text style={styles.error} accessibilityLiveRegion="polite">

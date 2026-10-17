@@ -61,6 +61,25 @@ describe('plan_day', () => {
     expect(db.tables.activity_feed[0]).toMatchObject({ kind: 'proposal_created', actor_agent: true });
   });
 
+  it('no le pasa a Claude ideas ni bloques privados (la propuesta la ve todo el viaje)', async () => {
+    const { db, ctx } = setup();
+    db.tables.blocks.push(
+      { id: 'idea-priv', trip_id: TRIP, leg_id: 'leg', day_id: null, title: 'Regalo sorpresa', type: 'activity', is_private: true, created_by: 'juan' },
+      { id: 'b-priv', trip_id: TRIP, leg_id: 'leg', day_id: 'd1', title: 'Médico', start_time: '17:00', end_time: '17:30', is_private: true, created_by: 'juan', sort_order: 1 },
+    );
+    const plan = vi.fn(async () => ({
+      summary: 'Regalo',
+      blocks: [{ title: 'Regalo sorpresa', type: 'activity', start_time: '15:00', end_time: '16:00', idea_id: 'idea-priv', place_ref: null, description: null }],
+    }));
+    await planDayImpl(input, ctx, { plan } as PlanDayLLM).catch(() => null);
+    const user = (plan.mock.calls[0] as unknown as [{ user: string }])[0].user;
+    expect(user).not.toContain('Regalo sorpresa');
+    expect(user).not.toContain('Médico');
+    // Aunque el modelo invente el id, no entra en la propuesta.
+    const ops = (db.tables.agent_proposals[0] as { ops: { block_id?: string }[] } | undefined)?.ops ?? [];
+    expect(ops.some((o) => o.block_id === 'idea-priv')).toBe(false);
+  });
+
   it('el hueco por defecto termina en el próximo bloque', () => {
     expect(gapEnd(15 * 60, [{ start_time: '20:00' }, { start_time: '10:00' }])).toBe(20 * 60);
     expect(gapEnd(15 * 60, [])).toBe(22 * 60);

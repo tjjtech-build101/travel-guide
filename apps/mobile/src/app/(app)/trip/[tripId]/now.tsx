@@ -1,14 +1,14 @@
 // Vista Ahora v2 (PRD 19 + docs/AHORA-V2.md): responde "¿qué hago ya?" con UN protagonista.
-// Encabezado + clima · frase de Scout · riel del día · protagonista (pickHero) · "Después" · un aviso · dock.
+// Encabezado + clima · frase de Scout · riel del día · un aviso · protagonista (pickHero) · "Después" · dock.
 // Deep links de prueba (build101://trip/<id>/now?...):
-//   ?at=2026-10-18T10:30 | real  · hora simulada (Montevideo)      ?preview=day1 · vista previa del día 1
+//   ?at=2026-10-18T10:30 | real  · hora simulada (Montevideo)      ?preview=day1 · vista previa del día 1 (local, sin escrituras)
 //   ?loc=simulated|real|near     · near: GPS simulado a ~8 min a pie del próximo bloque
 //   ?scout=listening|speaking|thinking|idle · estado del avatar
 //   ?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30|nearby:<min>|nearby-start (solo __DEV__)
 //   ?sim=play|pause|x1|x10|stop<N>|t<seg> (simulador de GPS, solo __DEV__)
 //   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · ?do=late|planday|offline|outdoor-on|outdoor-off (solo __DEV__)
 //   &n=<algo> repite el mismo link
-import { SCOUT, zonedParts } from '@build101/shared';
+import { SCOUT, zonedParts, zonedUtc } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -44,9 +44,9 @@ import {
   useWeatherNow,
 } from '../../../../features/now/v2/hooks';
 import { gapStartTime } from '../../../../features/now/v2/hooks/pure';
-import { countdown, dayRail, nearPoint, nextRowLabel, pickHero, pickNotice, showNextRow, toBriefSnapshot } from '../../../../features/now/v2/model';
+import { dayRail, nearPoint, nextRowLabel, pickHero, pickNotice, showNextRow, toBriefSnapshot } from '../../../../features/now/v2/model';
 import type { GapSuggestion } from '../../../../features/now/v2/types';
-import { Countdown } from '../../../../features/now/v2/ui/Countdown';
+import { LiveCountdown } from '../../../../features/now/v2/ui/Countdown';
 import { DayRail } from '../../../../features/now/v2/ui/DayRail';
 import { DockV2 } from '../../../../features/now/v2/ui/DockV2';
 import { GroupFaces, type GroupFacesPerson } from '../../../../features/now/v2/ui/GroupFaces';
@@ -57,7 +57,6 @@ import { HeroState, PreviewChip } from '../../../../features/now/v2/ui/HeroState
 import { HeroTour } from '../../../../features/now/v2/ui/HeroTour';
 import { InlineNotice } from '../../../../features/now/v2/ui/InlineNotice';
 import { LateSheet } from '../../../../features/now/v2/ui/LateSheet';
-import { MiniRoute } from '../../../../features/now/v2/ui/MiniRoute';
 import { NextRow } from '../../../../features/now/v2/ui/NextRow';
 import { ScoutLine } from '../../../../features/now/v2/ui/ScoutLine';
 import { WeatherChip } from '../../../../features/now/v2/ui/WeatherChip';
@@ -125,9 +124,14 @@ export default function NowTab() {
 
   const link = useLocalSearchParams<Link>();
 
-  // Reloj: cada 30 s; con la cuenta regresiva en segundos, cada 1 s.
-  const [tickMs, setTickMs] = useState<number>(30_000);
-  const { now, simulated, preview } = useNow(tickMs);
+  // Reloj: cada 30 s (la cuenta regresiva con segundos tiene su propio reloj: LiveCountdown).
+  // "Ver mi día 1" es local a esta pantalla: no toca el reloj global (ni avisos, ni ubicación compartida, ni otros
+  // viajes) y mientras dura no se escribe nada.
+  const { offsetMs: clockOffset, simulated } = useNow(30_000);
+  const [previewOffset, setPreviewOffset] = useState<number | null>(null);
+  const preview = previewOffset != null;
+  const offsetMs = previewOffset ?? clockOffset;
+  const now = Date.now() + offsetMs;
 
   useEffect(() => {
     void useNearbyTourJob.getState().hydrate();
@@ -143,7 +147,9 @@ export default function NowTab() {
     triedStart.current = location.kind;
     void location.start();
   }, [location]);
-  const here = fix ? { lat: fix.lat, lng: fix.lng } : null;
+  const fixLat = fix?.lat;
+  const fixLng = fix?.lng;
+  const here = useMemo(() => (fixLat != null && fixLng != null ? { lat: fixLat, lng: fixLng } : null), [fixLat, fixLng]);
   const group = useGroupPositions(tripId, here);
 
   // ───────── Hoy
@@ -168,11 +174,6 @@ export default function NowTab() {
     [today, plan, etaData, nowMin, far, myDayBlocks],
   );
   const rail = useMemo(() => dayRail(myDayBlocks, nowMin), [myDayBlocks, nowMin]);
-
-  // Cuenta regresiva (≤ 10 min: con segundos).
-  const cd = hero.kind === 'leave' ? countdown(hero.leaveIn, zonedParts(now, tz).seconds) : null;
-  const wantTick = cd?.tickMs ?? 30_000;
-  useEffect(() => setTickMs(wantTick), [wantTick]);
 
   // Haptic al pasar a "justo" o "tarde".
   const urgency = hero.kind === 'leave' ? hero.urgency : null;
@@ -208,12 +209,14 @@ export default function NowTab() {
   }, [gap.adding]);
 
   const city = leg?.city ?? null;
+  // Sin frase en "salí para" (el protagonista ya lo dice todo) ni en los estados.
+  const showLine = hero.kind !== 'leave' && hero.kind !== 'state';
   const snapshot = useMemo(
     () =>
-      today
+      today && showLine
         ? toBriefSnapshot({ hero, nowMin, city, plan, eta: etaData, weather, suggestions: gap.items, group })
         : null,
-    [today, hero, nowMin, city, plan, etaData, weather, gap.items, group],
+    [today, showLine, hero, nowMin, city, plan, etaData, weather, gap.items, group],
   );
   const line = useScoutLine(snapshot, tripId);
 
@@ -234,11 +237,12 @@ export default function NowTab() {
     return people.length ? <GroupFaces people={people} /> : null;
   };
 
-  // Último aviso del vigilante de horarios para el próximo bloque (va chiquito dentro de "Salí para").
-  const lastAlert = useScheduleStore((s) => (next ? s.last[next.block.id] : undefined));
-  const alertNote = lastAlert
-    ? `${SCOUT.name} te avisó a las ${clock(zonedParts(lastAlert.at, tz).minutes)}${lastAlert.channel === 'voice' ? ' en la llamada' : ''}`
-    : null;
+  // Vista previa: nada de escrituras (agregar, armar, avisar, mover, empezar tour).
+  const blockedByPreview = () => {
+    if (!preview) return false;
+    showToast({ text: 'Es una vista previa. Volvé a hoy para hacer cambios.', tone: 'info' });
+    return true;
+  };
 
   // ───────── Acciones del Scout
   const talkAbout = (b: PlanBlock) =>
@@ -310,6 +314,7 @@ export default function NowTab() {
       : ([plan?.current?.block, next?.block].find((b): b is PlanBlock => !!b && b.type === 'tour' && !!b.tour_id) ?? null);
   const tourPreview = useTourPreview(hero.kind === 'tour' ? hero.block.tour_id : null);
   const onStartTour = async (b: PlanBlock) => {
+    if (blockedByPreview()) return;
     const names = b.participant_ids.map((id) => members.get(id)?.display_name).filter((n): n is string => !!n);
     const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
     if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
@@ -330,7 +335,7 @@ export default function NowTab() {
   const lateBy = hero.kind === 'leave' ? Math.max(0, -hero.leaveIn) : 0;
 
   const onNotifyLate = async () => {
-    if (hero.kind !== 'leave') return;
+    if (hero.kind !== 'leave' || blockedByPreview()) return;
     setNotify('notifying');
     const res = await callTool<'report_late', { feed_id: string; summary: string }>('report_late', {
       trip_id: tripId,
@@ -353,13 +358,18 @@ export default function NowTab() {
 
   const onShiftLate = (min: number) => {
     if (hero.kind !== 'leave' || !dayId) return;
+    if (blockedByPreview()) {
+      setLateOpen(false);
+      return;
+    }
     const to = clock(hero.next.start + min);
     setLateOpen(false);
     moveBlock.mutate({ blockId: hero.next.block.id, dayId, startTime: to, title: hero.next.block.title, toLabel: `a las ${to}` });
   };
 
-  // ───────── Armame la tarde / Agregar idea
+  // ───────── Armame la mañana/tarde/noche / Agregar idea
   const onPlanDay = () => {
+    if (blockedByPreview()) return;
     if (!dayId) {
       showToast({ text: 'Hoy no hay un día del viaje para armar.', tone: 'error' });
       return;
@@ -391,6 +401,7 @@ export default function NowTab() {
   }, [link.do, link.n]);
 
   const onAddSuggestion = (s: GapSuggestion) => {
+    if (blockedByPreview()) return;
     setAddingId(s.id);
     gap.add(s);
   };
@@ -398,6 +409,7 @@ export default function NowTab() {
   // ───────── Deep links de prueba
   useEffect(() => {
     if (!link.at) return;
+    setPreviewOffset(null);
     if (link.at === 'real') useClockStore.getState().reset();
     else useClockStore.getState().simulate(link.at);
   }, [link.at, link.n]);
@@ -405,8 +417,13 @@ export default function NowTab() {
     if (link.scout && (PREVIEW_STATES as string[]).includes(link.scout)) previewScoutState(link.scout as ScoutState);
   }, [link.scout]);
   const startDate = trip.data?.start_date ?? legs?.[0]?.start_date ?? null;
+  const startPreview = () => {
+    const date = startDate?.slice(0, 10);
+    const t = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? zonedUtc(`${date}T10:00`, tz) : null;
+    if (t != null) setPreviewOffset(t - Date.now());
+  };
   useEffect(() => {
-    if (link.preview === 'day1' && startDate) useClockStore.getState().previewDay1(startDate, tz);
+    if (link.preview === 'day1' && startDate) startPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link.preview, link.n, startDate]);
 
@@ -520,7 +537,8 @@ export default function NowTab() {
       onNearbyTour={() => void onNearbyTour()}
       tourAvailable={tourAvailable}
       onCamera={onCamera}
-      onDirections={onDirections}
+      // "Salí para" ya tiene "Cómo llego" como botón principal: no se repite en el dock.
+      onDirections={hero.kind === 'leave' ? null : onDirections}
     />
   );
 
@@ -575,20 +593,20 @@ export default function NowTab() {
     protagonist = (
       <HeroLeave
         countdown={
-          <Countdown
-            text={cd?.text ?? ''}
+          <LiveCountdown
+            leaveAtMin={nowMin + hero.leaveIn}
+            tz={tz}
+            offsetMs={offsetMs}
             urgency={hero.urgency}
-            sub={`${cd && /^\d+:\d\d$/.test(cd.text) ? 'Para salir · ' : ''}${formatMinutes(hero.eta.minutes)} ${hero.eta.mode === 'walk' ? 'a pie' : 'en transporte'}`}
+            eta={`${formatMinutes(hero.eta.minutes)} ${hero.eta.mode === 'walk' ? 'a pie' : 'en transporte'}`}
           />
         }
-        map={hasCoords(b) ? <MiniRoute from={here} to={{ lat: b.lat, lng: b.lng }} height={110} /> : null}
         faces={faces(b)}
         title={b.title}
         placeName={b.place_name}
         startLabel={clock(hero.next.start)}
         onDirections={() => (hasCoords(b) ? openDirections(b) : undefined)}
         onLate={hero.urgency !== 'ok' ? () => setLateOpen(true) : undefined}
-        note={hero.urgency === 'late' ? null : alertNote}
         onPress={() => openBlock(tripId, b.id)}
         onLongPress={talkShortcut(b)}
       />
@@ -640,7 +658,7 @@ export default function NowTab() {
         onAdd={onAddSuggestion}
         onPlanDay={onPlanDay}
         planning={planDay.isPending}
-        onNearbyTour={() => void onNearbyTour()}
+        nowMin={nowMin}
       />
     );
   } else {
@@ -648,7 +666,7 @@ export default function NowTab() {
       <HeroState
         state={hero.state}
         daysUntil={hero.daysUntil}
-        onPreviewDay1={startDate ? () => useClockStore.getState().previewDay1(startDate, tz) : undefined}
+        onPreviewDay1={startDate ? startPreview : undefined}
         onOpenPlan={goToPlan}
         onAddLeg={goToPlan}
       />
@@ -687,11 +705,11 @@ export default function NowTab() {
             <WeatherChip weather={weather} />
           </View>
 
-          {preview ? <PreviewChip onExit={() => useClockStore.getState().reset()} /> : null}
+          {preview ? <PreviewChip onExit={() => setPreviewOffset(null)} /> : null}
           {/* Sin conexión va arriba (cambia cómo leer todo lo demás); lluvia y propuestas, abajo. */}
           {notice?.kind === 'offline' ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
 
-          {hero.kind !== 'state' && (line.text || line.loading) ? <ScoutLine text={line.text ?? ''} loading={line.loading} onPress={onScoutLine} /> : null}
+          {showLine && (line.text || line.loading) ? <ScoutLine text={line.text ?? ''} loading={line.loading} onPress={onScoutLine} /> : null}
 
           {rail.length ? (
             <View style={styles.rail}>
@@ -699,11 +717,13 @@ export default function NowTab() {
             </View>
           ) : null}
 
+          {/* Lluvia o propuestas: fila compacta arriba del protagonista (no queda tapada por el dock). */}
+          {notice && notice.kind !== 'offline' ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
+
           {jobActive ? <AgentJobProgress tripId={tripId} showSkeleton={false} /> : null}
 
           {protagonist}
           {nextRow}
-          {notice && notice.kind !== 'offline' ? <InlineNotice notice={notice} onPress={onNotice} /> : null}
         </ScrollView>
         <ActionToast bottom={DOCK_SPACE + space.sm} />
         {dock}

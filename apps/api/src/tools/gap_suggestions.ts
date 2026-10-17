@@ -22,6 +22,8 @@ export type BankIdea = {
   lat: number | null;
   lng: number | null;
   duration_min: number | null;
+  /** Privada (propia): sirve en gap_suggestions (la ve solo uno), nunca en una propuesta compartida. */
+  is_private: boolean;
 };
 
 /** Caminata máxima para un hueco: un tercio del tiempo (ida, estadía y vuelta), entre 5 y 25 min. */
@@ -55,6 +57,7 @@ export async function loadBankIdeas(admin: Db, legId: string, userId: string): P
       lat: (b.lat as number | null) ?? null,
       lng: (b.lng as number | null) ?? null,
       duration_min: (b.duration_min as number | null) ?? null,
+      is_private: !!b.is_private,
     }));
 }
 

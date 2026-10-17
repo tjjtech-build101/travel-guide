@@ -61,14 +61,13 @@ export async function planDayImpl(input: ToolInput<'plan_day'>, ctx: ToolCtx, ll
   const to = gapEnd(from, dayBlocks, input.to_time);
   if (to - from < MIN_GAP) throw badInput('No hay un hueco libre de al menos 30 min en ese horario.');
 
-  // Lo ocupado: los privados ajenos se ven como "Ocupado" (sin título).
+  // Lo ocupado: los privados (ajenos y propios) se ven como "Ocupado" (sin título): la propuesta la ve todo el viaje.
   const busy = dayBlocks
     .filter((b) => b.start_time)
     .map((b) => {
       const start = toMin(b.start_time)!;
       const end = toMin(b.end_time) ?? start + (b.duration_min ?? 60);
-      const mine = !b.is_private || b.created_by === ctx.userId;
-      return { title: mine ? b.title : 'Ocupado', start_time: hhmm(start), end_time: hhmm(end), start, end };
+      return { title: b.is_private ? 'Ocupado' : b.title, start_time: hhmm(start), end_time: hhmm(end), start, end };
     });
 
   const here =
@@ -83,7 +82,8 @@ export async function planDayImpl(input: ToolInput<'plan_day'>, ctx: ToolCtx, ll
   ]);
   const walk = (p: { lat: number | null; lng: number | null }) =>
     here && p.lat != null && p.lng != null ? walkEstimateMin(here, { lat: p.lat, lng: p.lng }) : null;
-  const ideas = ideasAll.slice(0, 30).map((i) => ({ ...i, walk_min: walk(i) }));
+  // Sin ideas privadas: agent_proposals y el feed los lee cualquier miembro (y otro podría aceptar el move).
+  const ideas = ideasAll.filter((i) => !i.is_private).slice(0, 30).map((i) => ({ ...i, walk_min: walk(i) }));
   const places = placesAll.map((p, i) => ({ ref: `p${i + 1}`, ...p, walk_min: walk(p) }));
 
   let plan;

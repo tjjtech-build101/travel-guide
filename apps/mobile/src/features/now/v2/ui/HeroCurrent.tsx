@@ -7,7 +7,7 @@ import { Text } from '../../../../ui/Text';
 import { colors, font, space } from '../../../../ui/theme';
 import { AlertChips } from '../../../plan/components/BlockCard';
 import { formatMinutes } from '../../selectors';
-import { HeroActions, HeroCard, heroText, Kicker } from './HeroState';
+import { HeroActions, HeroCard, HeroHead, heroText, Kicker } from './HeroState';
 
 type Props = {
   title: string;
@@ -36,11 +36,13 @@ export function remainingLabel(remainingMin: number | null, endLabel?: string | 
 
 export function HeroCurrent({ title, placeName, progress, remainingMin, endLabel, faces, alerts, onTellMe, onPress, onLongPress }: Props) {
   const left = remainingLabel(remainingMin, endLabel);
+  // Una alerta con la misma hora que el fin ("Última visita 17:00" con "hasta 17:00") no suma: fuera.
+  const shownAlerts = (alerts ?? []).filter((a) => !(endLabel && a.text.includes(endLabel)));
   const pct = progress == null ? null : Math.min(1, Math.max(0, progress));
   return (
-    <HeroCard onPress={onPress} onLongPress={onLongPress} accessibilityLabel={`Ahora: ${title}${left ? `. ${left}` : ''}`}>
+    <HeroCard onPress={onPress} onLongPress={onLongPress}>
       <Kicker>AHORA</Kicker>
-      <View style={styles.text}>
+      <HeroHead label={`Ahora: ${title}${placeName ? `, ${placeName}` : ''}`} onPress={onPress} onLongPress={onLongPress}>
         <Text style={heroText.title} numberOfLines={2}>
           {title}
         </Text>
@@ -49,7 +51,7 @@ export function HeroCurrent({ title, placeName, progress, remainingMin, endLabel
             {placeName}
           </Text>
         ) : null}
-      </View>
+      </HeroHead>
       {pct != null ? (
         <View
           style={styles.track}
@@ -61,14 +63,13 @@ export function HeroCurrent({ title, placeName, progress, remainingMin, endLabel
       ) : null}
       {left ? <Text style={styles.left}>{left}</Text> : null}
       {faces ? <View>{faces}</View> : null}
-      <AlertChips alerts={alerts ?? null} max={2} />
+      <AlertChips alerts={shownAlerts} max={2} />
       <HeroActions primary={{ label: 'Contame de esto', onPress: onTellMe, hint: 'El Scout te cuenta de este lugar' }} />
     </HeroCard>
   );
 }
 
 const styles = StyleSheet.create({
-  text: { gap: 2 },
   track: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceMuted, overflow: 'hidden', marginTop: space.sm },
   fill: { height: 8, borderRadius: 4, backgroundColor: colors.primary },
   left: { fontSize: font.body, fontWeight: '700', color: colors.text },

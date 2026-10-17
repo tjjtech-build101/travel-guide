@@ -1,4 +1,4 @@
-// "Armame la tarde" (docs/AHORA-V2.md): plan_day. El agente propone (agent_proposals), nunca aplica solo:
+// "Armame la mañana/tarde/noche" (docs/AHORA-V2.md): plan_day. El agente propone (agent_proposals), nunca aplica solo:
 // la propuesta aparece en el aviso "Scout propone N cambios" por Realtime.
 import type { PlanDayOutput } from '@build101/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -20,7 +20,7 @@ export type PlanDayVars = {
 /** Mensaje en español para mostrar si falla. */
 export function planDayErrorText(e: unknown): string {
   if (e instanceof ToolCallError) {
-    if (e.code === 'network_error') return 'Sin conexión: no pude armar la tarde.';
+    if (e.code === 'network_error') return 'Sin conexión: no pude armar el plan.';
     // La API ya manda el texto amable ("Scout no está disponible ahora.").
     if (e.code === 'scout_unavailable' && e.message) return e.message;
     if (e.code === 'empty_plan') return 'No encontré nada que entre en ese rato.';
@@ -28,7 +28,7 @@ export function planDayErrorText(e: unknown): string {
     if (e.code === 'not_found') return 'No encontré el día.';
     if (e.code === 'unauthenticated') return 'Tu sesión venció. Volvé a entrar.';
   }
-  return 'No pude armar la tarde. Probá de nuevo.';
+  return 'No pude armar el plan. Probá de nuevo.';
 }
 
 export function usePlanDay() {

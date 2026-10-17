@@ -1,11 +1,12 @@
 // Frase de Scout (docs/AHORA-V2.md): al instante la versión por reglas (nowBriefRules) y, cuando el momento se
-// queda quieto 1,5 s, la de Claude (now_brief). La key redondea minutos a 5: no se llama en cada tick.
-// Si now_brief falla o no hay saldo, quedan las reglas.
+// queda quieto 1,5 s, la de Claude (now_brief). La key no incluye la hora (briefKey): solo se pide otra frase
+// cuando cambia algo que se nota. Mientras llega, si el momento es el mismo (briefIdentity), sigue la frase
+// anterior de Claude: nada de LLM → reglas → LLM. Si now_brief falla o no hay saldo, quedan las reglas.
 import { type NowBriefOutput, type NowBriefSnapshotT, nowBriefRules } from '@build101/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { briefKey } from './pure';
+import { briefIdentity, briefKey } from './pure';
 import { callNowTool } from './nowApi';
 
 const DEBOUNCE_MS = 1500;
@@ -45,8 +46,14 @@ export function useScoutLine(
     },
   });
 
+  // Última frase de Claude y de qué momento era.
+  const identity = briefIdentity(snapshot);
+  const lastLlm = useRef<{ identity: string; text: string } | null>(null);
+  const fresh = settled?.key === key ? q.data : null;
+  if (fresh && settled) lastLlm.current = { identity: briefIdentity(settled.snapshot) ?? '', text: fresh.text };
+
   if (!snapshot || !key) return { text: null, source: 'rules', loading: false };
-  const llm = settled?.key === key ? q.data : null;
-  if (llm) return { text: llm.text, source: llm.source, loading: false };
+  if (fresh) return { text: fresh.text, source: fresh.source, loading: false };
+  if (lastLlm.current && lastLlm.current.identity === identity) return { text: lastLlm.current.text, source: 'llm', loading: false };
   return { text: rules, source: 'rules', loading: settled?.key !== key || q.isFetching };
 }

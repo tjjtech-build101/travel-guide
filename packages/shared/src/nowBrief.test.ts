@@ -20,24 +20,27 @@ describe('nowBriefRules', () => {
     for (const t of [a, b]) expect(t).not.toMatch(/undefined|null/);
   });
 
-  it('free: con hueco, sin hueco, con sugerencia y con lluvia', () => {
-    expect(nowBriefRules({ ...base, hero: 'free', gap_min: 75 })).toBe('Tenés 1 h 15 libres. ¿Te armo algo cerca?');
-    expect(nowBriefRules({ ...base, hero: 'free', gap_min: null })).toBe('Tenés el resto del día libre. ¿Te armo algo cerca?');
+  it('free: no repite el tiempo libre (ya está en el protagonista)', () => {
+    expect(nowBriefRules({ ...base, hero: 'free', gap_min: 75 })).toBe('¿Te armo algo cerca?');
     expect(nowBriefRules({ ...base, hero: 'free', gap_min: 45, suggestions: [{ title: 'Café Brasilero', walk_min: 4 }] })).toBe(
-      'Tenés 45 min libres. Café Brasilero queda a 4 min.',
+      'Café Brasilero queda a 4 min: ¿lo sumamos?',
     );
     expect(nowBriefRules({ ...base, hero: 'free', gap_min: 45, weather: { rain_soon: true } })).toContain('bajo techo');
   });
 
-  it('current: avisa la salida si es dentro de la hora', () => {
-    expect(nowBriefRules({ ...base, hero: 'current', next, leave_in_min: 40 })).toBe('Disfrutá. En 40 min salís para Almuerzo.');
-    expect(nowBriefRules({ ...base, hero: 'current', next, leave_in_min: 200 })).toBe('Disfrutá. Después sigue Almuerzo.');
+  it('current: no repite la fila "Después"; ofrece contar algo del lugar', () => {
+    expect(nowBriefRules({ ...base, hero: 'current', current: { title: 'Teatro Solís', place_name: 'Teatro Solís' }, next, leave_in_min: 40 })).toBe(
+      'Disfrutá. ¿Te cuento algo de Teatro Solís?',
+    );
     expect(nowBriefRules({ ...base, hero: 'current' })).toBe('Disfrutá, no hay apuro.');
   });
 
-  it('tour nombra el tour', () => {
-    expect(nowBriefRules({ ...base, hero: 'tour', current: { title: 'Tour Ciudad Vieja' } })).toBe(
-      'Tour Ciudad Vieja está listo. Cuando quieras arrancamos.',
+  it('tour: "Tu tour por …" y, si es más tarde, a qué hora arranca', () => {
+    expect(nowBriefRules({ ...base, hero: 'tour', current: { title: 'Tour por Ciudad Vieja', type: 'tour' } })).toBe(
+      'Tu tour por Ciudad Vieja está listo. Cuando quieras arrancamos.',
+    );
+    expect(nowBriefRules({ ...base, hero: 'tour', next: { title: 'Ciudad Vieja', type: 'tour', start_time: '11:00' } })).toBe(
+      'Tu tour por Ciudad Vieja está listo. Arranca a las 11:00.',
     );
   });
 
