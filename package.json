@@ -1,0 +1,19 @@
+{
+  "name": "build101",
+  "private": true,
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "dev:api": "pnpm --filter api dev",
+    "dev:mobile": "pnpm --filter mobile start",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:start": "npx supabase start",
+    "db:reset": "npx supabase db reset",
+    "seed:remote": "tsx scripts/seed-remote.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "tsx": "^4.20.0"
+  }
+}

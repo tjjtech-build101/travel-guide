@@ -1,0 +1,38 @@
+// Interfaz única de ubicación (Arquitectura, principio 5). Todo lo que use ubicación consume esto.
+
+export type LocationFix = {
+  /** epoch ms */
+  t: number;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  speed?: number | null;
+  accuracy: number;
+};
+
+export interface LocationProvider {
+  readonly kind: 'real' | 'simulated';
+  start(): Promise<void>;
+  stop(): void;
+  getCurrent(): LocationFix | null;
+  subscribe(cb: (fix: LocationFix) => void): () => void;
+}
+
+/** Punto de un track grabado: `t` = segundos desde el inicio, `heading` puede ser null. */
+export type TrackPoint = {
+  t: number;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  accuracy: number;
+};
+
+const EARTH_RADIUS_M = 6_371_000;
+
+export function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+}
