@@ -34,6 +34,8 @@ export type StartCallArgs = {
   location?: { lat: number; lng: number; accuracy?: number | null } | null;
   /** Contexto de la pantalla (bloque, punto del mapa): va como mensaje de sistema antes del saludo. */
   context?: Record<string, unknown>;
+  /** Sin saludo: la llamada se abre para narrar algo que llega enseguida (p. ej. la foto de la cámara). */
+  silentOpen?: boolean;
 };
 
 type Fix = { lat: number; lng: number; accuracy?: number | null; heading?: number | null } | null;
@@ -125,6 +127,8 @@ const TAIL_MS = 600;
 let vadMode: 'normal' | 'barge' = 'normal';
 const MAX_EVENTS = 200;
 let echoCount = 0;
+/** Eventos que llegaron mientras la llamada conectaba: se mandan apenas está en vivo. */
+let pendingEvents: { type: VoiceEventType; payload: unknown; respond: boolean }[] = [];
 /** Hay una respuesta del modelo en curso en el servidor (entre response.created y response.done). */
 let responseActive = false;
 /** Se pidió un response.create mientras había otra en curso: se manda al terminar (evita conversation_already_has_active_response). */
@@ -461,7 +465,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
             },
           });
         }
-        if (!isRetry) {
+        if (!isRetry && !args.silentOpen) {
           // El saludo con la detección exigente: un ruido de la sala no lo cancela; una voz cercana sí.
           setVad('barge');
           requestResponse();
@@ -557,6 +561,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       echoCount = 0;
       responseActive = false;
       responseQueued = false;
+      pendingEvents = [];
       set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
       try {
         startCallAudio(get().speaker);
@@ -569,6 +574,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
           return;
         }
         set({ status: 'live', startedAt: Date.now() });
+        // Lo que llegó mientras conectaba (p. ej. el resultado de la foto).
+        const queued = pendingEvents;
+        pendingEvents = [];
+        for (const ev of queued) get().injectEvent(ev.type, ev.payload, { respond: ev.respond });
         hapticResult(true);
       } catch (e) {
         // Colgó mientras conectaba: endCall ya limpió todo, no es un error.
@@ -607,6 +616,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     },
 
     injectEvent: (type, payload, opts = {}) => {
+      if (get().status === 'connecting') {
+        pendingEvents.push({ type, payload, respond: opts.respond !== false });
+        return true;
+      }
       if (!conn || get().status !== 'live') return false;
       const sent = conn.send({
         type: 'conversation.item.create',

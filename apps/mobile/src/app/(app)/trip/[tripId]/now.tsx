@@ -47,6 +47,7 @@ import { Button } from '../../../../ui/Button';
 import { ErrorState, SkeletonCard } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
+import { showToScout } from '../../../../voice/camera/showToScout';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
 
 const DOCK_HEIGHT = 190;
@@ -185,8 +186,8 @@ export default function NowTab() {
     else Alert.alert('No pude armar el tour', res.message);
   };
 
-  const onCamera = () =>
-    Alert.alert('Cámara', `Muy pronto: le vas a poder mostrar a ${SCOUT.name} lo que estás mirando y te cuenta qué es.`);
+  // PRD 08: abre la cámara y, si no hay llamada, el scout se conecta de fondo para narrar la foto.
+  const onCamera = () => void showToScout({ tripId });
 
   // Cómo llego: al próximo bloque; si no hay, al actual.
   const directionsTarget = [next?.block, plan?.current?.block].find((b): b is PlanBlock => !!b && hasCoords(b)) ?? null;
