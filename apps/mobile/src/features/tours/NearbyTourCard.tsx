@@ -34,6 +34,15 @@ function useTourStops(tourId: string | null, enabled: boolean) {
   });
 }
 
+/** Errores crudos del proveedor (JSON, códigos HTTP) → texto para la persona. */
+function friendlyError(error: string | null | undefined): string {
+  if (!error) return 'Algo falló armando el recorrido.';
+  if (/credit balance|rate.?limit|overloaded|^\d{3}\s*\{/i.test(error)) {
+    return `${SCOUT.name} no pudo investigar los lugares en este momento. Probá de nuevo en un rato.`;
+  }
+  return error.length > 160 ? `${error.slice(0, 157)}…` : error;
+}
+
 export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | null }) {
   const job = useNearbyTourJob((s) => s.job);
   const clear = useNearbyTourJob((s) => s.clear);
@@ -67,7 +76,7 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
       <View style={[styles.card, styles.error]}>
         <Text style={styles.kicker}>TOUR ACÁ, AHORA</Text>
         <Text style={styles.title}>No pude armar el tour</Text>
-        <Text style={styles.body}>{row?.error ?? 'Algo falló armando el recorrido.'}</Text>
+        <Text style={styles.body}>{friendlyError(row?.error)}</Text>
         <Button label="Reintentar" onPress={() => void retry()} disabled={!here} style={styles.btn} />
         <Button label="Cerrar" variant="ghost" onPress={clear} />
       </View>
@@ -82,7 +91,7 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
         <Text style={styles.title}>{stops.data?.title ?? 'Tour acá, ahora'}</Text>
         {result ? (
           <Text style={styles.body}>
-            {result.stop_count} paradas · ~{result.est_duration_min} min · {Math.round(result.total_walk_m / 100) / 10} km a pie
+            {result.stop_count} paradas · ~{result.est_duration_min} min · {(Math.round(result.total_walk_m / 100) / 10).toString().replace(".", ",")} km a pie
           </Text>
         ) : null}
         {list.length ? (

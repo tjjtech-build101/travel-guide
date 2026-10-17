@@ -2,6 +2,8 @@
 // grande y rápido a lo del Scout (hablar, "Tour acá, ahora", cámara, cómo llego).
 // Fecha/hora simulables para probar con el seed: menú dev o `build101://trip/<id>/now?at=2026-10-18T10:30`
 // (`at=real` vuelve al reloj real). Previsualizar el avatar: `?scout=listening|speaking|thinking|idle`.
+// Tour en vivo (solo __DEV__, para probar sin tocar la pantalla): `?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30`
+// y simulador `?sim=play|pause|x1|x10|stop<N>` (salta a ~15 s de la parada N). `&n=<algo>` para repetir el mismo.
 import { SCOUT } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -73,7 +75,7 @@ export default function NowTab() {
   const nearbyJob = useNearbyTourJob((s) => s.job);
 
   // Deep link de pruebas: ?at=2026-10-18T10:30 | real · ?scout=listening
-  const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string }>();
+  const link = useLocalSearchParams<{ at?: string; scout?: string; loc?: string; tour?: string; sim?: string; n?: string }>();
   useEffect(() => {
     if (!link.at) return;
     if (link.at === 'real') useClockStore.getState().reset();
@@ -99,6 +101,24 @@ export default function NowTab() {
   useEffect(() => {
     if (link.loc === 'simulated' || link.loc === 'real') setKind(link.loc);
   }, [link.loc, setKind]);
+
+  // Deep links de pruebas del tour en vivo (solo dev).
+  const { simulator, simStops } = location;
+  useEffect(() => {
+    if (!__DEV__ || !link.sim) return;
+    const cmd = link.sim;
+    if (cmd === 'play') simulator.play();
+    else if (cmd === 'pause') simulator.pause();
+    else if (cmd === 'x1') simulator.setSpeed(1);
+    else if (cmd === 'x10') simulator.setSpeed(10);
+    else if (/^stop\d+$/.test(cmd)) {
+      const live = useTourStore.getState().live;
+      const i = Number(cmd.slice(4));
+      const st = live ? [...live.tour.stops].sort((a, b) => a.sort_order - b.sort_order)[i - 1] : simStops[i - 1];
+      if (st) simulator.seekToPoint(st.lat, st.lng, 15);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link.sim, link.n]);
 
   const members = useMemo(
     () => new Map<string, AvatarPerson>((overview.data?.members ?? []).map((m) => [m.id, m])),
@@ -209,6 +229,34 @@ export default function NowTab() {
     const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
     if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
   };
+
+  useEffect(() => {
+    if (!__DEV__ || !link.tour) return;
+    const t = useTourStore.getState();
+    const cmd = link.tour;
+    if (cmd === 'end') void t.finish();
+    else if (cmd === 'close') t.close();
+    else if (cmd === 'skip') {
+      const live = t.live;
+      const pending = live ? [...live.tour.stops].sort((a, b) => a.sort_order - b.sort_order).find((x) => !live.engine.visited[x.stop_id] && !live.engine.skipped.includes(x.stop_id)) : null;
+      if (pending) t.skip(pending.stop_id);
+    } else if (cmd === 'more') {
+      const c = t.card;
+      if (c && 'stopId' in c) void t.showLayer(c.stopId, c.kind === 'dwell' ? c.offer : 'more');
+    } else if (cmd === 'scout') void t.askScout(t.live?.engine.insideStopId ?? null);
+    else if (cmd.startsWith('clock:')) t.devShiftClock(Number(cmd.slice(6)) || 0);
+    else if (cmd.startsWith('nearby:')) {
+      // "Tour acá, ahora" sin el diálogo de duración (gasta una corrida real de generate_tour).
+      if (here) void startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min: Number(cmd.slice(7)) || 30 });
+    } else if (cmd === 'nearby-start') {
+      const j = useNearbyTourJob.getState().job;
+      if (j) void t.start({ tourId: j.tourId, tripId: j.tripId }).then((ok) => ok && useNearbyTourJob.getState().clear());
+    }
+    else if (cmd === 'start') {
+      if (tourBlock) void onStartTour(tourBlock);
+    } else void t.start({ tourId: cmd, tripId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link.tour, link.n, !!tourBlock]);
 
   const onCamera = () =>
     Alert.alert('Cámara', `Muy pronto: le vas a poder mostrar a ${SCOUT.name} lo que estás mirando y te cuenta qué es.`);
