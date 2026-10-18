@@ -1,0 +1,40 @@
+// "Nuevo tour" (planificador de tours, como "Nuevo viaje"): Contame → Lo que entendí (tour_interview, 1-4 rondas con
+// repreguntas) → Elegí tu recorrido (tour_variants) → generate_tour con la variante elegida. Al arrancar el armado,
+// vuelve a Ahora, donde la tarjeta muestra el progreso en vivo.
+import { Stack, useLocalSearchParams } from 'expo-router';
+import { useEffect } from 'react';
+import { BackHandler } from 'react-native';
+
+import { BriefStep } from '../../../features/newTour/BriefStep';
+import { useNewTourStore } from '../../../features/newTour/store';
+import { TellStep } from '../../../features/newTour/TellStep';
+import { VariantsStep } from '../../../features/newTour/VariantsStep';
+
+export default function NewTourScreen() {
+  const params = useLocalSearchParams<{ tripId?: string; lat?: string; lng?: string }>();
+  const phase = useNewTourStore((s) => s.phase);
+
+  useEffect(() => {
+    const lat = Number(params.lat);
+    const lng = Number(params.lng);
+    useNewTourStore.getState().init({ here: Number.isFinite(lat) && Number.isFinite(lng) && params.lat ? { lat, lng } : null, tripId: params.tripId ?? null });
+  }, [params.lat, params.lng, params.tripId]);
+
+  // Android: atrás vuelve de paso antes de salir.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      const s = useNewTourStore.getState();
+      if (s.phase === 'tell') return false;
+      s.back();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
+  return (
+    <>
+      <Stack.Screen options={{ title: 'Nuevo tour', headerBackButtonDisplayMode: 'minimal' }} />
+      {phase === 'brief' ? <BriefStep /> : phase === 'variants' ? <VariantsStep /> : <TellStep />}
+    </>
+  );
+}

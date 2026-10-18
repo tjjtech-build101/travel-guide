@@ -458,3 +458,13 @@ Sin migración: usa `agent_proposals` tal cual. Lo que falta del PRD 11 es el mo
 - **Voz**: entrevista conversacional de 3-6 intercambios con resumen y confirmación antes de `generate_tour`; nunca dejar afuera un lugar pedido. En el tour: si la respuesta no está en `facts`, `research` en el momento (nunca "no sé"); `research_ready` se cuenta entero.
 - **`research`**: verifica citas en código contra la página (Claude solo si no se puede bajar), hasta 5 búsquedas, respuesta hasta ~130 palabras.
 - **Observabilidad**: cada investigación profunda queda en `agent_jobs` con `kind='enrich_stop'` (resultado o error).
+
+---
+
+## Planificador de tours (rápido y detallado) — en código
+
+- **Dos formas de armar un tour.** *Rápido*: la hoja "Tour acá, ahora" pide solo duración y "algo en especial" (va como `notes`, que el generador interpreta) y llama `generate_tour`; en el tour se ajusta con el Scout. *Detallado*: pantalla `/tours/new` (como "Nuevo viaje"): Contame → Lo que entendí (rondas) → Elegí tu recorrido → `generate_tour` con la variante.
+- **`tour_interview`** (nueva, síncrona, Claude): `{start_lat, start_lng, duration_min?, trip_id?, block_id?, participant_ids?, start_at?, conversation, round 1-4}` → `TourInterviewResult {summary, understood: TourUnderstanding, context[], nearby[], questions: TourInterviewQuestion[] (0-4), done, round, coverage}`. Ronda 1: lo básico; 2-4: repreguntas. Usa el brief del grupo y los lugares con historia cerca (Wikipedia + place_library). Tipos en `packages/shared/src/tourPlanner.ts`.
+- **`tour_variants`** (nueva, síncrona): `{…mismo punto de partida, conversation, understanding?}` → `TourVariantsResult {variants: TourVariant[]}` (2-3: recomendado · joyas · cierre con vista o tema a fondo), con paradas reales, `est_duration_min`, `walk_m`, pros/contras, `must_included`/`must_missing` y una `recommended`. Usa la misma preparación que `generate_tour` (`prepareTour`).
+- **`generate_tour`** acepta `variant_stops[] {name, lat, lng, google_place_id?, wikidata_id?}` (máx. 15): esas paradas son el recorrido (entran como pedidas, el director no las cambia). `understandingToTourInput()` pasa lo entendido a los campos de `generate_tour`.
+- **Voz**: rápido (1-2 preguntas y arma) o detallado (entrevista → `tour_variants` → elige → `generate_tour` con `variant_stops`).

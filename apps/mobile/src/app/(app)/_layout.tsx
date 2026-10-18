@@ -51,6 +51,7 @@ function AppStack() {
       {/* PRD 02 · sheets del Plan (detalle/edición, crear, propuestas, traer del banco). */}
       <Stack.Screen name="plan/block/[blockId]" options={PLAN_SHEET} />
       <Stack.Screen name="plan/new" options={PLAN_SHEET} />
+      <Stack.Screen name="tours/new" options={{ title: 'Nuevo tour', headerBackTitle: 'Atrás' }} />
       <Stack.Screen name="plan/proposals" options={PLAN_SHEET} />
       <Stack.Screen name="plan/bank" options={PLAN_SHEET} />
     </Stack>

@@ -665,7 +665,7 @@ const distinctUrls = (facts: Fact[]) => new Set(facts.filter((f) => f.verified).
 
 const HAS_INTERIOR: PlaceKind[] = ['church', 'museum', 'theater', 'market', 'building'];
 
-const KIND_LABEL: Record<PlaceKind, string> = {
+export const KIND_LABEL: Record<PlaceKind, string> = {
   plaza: 'plaza',
   church: 'iglesia',
   museum: 'museo',
@@ -713,12 +713,16 @@ export type ComposedTour = {
   missingMust: string[];
 };
 
-type Keyed = RawCandidate & { key: string; kind: PlaceKind; exteriorOnly: boolean; interior: boolean; score: number; dwell: number; must: boolean };
+export type Keyed = RawCandidate & { key: string; kind: PlaceKind; exteriorOnly: boolean; interior: boolean; score: number; dwell: number; must: boolean };
 
-export async function composeTour(
+/**
+ * Primera mitad del armado (sin LLM caro): brief del grupo, pedido libre, candidatos reales, lugares pedidos, puntaje y
+ * el problema de ruta listo. La usan composeTour (generate_tour) y tour_variants (variantes para elegir).
+ */
+export async function prepareTour(
   args: { input: ToolInput<'generate_tour'>; brief: TourBrief; progress: (text: string) => void; startedAt: number },
   deps: TourDeps,
-): Promise<ComposedTour> {
+) {
   const { input, brief, progress } = args;
   const budgetMs = deps.budgetMs ?? 270_000;
   const timeLeft = () => budgetMs - (Date.now() - args.startedAt);
@@ -821,6 +825,18 @@ export async function composeTour(
     }
   }
   if (missingMust.length) progress(`No encontré ${missingMust.join(', ')} cerca: si es otro nombre, decímelo y lo sumo`);
+
+  // Variante elegida en tour_variants: sus paradas SON el recorrido (entran como pedidas; el orden lo decide la ruta).
+  const fromVariant = !!input.variant_stops?.length;
+  for (const v of input.variant_stops ?? []) {
+    const hit = all.find((o) => distanceMeters(o, v) <= 60 && ((v.google_place_id && o.google_place_id === v.google_place_id) || mustMatchScore(o.name, v.name) >= 0.45));
+    if (hit) mustSet.add(hit);
+    else {
+      const c: RawCandidate = { source: 'google', google_place_id: v.google_place_id ?? null, wikidata_id: v.wikidata_id ?? null, name: v.name, lat: v.lat, lng: v.lng, interests: interestsForName(v.name), facts: [] };
+      all.push(c);
+      mustSet.add(c);
+    }
+  }
   // Fuera del radio solo queda lo que pidieron por nombre (hasta 4 km).
   all = all.filter((c) => mustSet.has(c) || distanceMeters(start, c) <= radius * 1.25);
 
@@ -896,8 +912,20 @@ export async function composeTour(
     maxWalkM,
     startMinuteOfWeek,
   };
-  const maxStops = input.mode === 'explorer' ? 20 : targetStops(input.duration_min, group.pace);
-  const budget = input.mode === 'explorer' ? input.duration_min * 3 : input.duration_min;
+  const maxStops = fromVariant ? input.variant_stops!.length : input.mode === 'explorer' ? 20 : targetStops(input.duration_min, group.pace);
+  const budget = input.mode === 'explorer' ? input.duration_min * 3 : fromVariant ? input.duration_min * 1.15 : input.duration_min;
+  return { input, brief, progress, timeLeft, usage, stats, group, audience, context, cfg, city, country, start, mustNames, mustSet, missingMust, radius, keyed, byKey, end, lastKey, routeCand, baseProblem, maxStops, budget };
+}
+
+export type PreparedTour = Awaited<ReturnType<typeof prepareTour>>;
+
+export async function composeTour(
+  args: { input: ToolInput<'generate_tour'>; brief: TourBrief; progress: (text: string) => void; startedAt: number },
+  deps: TourDeps,
+): Promise<ComposedTour> {
+  const prep = await prepareTour(args, deps);
+  const { input, brief, progress, timeLeft, usage, stats, group, context, cfg, city, country, start, mustNames, mustSet, missingMust, keyed, byKey, end, lastKey, routeCand, baseProblem, maxStops, budget } = prep;
+  let audience = prep.audience;
   let plan: RoutePlan = planRoute({ ...baseProblem, budgetMin: budget, maxStops, candidates: keyed.map((c) => routeCand(c)) });
   if (plan.keys.length < 3) plan = planRoute({ ...baseProblem, budgetMin: budget * 1.3, maxStops, candidates: keyed.map((c) => routeCand(c)) });
   if (plan.keys.length < 3) {
@@ -1071,7 +1099,8 @@ export async function composeTour(
 
   // Swaps del director (máx. 3, solo keys válidas) → se re-rutea con esas paradas como obligatorias.
   let finalPlan = plan;
-  const swaps = (director?.swaps ?? []).filter((s) => inRoute.has(s.remove_key) && byKey.has(s.add_key) && !inRoute.has(s.add_key)).slice(0, 3);
+  // Si la persona eligió una variante, el director no cambia paradas (las eligió ella).
+  const swaps = (input.variant_stops?.length ? [] : (director?.swaps ?? [])).filter((s) => inRoute.has(s.remove_key) && byKey.has(s.add_key) && !inRoute.has(s.add_key)).slice(0, 3);
   if (swaps.length) {
     const keys = new Set(plan.keys);
     for (const s of swaps) {
