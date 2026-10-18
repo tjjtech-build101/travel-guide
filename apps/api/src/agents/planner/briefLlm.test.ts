@@ -24,25 +24,25 @@ type Q = BriefOutputT['questions'][number];
 const understood = (over: Partial<BriefOutputT['understood']> = {}): BriefOutputT['understood'] => ({
   destinations: [{ city: 'Montevideo', country: 'Uruguay' }, { city: 'Buenos Aires', country: 'Argentina' }],
   start_date: '2026-10-24',
-  end_date: null,
+  end_date: '',
   days: 5,
-  travelers: null,
+  travelers: 0,
   party: 'friends',
   names: ['Sofi'],
   interests: [{ tag: 'comida', weight: 7 }, { tag: 'arte', weight: 3 }],
   must: ['Mercado del Puerto'],
   avoid: ['boliches'],
-  budget: null,
-  pace: null,
-  first_time: null,
+  budget: '',
+  pace: '',
+  first_time: 'unknown',
   kids_ages: [],
-  arrival: null,
-  departure: null,
-  lodging_booked: null,
+  arrival: '',
+  departure: '',
+  lodging_booked: '',
   notes: [],
-  trip_kind: null,
+  trip_kind: '',
   anchors: [],
-  origin: null,
+  origin: '',
   ...over,
 });
 
@@ -61,7 +61,7 @@ const q = (id: string, over: Partial<Q> = {}): Q => ({
   ...over,
 });
 
-const out = (over: Partial<BriefOutputT> = {}): BriefOutputT => ({ summary: 'x', understood: understood(), coverage: [], questions: [], done: false, ...over });
+const out = (over: Partial<BriefOutputT> = {}): BriefOutputT => ({ summary: 'x', understood: understood(), coverage: '', questions: [], done: false, ...over });
 
 function deps(llm: Partial<BriefLLM>, warm: BriefDeps['warm'] = null, research: ResearchFn | null = null): BriefDeps & ShapesDeps {
   return {
@@ -173,7 +173,7 @@ describe('trip_brief', () => {
     const r = await tripBrief({ conversation: [{ role: 'user', text: 'quiero viajar' }], round: 3 }, ctxFor(new FakeDb(), U.juan), deps(
       {
         brief: async () => ({
-          value: out({ summary: 'Contame a dónde.', understood: understood({ destinations: [], start_date: null, days: null }), questions: [q('where', { dimension: 'other', kind: 'text', options: [] })] }),
+          value: out({ summary: 'Contame a dónde.', understood: understood({ destinations: [], start_date: '', days: 0 }), questions: [q('where', { dimension: 'other', kind: 'text', options: [] })] }),
           usage: emptyUsage(),
         }),
       },
@@ -207,7 +207,7 @@ describe('trip_brief', () => {
   it('temporada y feriados solo si se saben', () => {
     expect(seasonLine({ city: 'Lisboa', country: 'Portugal' }, '2026-07-10')).toBe('En julio en Lisboa es verano.');
     expect(seasonLine({ city: 'Ciudad de México', country: 'México' }, '2026-07-10')).toBeNull();
-    expect(seasonLine({ city: 'X', country: null }, '2026-07-10')).toBeNull();
+    expect(seasonLine({ city: 'X', country: '' }, '2026-07-10')).toBeNull();
     expect(holidayLines('2026-12-20', '2027-01-02')).toHaveLength(2);
     expect(holidayLines('2026-10-17', '2026-10-24')).toEqual([]);
   });
@@ -236,12 +236,12 @@ describe('preguntas ya hechas en la conversación', () => {
 // ───────────────────────── Caso real: Mundial de Rugby 2027
 
 const mundialStory = 'Me quiero ir a Australia con amigos a ver el mundial de rugby de 2027';
-const mundialAnchor = { id: 'mundial-rugby-2027', name: 'Mundial de Rugby 2027', kind: 'sports' as const, city: null, country: 'Australia', date: null, tickets: 'unknown' as const, note: null };
+const mundialAnchor = { id: 'mundial-rugby-2027', name: 'Mundial de Rugby 2027', kind: 'sports' as const, city: '', country: 'Australia', date: '', tickets: 'unknown' as const, note: '' };
 const mundialUnderstood = (over: Partial<BriefOutputT['understood']> = {}) =>
   understood({
     destinations: [{ city: 'Australia', country: 'Australia' }],
-    start_date: null,
-    days: null,
+    start_date: '',
+    days: 0,
     names: [],
     interests: [],
     must: [],
@@ -252,8 +252,8 @@ const mundialUnderstood = (over: Partial<BriefOutputT['understood']> = {}) =>
   });
 
 const researchedAnchors: TripAnchor[] = [
-  { id: 'arg-g1', name: 'Argentina vs Australia (grupos)', kind: 'sports', city: 'Perth', country: 'Australia', date: '2027-10-02', time: '19:00', venue: 'Perth Stadium', tickets: 'want', researched: true, sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }], note: null },
-  { id: 'arg-g2', name: 'Argentina vs Samoa (grupos)', kind: 'sports', city: 'Sydney', country: 'Australia', date: '2027-10-09', time: '17:00', venue: 'Accor Stadium', tickets: 'want', researched: true, sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }], note: null },
+  { id: 'arg-g1', name: 'Argentina vs Australia (grupos)', kind: 'sports', city: 'Perth', country: 'Australia', date: '2027-10-02', time: '19:00', venue: 'Perth Stadium', tickets: 'want', researched: true, sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }], note: '' },
+  { id: 'arg-g2', name: 'Argentina vs Samoa (grupos)', kind: 'sports', city: 'Sydney', country: 'Australia', date: '2027-10-09', time: '17:00', venue: 'Accor Stadium', tickets: 'want', researched: true, sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }], note: '' },
   { id: 'cuartos', name: 'Cuartos de final', kind: 'sports', city: 'Sydney', country: 'Australia', date: '2027-10-23', time: null, venue: null, tickets: 'want', researched: true, sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }], note: 'El cruce de cuartos depende de cómo termine el grupo.' },
 ];
 
@@ -290,7 +290,7 @@ describe('entrevista en rondas: Mundial de Rugby 2027', () => {
             value: out({
               summary: 'Entendí: Mundial de Rugby 2027 en Australia con amigos.',
               understood: mundialUnderstood(),
-              coverage: [{ dimension: 'anchor', status: 'unknown' }, { dimension: 'travelers', status: 'unknown' }],
+              coverage: 'anchor=unknown, travelers=unknown',
               questions: [
                 q('team', { dimension: 'anchor', text: '¿A quién siguen en el Mundial?', options: [{ value: 'pumas', label: 'Los Pumas' }, { value: 'teros', label: 'Los Teros' }, { value: 'neutral', label: 'Neutrales' }], default_values: ['pumas'] }),
                 q('phase', { dimension: 'anchor', text: '¿Qué parte del Mundial quieren ver?', options: [{ value: 'groups', label: 'Grupos siguiendo al equipo' }, { value: 'qf_final', label: 'De cuartos a la final' }, { value: 'final', label: 'Solo la final' }] }),

@@ -1,6 +1,8 @@
 // Prompts y esquemas de la entrevista (trip_brief) y de las formas del viaje (trip_shapes) · PRD 31 v2.
 // Lo estático (BRIEF_SYSTEM, SHAPES_SYSTEM, con los ejemplos few-shot) no lleva nada variable: el prefijo se cachea.
-// Esquemas de salida estructurada: nada de min/max/regex ni records (se validan/convierten en briefLlm.ts).
+// Esquemas de salida estructurada: nada de min/max/regex ni records, y SIN enums (los valores van en la descripción y
+// se validan en briefLlm.ts) y SIN nullables ("" / 0 = no se sabe): con enums y anyOf anidados la gramática compilada
+// superaba el límite de la API (400 "compiled grammar is too large").
 import { INTEREST_TAGS, TRIP_DIMENSIONS, TRIP_KINDS, type TripAnchor, type TripUnderstanding } from '@build101/shared';
 import { z } from 'zod';
 import { nextSaturday, weekdayLong } from '../dates';
@@ -12,58 +14,58 @@ import { SkeletonLeg, SkeletonTransfer } from '../schemas';
 export const BriefAnchor = z.object({
   id: z.string().describe('Slug corto ("pumas-grupos", "final", "casamiento")'),
   name: z.string().describe('Qué es, con el equipo/fase que dijo: "Partidos de los Pumas en el Mundial de Rugby 2027"'),
-  kind: z.enum(['sports', 'concert', 'festival', 'wedding', 'conference', 'other']),
-  city: z.string().nullable(),
-  country: z.string().nullable(),
-  date: z.string().nullable().describe('YYYY-MM-DD SOLO si el usuario la dijo; si no, null (se investiga después)'),
-  tickets: z.enum(['have', 'want', 'watch_out', 'unknown']),
-  note: z.string().nullable().describe('Lo que dijo de equipo, fase o entradas ("siguen a los Pumas desde grupos")'),
+  kind: z.string().describe('Uno de: sports | concert | festival | wedding | conference | other'),
+  city: z.string(),
+  country: z.string(),
+  date: z.string().describe('YYYY-MM-DD SOLO si el usuario la dijo; si no, null (se investiga después)'),
+  tickets: z.string().describe('Uno de: have | want | watch_out | unknown'),
+  note: z.string().describe('Lo que dijo de equipo, fase o entradas ("siguen a los Pumas desde grupos")'),
 });
 
 export const BriefUnderstood = z.object({
-  destinations: z.array(z.object({ city: z.string().describe('Ciudad en su idioma original'), country: z.string().nullable() })),
-  start_date: z.string().nullable().describe('YYYY-MM-DD solo si el usuario dio la fecha (o se deduce sin dudas)'),
-  end_date: z.string().nullable(),
-  days: z.number().nullable().describe('Cantidad de días si la dijo ("una semana" = 7)'),
-  travelers: z.number().nullable(),
-  party: z.enum(['solo', 'couple', 'friends', 'family']).nullable(),
+  destinations: z.array(z.object({ city: z.string().describe('Ciudad en su idioma original'), country: z.string() })),
+  start_date: z.string().describe('YYYY-MM-DD solo si el usuario dio la fecha (o se deduce sin dudas)'),
+  end_date: z.string(),
+  days: z.number().describe('Cantidad de días si la dijo ("una semana" = 7); 0 si no'),
+  travelers: z.number().describe('Cantidad de viajeros; 0 si no se sabe'),
+  party: z.string().describe('Uno de: solo | couple | friends | family'),
   names: z.array(z.string()).describe('Nombres propios mencionados, sin el organizador'),
-  interests: z.array(z.object({ tag: z.enum(INTEREST_TAGS), weight: z.number().describe('1-5') })),
+  interests: z.array(z.object({ tag: z.string().describe(`Uno de: ${INTEREST_TAGS.join(' | ')}`), weight: z.number().describe('1-5') })),
   must: z.array(z.string()).describe('Lo que dijo que sí o sí (lugares o cosas)'),
   avoid: z.array(z.string()).describe('Lo que dijo que ni loco'),
-  budget: z.enum(['low', 'mid', 'high', 'no_limit']).nullable(),
-  pace: z.enum(['relaxed', 'balanced', 'intense']).nullable(),
-  first_time: z.boolean().nullable(),
+  budget: z.string().describe('Uno de: low | mid | high | no_limit'),
+  pace: z.string().describe('Uno de: relaxed | balanced | intense'),
+  first_time: z.string().describe('yes | no | unknown (primera vez en el destino)'),
   kids_ages: z.array(z.string()),
-  arrival: z.string().nullable().describe('Texto libre de cómo/cuándo llegan, si lo dijo'),
-  departure: z.string().nullable(),
-  lodging_booked: z.string().nullable().describe('Dónde se alojan si ya reservaron'),
+  arrival: z.string().describe('Texto libre de cómo/cuándo llegan, si lo dijo'),
+  departure: z.string(),
+  lodging_booked: z.string().describe('Dónde se alojan si ya reservaron'),
   notes: z.array(z.string()).describe('Lo demás que importa: transporte elegido, extras, presupuesto en números'),
-  trip_kind: z.enum(TRIP_KINDS).nullable().describe('event si el viaje gira alrededor de algo con fecha (partido, recital, casamiento)'),
+  trip_kind: z.string().describe(`Uno de: ${TRIP_KINDS.join(' | ')}. event si el viaje gira alrededor de algo con fecha (partido, recital, casamiento)`),
   anchors: z.array(BriefAnchor).describe('El motivo con fecha del viaje, tal como lo dijo el usuario'),
-  origin: z.string().nullable().describe('Ciudad/país desde donde salen, si lo dijo'),
+  origin: z.string().describe('Ciudad/país desde donde salen, si lo dijo'),
 });
 
 export const BriefQuestion = z.object({
   id: z.string().describe('Slug corto y estable para esta entrevista ("team", "phase", "tickets", "group_size")'),
-  dimension: z.enum(TRIP_DIMENSIONS),
+  dimension: z.string().describe(`Uno de: ${TRIP_DIMENSIONS.join(' | ')}`),
   text: z.string().describe('Pregunta corta en voseo, con las palabras del usuario y el destino'),
   why: z.string().describe('Por qué cambia el plan (una línea)'),
-  kind: z.enum(['single', 'multi', 'text', 'date']),
+  kind: z.string().describe('Uno de: single | multi | text | date'),
   options: z.array(z.object({ value: z.string(), label: z.string() })).describe('2-6 chips concretos del lugar (vacío solo si kind es text o date)'),
   default_values: z.array(z.string()).describe('value(s) por defecto sensatos; vacío si no hay'),
   optional: z.boolean(),
 });
 
 export const BriefCoverage = z.object({
-  dimension: z.enum(TRIP_DIMENSIONS),
-  status: z.enum(['known', 'assumed', 'unknown']),
+  dimension: z.string().describe(`Uno de: ${TRIP_DIMENSIONS.join(' | ')}`),
+  status: z.string().describe('Uno de: known | assumed | unknown'),
 });
 
 export const BriefOutput = z.object({
   summary: z.string().describe('1-2 frases en voseo: lo que entendí'),
   understood: BriefUnderstood,
-  coverage: z.array(BriefCoverage).describe('Una entrada por dimensión relevante para ESTE viaje'),
+  coverage: z.string().describe('Una entrada por dimensión relevante para ESTE viaje, separadas por coma: "dates=known, budget=unknown, pace=assumed"'),
   questions: z.array(BriefQuestion).describe('0-4 para esta ronda, ordenadas por cuánto cambian el plan'),
   done: z.boolean().describe('true si ya sé lo suficiente para proponer las formas del viaje'),
 });
@@ -98,7 +100,7 @@ Lo que entendiste (understood):
 - anchors: el motivo con fecha, como lo dijo el usuario, con el equipo, la fase y las entradas en name/note/tickets. date SOLO si el usuario la dijo (aunque la sepas de memoria: se investiga después con fuentes). Si todavía no dijo a quién sigue o qué fase, igual creá el ancla del evento y preguntalo.
 - origin: desde dónde salen, si lo dijo. notes: transporte elegido, extras, presupuesto en números y todo lo demás que importa.
 
-coverage: para cada dimensión que importa en ESTE tipo de viaje, known (lo dijo), assumed (lo supusiste con confianza) o unknown (falta).
+coverage: un texto "dimensión=estado" separado por comas, para cada dimensión que importa en ESTE tipo de viaje: known (lo dijo), assumed (lo supusiste con confianza) o unknown (falta). Ej: "anchor=known, dates=assumed, budget=unknown".
 
 Preguntas (máximo 4 por ronda, mejor menos):
 - Generadas para ESTE viaje: usá las palabras del usuario y el destino, con opciones concretas del lugar (nombres reales de equipos, fases, regiones, excursiones), nunca genéricas tipo "Cultura / Naturaleza / Gastronomía".

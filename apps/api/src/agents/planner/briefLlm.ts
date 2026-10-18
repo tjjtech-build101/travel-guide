@@ -11,6 +11,7 @@ import {
   combineInterestWeights,
   INTEREST_TAGS,
   TRIP_DIMENSIONS,
+  TRIP_KINDS,
   type InterestTag,
   type ToolInput,
   type TripAnchor,
@@ -136,7 +137,7 @@ export function defaultBriefDeps(): BriefDeps {
     },
     today: () => todayIso(),
     warm: (admin, destinations) => runInBackground('trip_brief/warm', warmCatalogs(admin, destinations)),
-    timeoutMs: 15_000,
+    timeoutMs: 30_000, // ronda 1 real con Opus 5.5 effort low: ~15 s
     research: (u, opts) => researchAnchors(u, opts),
     warmAnchors: true,
   };
@@ -145,7 +146,7 @@ export function defaultBriefDeps(): BriefDeps {
 export function defaultShapesDeps(): ShapesDeps {
   // Peor caso ~80 s (re-extraer 12 + investigar 25 + formas 45); lo normal es ~45: lo entendido sale de la cache de
   // trip_brief y la investigación ya arrancó en segundo plano cuando terminó la entrevista.
-  return { ...defaultBriefDeps(), timeoutMs: 45_000, understandTimeoutMs: 12_000, anchorsTimeoutMs: 25_000 };
+  return { ...defaultBriefDeps(), timeoutMs: 90_000, understandTimeoutMs: 25_000, anchorsTimeoutMs: 30_000 };
 }
 
 // ───────────────────────── Precalentado del catálogo
@@ -261,6 +262,25 @@ const slugId = (s: string) =>
     .slice(0, 40);
 
 /** Anclas que dijo el usuario: nunca investigadas acá (sin fuentes, sin hora ni sede; fecha solo si es ISO). */
+
+/** El esquema de salida no lleva enums (límite de gramática de la API): los valores se validan acá. */
+function oneOf<T extends string>(v: string | null | undefined, allowed: readonly T[]): T | null {
+  const x = (v ?? '').trim().toLowerCase();
+  return (allowed as readonly string[]).includes(x) ? (x as T) : null;
+}
+const ANCHOR_KIND_VALUES = ['sports', 'concert', 'festival', 'wedding', 'conference', 'other'] as const;
+const TICKETS_VALUES = ['have', 'want', 'watch_out', 'unknown'] as const;
+const PARTY_VALUES = ['solo', 'couple', 'friends', 'family'] as const;
+const BUDGET_VALUES = ['low', 'mid', 'high', 'no_limit'] as const;
+const PACE_VALUES = ['relaxed', 'balanced', 'intense'] as const;
+const QUESTION_KIND_VALUES = ['single', 'multi', 'text', 'date'] as const;
+/** "yes" | "no" | "unknown" (o booleano, por compatibilidad) → boolean | null. */
+function firstTime(v: unknown): boolean | null {
+  if (typeof v === 'boolean') return v;
+  const x = String(v ?? '').trim().toLowerCase();
+  return x === 'yes' || x === 'si' || x === 'sí' || x === 'true' ? true : x === 'no' || x === 'false' ? false : null;
+}
+
 export function normalizeBriefAnchors(anchors: BriefOutputT['understood']['anchors'] | null | undefined): TripAnchor[] {
   const out: TripAnchor[] = [];
   const seen = new Set<string>();
@@ -273,13 +293,13 @@ export function normalizeBriefAnchors(anchors: BriefOutputT['understood']['ancho
     out.push({
       id,
       name,
-      kind: a.kind ?? 'other',
+      kind: oneOf(a.kind, ANCHOR_KIND_VALUES) ?? 'other',
       city: clip(a.city, 120),
       country: clip(a.country, 80),
       date: isIsoDate(a.date) ? a.date : null,
       time: null,
       venue: null,
-      tickets: a.tickets ?? 'unknown',
+      tickets: oneOf(a.tickets, TICKETS_VALUES) ?? 'unknown',
       researched: false,
       sources: [],
       note: clip(a.note, 400),
@@ -290,8 +310,9 @@ export function normalizeBriefAnchors(anchors: BriefOutputT['understood']['ancho
 
 export function normalizeUnderstanding(u: BriefOutputT['understood'], input: Pick<ToolInput<'trip_brief'>, 'start_date' | 'end_date'>): TripUnderstanding {
   const interests: Partial<Record<InterestTag, number>> = {};
-  for (const { tag, weight } of u.interests ?? []) {
-    if (!(INTEREST_TAGS as readonly string[]).includes(tag)) continue;
+  for (const { tag: rawTag, weight } of u.interests ?? []) {
+    const tag = oneOf(rawTag, INTEREST_TAGS);
+    if (!tag) continue;
     const w = Math.min(5, Math.max(1, Math.round(Number(weight) || 3)));
     interests[tag] = Math.max(interests[tag] ?? 0, w);
   }
@@ -307,20 +328,20 @@ export function normalizeUnderstanding(u: BriefOutputT['understood'], input: Pic
     end_date: input.end_date ?? date(u.end_date),
     days: pos(u.days),
     travelers: pos(u.travelers),
-    party: u.party ?? null,
+    party: oneOf(u.party, PARTY_VALUES),
     names: nonEmpty(u.names),
     interests,
     must: nonEmpty(u.must),
     avoid: nonEmpty(u.avoid),
-    budget: u.budget ?? null,
-    pace: u.pace ?? null,
-    first_time: u.first_time ?? null,
+    budget: oneOf(u.budget, BUDGET_VALUES),
+    pace: oneOf(u.pace, PACE_VALUES),
+    first_time: firstTime(u.first_time),
     kids_ages: nonEmpty(u.kids_ages),
     arrival: u.arrival?.trim() || null,
     departure: u.departure?.trim() || null,
     lodging_booked: u.lodging_booked?.trim() || null,
     notes: nonEmpty(u.notes),
-    trip_kind: u.trip_kind ?? (anchors.length ? 'event' : null),
+    trip_kind: oneOf(u.trip_kind, TRIP_KINDS) ?? (anchors.length ? 'event' : null),
     anchors,
     origin: clip(u.origin, 120),
   };
@@ -371,11 +392,26 @@ const SINGLE_SLOT = new Set<string>(['dates', 'duration', 'travelers', 'origin',
 
 export type Coverage = Partial<Record<TripDimension, 'known' | 'assumed' | 'unknown'>>;
 
-export function normalizeCoverage(cov: BriefOutputT['coverage'] | null | undefined, u: TripUnderstanding, asked: AskedQuestion[]): Coverage {
+/** coverage del modelo: texto "dates=known, budget=unknown" (v2: un string, no un array, por el límite de gramática). */
+export function parseCoverage(cov: string | { dimension: string; status: string }[] | null | undefined): { dimension: string; status: string }[] {
+  if (Array.isArray(cov)) return cov;
+  return (cov ?? '')
+    .split(/[,;\n]/)
+    .map((p) => p.split(/[=:]/).map((x) => x.trim()))
+    .filter((p) => p.length === 2 && p[0] && p[1])
+    .map(([dimension, status]) => ({ dimension, status }));
+}
+
+export function normalizeCoverage(
+  cov: string | { dimension: string; status: string }[] | null | undefined,
+  u: TripUnderstanding,
+  asked: AskedQuestion[],
+): Coverage {
   const out: Coverage = {};
-  for (const c of cov ?? []) {
-    if (!(TRIP_DIMENSIONS as readonly string[]).includes(c.dimension)) continue;
-    if (c.status === 'known' || c.status === 'assumed' || c.status === 'unknown') out[c.dimension] = c.status;
+  for (const c of parseCoverage(cov)) {
+    const dim = oneOf(c.dimension, TRIP_DIMENSIONS);
+    const status = oneOf(c.status, ['known', 'assumed', 'unknown'] as const);
+    if (dim && status) out[dim] = status;
   }
   for (const d of TRIP_DIMENSIONS) if (alreadyKnown(d, u)) out[d] = 'known';
   // Lo que ya se preguntó y se contestó cuenta como sabido (aunque el modelo diga otra cosa).
@@ -412,7 +448,7 @@ export function normalizeQuestions(
     if (out.length >= 4) break;
     const text = q.text?.trim();
     if (!text) continue;
-    const dimension: TripDimension = (TRIP_DIMENSIONS as readonly string[]).includes(q.dimension) ? q.dimension : 'other';
+    const dimension: TripDimension = oneOf(q.dimension, TRIP_DIMENSIONS) ?? 'other';
     const id = slugId(q.id || dimension) || dimension;
     if (askedIds.has(id) || askedTexts.has(questionKey(text))) continue;
     if (out.some((x) => x.id === id || questionKey(x.text) === questionKey(text))) continue;
@@ -423,7 +459,7 @@ export function normalizeQuestions(
       .map((o) => ({ value: o.value?.trim() ?? '', label: o.label?.trim() ?? '' }))
       .filter((o) => o.value && o.label && !values.has(o.value) && values.add(o.value))
       .slice(0, 6);
-    let kind = q.kind;
+    let kind = oneOf(q.kind, QUESTION_KIND_VALUES) ?? (q.options?.length ? 'single' : 'text');
     if ((kind === 'single' || kind === 'multi') && options.length < 2) kind = 'text';
     const valid = new Set(options.map((o) => o.value));
     const defaults = (q.default_values ?? []).map((v) => v.trim()).filter((v) => v && (!options.length || valid.has(v)));
@@ -689,7 +725,7 @@ export async function tripBrief(input: ToolInput<'trip_brief'>, ctx: ToolCtx, de
     round,
     asked,
   });
-  const timeoutMs = round <= 1 ? deps.timeoutMs : Math.max(deps.timeoutMs, Math.min(2 * deps.timeoutMs, 30_000));
+  const timeoutMs = round <= 1 ? deps.timeoutMs : Math.max(deps.timeoutMs, 45_000);
   const { value } = await withTimeout(timeoutMs, 'La entrevista', (signal) =>
     deps.llm.brief({ system: BRIEF_SYSTEM, user, config: briefConfig(round), signal }),
   );
@@ -737,7 +773,7 @@ async function understandingForShapes(input: ToolInput<'trip_shapes'>, ctx: Tool
   const hit = cachedUnderstanding(understandingKey(ctx.userId, input));
   if (hit) return hit;
   try {
-    const { value } = await withTimeout(deps.understandTimeoutMs ?? 12_000, 'Entender el viaje', (signal) =>
+    const { value } = await withTimeout(deps.understandTimeoutMs ?? 25_000, 'Entender el viaje', (signal) =>
       deps.llm.brief({ system: BRIEF_SYSTEM, user: renderBriefUser({ ...base, ask: 'understand', round: 3 }), config: BRIEF_CONFIG, signal }),
     );
     const u = normalizeUnderstanding(value.understood, input);
@@ -768,7 +804,7 @@ export async function tripShapes(input: ToolInput<'trip_shapes'>, ctx: ToolCtx, 
   if (understanding && hasAnchors(understanding)) {
     if (deps.research) {
       try {
-        research = await deps.research(understanding, { today, timeoutMs: deps.anchorsTimeoutMs ?? 25_000 });
+        research = await deps.research(understanding, { today, timeoutMs: deps.anchorsTimeoutMs ?? 30_000 });
       } catch (err) {
         console.warn('[trip_shapes] investigación de anclas:', (err as Error).message);
       }
