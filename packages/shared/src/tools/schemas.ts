@@ -285,7 +285,7 @@ export const PlanTripInput = z.object({
 
 // ---------- PRD 31 · planificador colaborativo ----------
 
-const PlannerConversation = z.array(PlanTripMessage).min(1).max(40);
+export const PlannerConversation = z.array(PlanTripMessage).min(1).max(40);
 
 export const TripBriefInput = z.object({
   trip_id: Id.optional(),
@@ -364,6 +364,11 @@ export const GenerateTourInput = z.object({
   finish: TourFinish.optional().describe('Cómo terminar si no hay end_point: con vista, comiendo, volviendo al inicio o donde sea'),
   must_include: z.array(z.string().min(1).max(120)).max(5).optional().describe('Lugares que sí o sí quieren ver (nombres)'),
   notes: z.string().max(500).optional().describe('Pedido libre de la persona ("algo con fantasmas", "nada de iglesias")'),
+  variant_stops: z
+    .array(z.object({ name: z.string().max(160), lat: z.number(), lng: z.number(), google_place_id: z.string().nullable().optional(), wikidata_id: z.string().nullable().optional() }))
+    .max(15)
+    .optional()
+    .describe('Paradas de la variante elegida en tour_variants: el tour se arma con estas (orden y textos los decide el generador)'),
 });
 
 // ---------- generate_indoor_tour · tour adentro de un lugar (museo, mercado, iglesia) ----------
@@ -376,6 +381,47 @@ export const GenerateIndoorTourInput = z.object({
   duration_min: z.number().int().min(15).max(120).default(45),
   language: z.string().default('es'),
   notes: z.string().max(500).optional().describe('Pedido libre ("lo más famoso", "para chicos", "solo la planta baja")'),
+});
+
+// ---------- tour_interview / tour_variants · planificador de tours (como el de viajes) ----------
+
+const TourBase = {
+  start_lat: z.number().min(-90).max(90),
+  start_lng: z.number().min(-180).max(180),
+  duration_min: z.number().int().min(15).max(240).optional().describe('Si la persona ya la dijo; si no, la entrevista la pregunta'),
+  trip_id: Id.optional(),
+  block_id: Id.optional(),
+  participant_ids: z.array(Id).optional(),
+  start_at: z.string().optional().describe('ISO datetime; default: ahora'),
+};
+
+// Laxo a propósito (viene de un LLM): el servidor lo sanea.
+export const TourUnderstandingInput = z.object({
+  duration_min: z.number().nullable().optional(),
+  must_include: z.array(z.string().max(160)).max(8).optional(),
+  avoid: z.array(z.string().max(120)).max(10).optional(),
+  themes: z.array(z.string().max(40)).max(10).optional(),
+  energy: z.string().nullable().optional(),
+  finish: z.string().nullable().optional(),
+  food_stop: z.boolean().nullable().optional(),
+  kids: z.array(z.string()).max(4).optional(),
+  indoor: z.string().nullable().optional(),
+  familiarity: z.string().nullable().optional(),
+  include_paid_entries: z.boolean().nullable().optional(),
+  storyline: z.boolean().nullable().optional(),
+  wishes: z.array(z.string().max(300)).max(10).optional(),
+});
+
+export const TourInterviewInput = z.object({
+  ...TourBase,
+  conversation: PlannerConversation.describe('Lo que contó la persona + preguntas/respuestas anteriores'),
+  round: z.number().int().min(1).max(4).optional().describe('Ronda (1-4): 1 = lo básico, 2-4 = repreguntas. Default 1.'),
+});
+
+export const TourVariantsInput = z.object({
+  ...TourBase,
+  conversation: PlannerConversation,
+  understanding: TourUnderstandingInput.optional().describe('Lo entendido en la última ronda de tour_interview'),
 });
 
 // ---------- tour_brief · entrevista previa al tour ----------

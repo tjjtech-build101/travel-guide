@@ -19,3 +19,4 @@ export * from './polyline';
 export * from './routeProgress';
 export * from './tourBrief';
 export * from './planner';
+export * from './tourPlanner';

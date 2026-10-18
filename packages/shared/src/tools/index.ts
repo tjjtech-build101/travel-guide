@@ -24,6 +24,8 @@ import {
   SearchPlacesInput,
   ShouldGenerateTourInput,
   TourBriefInput,
+  TourInterviewInput,
+  TourVariantsInput,
   TripBriefInput,
   TripShapesInput,
   UndoInput,
@@ -134,6 +136,16 @@ export const toolDefs = {
   choose_option: {
     description: 'Elige una de las opciones de un lugar del día (blocks.choice_group): confirma esa y manda las otras al banco de ideas.',
     input: ChooseOptionInput,
+  },
+  tour_interview: {
+    description:
+      'Planificador de tours, paso 1 (como trip_brief): lee lo que contó la persona + perfiles + lugares cerca y devuelve lo que entendió y 0-4 preguntas (rondas 1-4, con repreguntas). Síncrona.',
+    input: TourInterviewInput,
+  },
+  tour_variants: {
+    description:
+      'Planificador de tours, paso 2 (como trip_shapes): 2-3 recorridos posibles con paradas reales, minutos, km y pros/contras. La elegida va a generate_tour (variant_stops). Síncrona.',
+    input: TourVariantsInput,
   },
   tour_brief: {
     description:

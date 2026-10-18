@@ -301,7 +301,7 @@ export default function NowTab() {
       Alert.alert('Tour acá, ahora', `${SCOUT.name} ya te está armando un tour.`);
       return;
     }
-    // Hoja con duración + la entrevista (tour_brief): 0-3 preguntas según el contexto del grupo.
+    // Hoja con las dos formas: rápido (lo mínimo, se arma ya) o detallado (entrevista + recorridos para elegir).
     setTourSheet(true);
   };
 

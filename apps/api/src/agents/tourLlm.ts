@@ -133,7 +133,7 @@ export interface TourLLM {
 }
 
 /** Llamada con salida estructurada (output_config.format), sin herramientas. Prompt de sistema cacheado. */
-async function structured<S extends Parameters<typeof betaZodOutputFormat>[0]>(
+export async function structured<S extends Parameters<typeof betaZodOutputFormat>[0]>(
   schema: S,
   { system, user, config }: LlmCall,
   what: string,
