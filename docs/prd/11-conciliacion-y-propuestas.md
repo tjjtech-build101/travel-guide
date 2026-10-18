@@ -2,7 +2,7 @@
 nro: 11
 prd: "11 · Conciliación de preferencias + propuestas con diff"
 prioridad: P1
-estado: Por hacer
+estado: En curso
 carril: Cerebro y contenido
 tamano: L (2-4h)
 depende_de: "01, 04"

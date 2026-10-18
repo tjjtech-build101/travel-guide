@@ -158,6 +158,23 @@ export const RouteEtaInput = z.object({
 
 export const UndoInput = z.object({ undo_token: z.string().min(10) });
 
+// ---------- PRD 11 · decide_proposal ----------
+
+export const DecideProposalInput = z.object({
+  proposal_id: Id.optional().describe('La propuesta a decidir. Si no viene, se decide la pendiente más reciente del viaje (trip_id).'),
+  trip_id: Id.optional().describe('Solo si no viene proposal_id: decide la propuesta pendiente más reciente de este viaje'),
+  decision: z.enum(['accept', 'reject']),
+  note: z.string().max(500).optional(),
+});
+
+/** data de decide_proposal. `expired` = venció (24 h) o alguien tocó un bloque afectado: hay que regenerarla. */
+export type DecideProposalResult = {
+  proposal_id: string;
+  status: 'accepted' | 'rejected' | 'expired';
+  applied_block_ids: string[];
+  summary: string;
+};
+
 export const AddIdeaInput = BlockFields.extend({
   trip_id: Id,
   leg_id: Id,

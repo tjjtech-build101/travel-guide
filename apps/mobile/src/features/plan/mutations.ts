@@ -14,7 +14,9 @@ type ApplyResult = { mode: 'applied' | 'proposed'; block?: PlanBlock; proposal_i
 export function toolErrorMessage(e: unknown, fallback = 'No se pudo guardar. Probá de nuevo.'): string {
   if (e instanceof ToolCallError) {
     if (e.code === 'network_error') return 'Sin conexión: no se pudo guardar.';
-    if (e.code === 'forbidden' || e.code === 'invalid_input' || e.code === 'not_found' || e.code === 'already_undone') {
+    // PRD 11 (decide_proposal): proposal_decided / apply_failed / booked traen un mensaje para mostrar tal cual.
+    const readable = ['forbidden', 'invalid_input', 'not_found', 'already_undone', 'proposal_decided', 'apply_failed', 'booked'];
+    if (readable.includes(e.code)) {
       return e.message;
     }
   }

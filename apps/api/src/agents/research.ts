@@ -15,6 +15,8 @@ import type { ToolCtx } from '../tools/types';
 import { anthropicClient, PLANNER_MODEL, textOf, type AnyBlock } from './llm';
 import { addUsage, emptyUsage, type Usage } from './schemas';
 import { anthropicTourLlm, captureViaTool, type TourLlmConfig } from './tourLlm';
+import { fetchPageText } from '../google/pageText';
+import { quoteInText } from './tourCheck';
 import { renderVerifyUser, VERIFY_SYSTEM } from './tourPrompts';
 import { ResearchOutput, type ResearchOutputT } from './tourSchemas';
 
@@ -22,7 +24,7 @@ import { ResearchOutput, type ResearchOutputT } from './tourSchemas';
 const BUDGET_MS = 90_000;
 const MAX_FACTS = 8;
 
-export const RESEARCH_Q_SYSTEM = `Sos el investigador de una app de viajes rioplatense. Te hacen UNA pregunta concreta (un año, un origen, quién, por qué, una curiosidad) sobre un lugar o tema. Buscala con web_search y web_fetch en fuentes confiables (Wikipedia, sitios oficiales, prensa seria) y reportá con report_facts entre 1 y ${MAX_FACTS} datos atómicos que respondan la pregunta, cada uno con la URL exacta donde aparece. Un dato por fact, escrito tal cual lo respalda la fuente. No inventes ni completes: si no encontrás nada confiable, reportá facts vacío.`;
+export const RESEARCH_Q_SYSTEM = `Sos el investigador de una app de viajes rioplatense. Te hacen UNA pregunta concreta (un año, un origen, quién, por qué, una curiosidad) sobre un lugar o tema. Buscala con web_search y web_fetch en fuentes confiables (Wikipedia, sitios oficiales, prensa seria; abrí las mejores páginas y sacá todo lo útil) y reportá con report_facts entre 1 y ${MAX_FACTS} datos atómicos que respondan la pregunta de la forma más completa posible, cada uno con la URL exacta donde aparece, el título de la fuente y una frase copiada TEXTUAL de esa página que lo respalde (se chequea automáticamente). Un dato por fact, escrito tal cual lo respalda la fuente. No inventes ni completes: si no encontrás nada confiable, reportá facts vacío.`;
 
 export function renderResearchQUser(i: Pick<ToolInput<'research'>, 'question' | 'place_name' | 'lat' | 'lng'>): string {
   const where = i.lat != null && i.lng != null ? ` (cerca de ${i.lat.toFixed(4)}, ${i.lng.toFixed(4)})` : '';
@@ -42,7 +44,7 @@ export type VerifiedFact = { text: string; source_url: string; quote: string };
 
 export interface ResearchLLM {
   research(args: { question: ToolInput<'research'>; config: TourLlmConfig; signal: AbortSignal }): Promise<{ facts: ResearchOutputT['facts']; usage: Usage }>;
-  verify(args: { fact: { text: string; source_url: string }; config: TourLlmConfig }): Promise<{ supported: boolean; quote: string; usage: Usage }>;
+  verify(args: { fact: { text: string; source_url: string; quote?: string }; config: TourLlmConfig }): Promise<{ supported: boolean; quote: string; usage: Usage }>;
   answer(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answer: string; usage: Usage }>;
   fromMemory(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answerable: boolean; answer: string }>;
 }
@@ -81,10 +83,16 @@ export function anthropicResearchLlm(): ResearchLLM {
         serverTools: ['web_search', 'web_fetch'],
         config,
         signal,
+        maxUses: 5,
       });
       return { facts: (r.value?.facts ?? []).slice(0, MAX_FACTS), usage: r.usage };
     },
     async verify({ fact, config }) {
+      // Rápido: si la página se puede bajar, la cita se chequea en código (sin otra vuelta de Claude).
+      if (fact.quote?.trim()) {
+        const page = await fetchPageText(fact.source_url);
+        if (page) return { supported: quoteInText(fact.quote, page), quote: fact.quote, usage: emptyUsage() };
+      }
       const v = await tour.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(fact), config });
       const quote = v.result?.quote?.trim() ?? '';
       return { supported: !!(v.result?.supported && quote), quote, usage: v.usage };

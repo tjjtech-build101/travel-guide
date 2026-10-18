@@ -13,14 +13,17 @@
 import { randomUUID } from 'node:crypto';
 import {
   distanceMeters,
+  INTEREST_TAGS,
   interestsForGoogleTypes,
   interestsForName,
   type GenerateTourResult,
   type InterestTag,
   type ToolInput,
+  type TourPlanLink,
 } from '@build101/shared';
 import { dbError, notFound } from '../errors';
 import { insertFeed } from '../feed';
+import { attachTourToPlan } from './tourPlan';
 import { tourWeather } from '../google/openMeteo';
 import { reverseGeocode } from '../google/osm';
 import { overpassCandidates } from '../google/overpass';
@@ -33,7 +36,7 @@ import { appendFacts, type LibraryFact } from '../places/library';
 import type { Db } from '../supabase';
 import type { ToolCtx } from '../tools/types';
 import { runEventsSearch } from './eventsSearch';
-import { kickDeepResearch } from './tourDeepResearch';
+import { chunkText, kickDeepResearch } from './tourDeepResearch';
 import { type Effort, JobError } from './llm';
 import { addUsage, emptyUsage, estimateCostUsd, type Usage } from './schemas';
 import { checkNarration, quoteInText, sourcesFor, stripCitations, wordCount, type CitedFact } from './tourCheck';
@@ -42,6 +45,7 @@ import { anthropicTourLlm, type TourLLM, type TourLlmConfig } from './tourLlm';
 import {
   CRITIC_SYSTEM,
   DIRECTOR_SYSTEM,
+  INTERPRET_SYSTEM,
   EXTRACT_SYSTEM,
   JUDGE_SYSTEM,
   RESEARCH_SYSTEM,
@@ -95,6 +99,8 @@ export type RawCandidate = {
   wikidata_id?: string | null;
   wiki_title?: string | null;
   wiki_lang?: string | null;
+  /** Título del artículo en inglés (más largo y con más datos en muchos lugares). */
+  wiki_title_en?: string | null;
   name: string;
   lat: number;
   lng: number;
@@ -159,6 +165,7 @@ export function dedupeCandidates(cands: RawCandidate[]): RawCandidate[] {
       wikidata_id: keep.wikidata_id ?? other.wikidata_id,
       wiki_title: keep.wiki_title ?? other.wiki_title,
       wiki_lang: keep.wiki_lang ?? other.wiki_lang,
+      wiki_title_en: keep.wiki_title_en ?? other.wiki_title_en,
       google_place_id: keep.google_place_id ?? other.google_place_id,
       osm_id: keep.osm_id ?? other.osm_id,
       interests: [...new Set([...keep.interests, ...other.interests])],
@@ -173,6 +180,23 @@ export function dedupeCandidates(cands: RawCandidate[]): RawCandidate[] {
     };
   }
   return out;
+}
+
+/**
+ * ¿Hay de dónde sacar historia verificable? (artículo de Wikipedia, ítem de Wikidata con idiomas, reseñas de Google,
+ * resumen editorial, datos propios o curado). Sin esto, la parada termina siendo "mirá el cartel": se evita.
+ */
+export function hasInfoSignal(c: Pick<RawCandidate, 'wiki_title' | 'wiki_title_en' | 'sitelinks' | 'rating_count' | 'summary' | 'facts' | 'tier' | 'source'>): boolean {
+  return (
+    !!c.wiki_title ||
+    !!c.wiki_title_en ||
+    (c.sitelinks ?? 0) >= 2 ||
+    (c.rating_count ?? 0) >= 80 ||
+    !!c.summary ||
+    c.facts.filter((f) => f.verified).length >= 3 ||
+    c.tier === 'curated' ||
+    c.source === 'event'
+  );
 }
 
 /** Lugares que no son paradas de tour (aparecen por búsquedas de texto o tags genéricos). */
@@ -209,17 +233,30 @@ export function filterCandidates(cands: RawCandidate[], opts: FilterOpts): (RawC
   return out;
 }
 
+const NAME_STOP = new Set(['los', 'las', 'del', 'de', 'la', 'el', 'y', 'the', 'of', 'en', 'al']);
+const sigWords = (s: string) => normalizeName(s).replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter((w) => w.length >= 4 && !NAME_STOP.has(w));
+
+/** Parecido entre lo que pidió la persona y un candidato: substring, trigramas o palabras significativas en común. */
+export function mustMatchScore(asked: string, candidate: string): number {
+  const n = normalizeName(asked);
+  const cn = normalizeName(candidate);
+  if (cn.includes(n) || n.includes(cn)) return 1;
+  const a = sigWords(asked);
+  const b = sigWords(candidate);
+  const common = a.filter((w) => b.some((x) => x === w || (w.length >= 6 && x.startsWith(w.slice(0, -1)))));
+  const words = common.length && common.some((w) => w.length >= 5) ? common.length / Math.min(a.length, b.length) : 0;
+  return Math.max(words, nameSimilarity(asked, candidate));
+}
+
 /** Busca en los candidatos los lugares que la persona pidió por nombre. Devuelve los nombres sin match. */
 export function matchMustInclude(cands: RawCandidate[], names: string[]): { keys: Set<number>; missing: string[] } {
   const keys = new Set<number>();
   const missing: string[] = [];
   for (const name of names) {
-    const n = normalizeName(name);
     let best = -1;
     let bestSim = 0;
     cands.forEach((c, i) => {
-      const cn = normalizeName(c.name);
-      const sim = cn.includes(n) || n.includes(cn) ? 1 : nameSimilarity(c.name, name);
+      const sim = mustMatchScore(name, c.name);
       if (sim > bestSim) {
         bestSim = sim;
         best = i;
@@ -246,7 +283,7 @@ export type TourDeps = BriefDeps & {
   searchEvents: (args: { lat: number; lng: number; date: string; language: string; city: string | null; country: string | null }) => Promise<RawCandidate[]>;
   wikidataInfo: (ids: string[]) => Promise<Map<string, WikidataInfo>>;
   wikipediaIntros: (titles: string[], lang: string) => Promise<Map<string, string>>;
-  wikipediaArticle: (title: string, lang: string) => Promise<WikiArticle | null>;
+  wikipediaArticle: (title: string, lang: string, maxChars?: number) => Promise<WikiArticle | null>;
   fetchPageText: (url: string) => Promise<string | null>;
   computeWalk: (stops: { lat: number; lng: number }[]) => Promise<{ total_min: number; total_m: number; polyline: string | null; legs: { min: number; m: number }[] }>;
   heartbeatMs?: number;
@@ -436,7 +473,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
     },
     wikidataInfo: (ids) => wikidataInfo(ids).catch(() => new Map()),
     wikipediaIntros: (titles, lang) => wikipediaIntros(titles, lang).catch(() => new Map()),
-    wikipediaArticle: (title, lang) => wikipediaArticle(title, lang).catch(() => null),
+    wikipediaArticle: (title, lang, maxChars) => wikipediaArticle(title, lang, maxChars).catch(() => null),
     fetchPageText,
     computeWalk: async (stops) => {
       if (stops.length < 2) return { total_min: 0, total_m: 0, polyline: null, legs: [] };
@@ -672,6 +709,8 @@ export type ComposedTour = {
   usage: Usage;
   audience: string;
   context: string[];
+  /** Lugares pedidos por nombre que no quedaron en el tour (no se encontraron o no entraron). */
+  missingMust: string[];
 };
 
 type Keyed = RawCandidate & { key: string; kind: PlaceKind; exteriorOnly: boolean; interior: boolean; score: number; dwell: number; must: boolean };
@@ -686,7 +725,7 @@ export async function composeTour(
   const usage: Usage = emptyUsage();
   const stats: TourStats = { web_search_calls: 0, places_reused: 0, places_new: 0, facts_verified: 0, facts_rejected: 0, facts_cited: 0, sentences_dropped: 0, critic_rewrites: 0 };
   const group = groupProfile(brief);
-  const audience = renderBriefCard(brief, group);
+  let audience = renderBriefCard(brief, group);
   const context = briefContextBullets(brief, group);
   const cfg = deps.config;
   const city = brief.place?.city ?? '';
@@ -697,47 +736,96 @@ export async function composeTour(
   const who = brief.members.map((m) => m.name).filter(Boolean);
   progress(who.length ? `Armo el tour pensando en ${who.join(', ')}` : 'Armo el tour con tu perfil');
 
+  // Pedido libre ("notes"): de ahí salen también lugares obligatorios, cosas a evitar y temas.
+  const askedMust = [...(input.must_include ?? [])];
+  if (input.notes?.trim()) {
+    try {
+      const r = await deps.llm.interpret({ system: INTERPRET_SYSTEM, user: input.notes, config: { ...cfg, effort: 'low', maxTokens: 2000 } });
+      addUsage(usage, r.usage);
+      for (const m of r.request.must_include) if (!askedMust.some((x) => mustMatchScore(x, m) >= 0.6)) askedMust.push(m);
+      for (const a of r.request.avoid) if (!group.avoid.includes(a)) group.avoid.push(a);
+      for (const t of r.request.themes) if ((INTEREST_TAGS as readonly string[]).includes(t)) group.weights[t] = 5;
+      if (r.request.themes.includes('curiosidades') && !group.themes.includes('curiosidades')) group.themes.push('curiosidades');
+    } catch (err) {
+      console.warn('[generate_tour] no pude interpretar el pedido:', readable(err));
+    }
+  }
+  if (askedMust.length) {
+    progress(`Me anoto que no te querés perder: ${askedMust.join(', ')}`);
+    if (!input.must_include?.length) audience += `\nQuieren ver sí o sí: ${askedMust.join(', ')}.`;
+  }
+
   // ── Candidatos en paralelo
-  const radius = input.radius_m ?? Math.min(1200, Math.max(400, input.duration_min * 20));
   // Si al grupo le gusta salir (vida nocturna / música), suman eventos reales de esa fecha (PRD 16).
   const wantsNightlife = Math.max(group.weights.vida_nocturna ?? 0, group.weights.musica ?? 0) >= 3;
   if (wantsNightlife) progress('Che, veo que les gusta salir: buscando qué hay hoy…');
   progress(`Buscando lugares con historia${brief.place?.neighborhood ? ` en ${brief.place.neighborhood}` : ' cerca'}…`);
-  const [lib, goog, wiki, osm, events] = await Promise.all([
-    deps.nearbyPlaceLibrary({ ...start, radius_m: radius }),
-    deps.searchGoogle({ ...start, radius_m: radius, food: wantsFood, dietary: group.dietary }),
-    deps.searchWikipedia({ ...start, radius_m: radius }),
-    deps.searchOverpass({ ...start, radius_m: radius }),
-    wantsNightlife
-      ? deps.searchEvents({ ...start, date: brief.local.date, language: input.language, city: brief.place?.city ?? null, country: brief.place?.country ?? null }).catch(() => [])
-      : Promise.resolve([] as RawCandidate[]),
-  ]);
-  if (events.length) progress(`Encontré ${events.length} ${events.length === 1 ? 'evento' : 'eventos'} para hoy`);
-  let all = dedupeCandidates([...lib, ...goog, ...wiki, ...osm, ...events]);
-  console.log(`[generate_tour] candidatos: biblioteca ${lib.length} · google/osm ${goog.length} · wikipedia ${wiki.length} · overpass ${osm.length} → ${all.length}`);
-
-  // Notoriedad y títulos de Wikipedia en lote (Wikidata).
-  const info = await deps.wikidataInfo(all.map((c) => c.wikidata_id).filter((x): x is string => !!x));
-  all = all.map((c) => {
-    const w = c.wikidata_id ? info.get(c.wikidata_id) : undefined;
-    if (!w) return c;
-    const title = c.wiki_title ?? w.eswiki ?? w.enwiki;
-    return { ...c, sitelinks: w.sitelinks, wiki_title: title, wiki_lang: c.wiki_title ? (c.wiki_lang ?? 'es') : w.eswiki ? 'es' : w.enwiki ? 'en' : null };
-  });
-
-  // Lugares pedidos por nombre que no aparecieron: los buscamos.
-  const mustNames = input.must_include ?? [];
-  let must = matchMustInclude(all, mustNames);
-  if (must.missing.length) {
-    const found = (await Promise.all(must.missing.map((name) => deps.searchByName({ name, ...start, radius_m: radius * 2 })))).filter((x): x is RawCandidate => !!x);
-    all = dedupeCandidates([...all, ...found]);
-    must = matchMustInclude(all, mustNames);
+  const gather = async (r: number): Promise<RawCandidate[]> => {
+    const [lib, goog, wiki, osm, events] = await Promise.all([
+      deps.nearbyPlaceLibrary({ ...start, radius_m: r }),
+      deps.searchGoogle({ ...start, radius_m: r, food: wantsFood, dietary: group.dietary }),
+      deps.searchWikipedia({ ...start, radius_m: r }),
+      deps.searchOverpass({ ...start, radius_m: r }),
+      wantsNightlife
+        ? deps.searchEvents({ ...start, date: brief.local.date, language: input.language, city: brief.place?.city ?? null, country: brief.place?.country ?? null }).catch(() => [])
+        : Promise.resolve([] as RawCandidate[]),
+    ]);
+    if (events.length) progress(`Encontré ${events.length} ${events.length === 1 ? 'evento' : 'eventos'} para hoy`);
+    const merged = dedupeCandidates([...lib, ...goog, ...wiki, ...osm, ...events]);
+    console.log(`[generate_tour] candidatos (${r} m): biblioteca ${lib.length} · google/osm ${goog.length} · wikipedia ${wiki.length} · overpass ${osm.length} → ${merged.length}`);
+    // Notoriedad y títulos de Wikipedia (es y en) en lote (Wikidata).
+    const info = await deps.wikidataInfo(merged.map((c) => c.wikidata_id).filter((x): x is string => !!x));
+    return merged.map((c) => {
+      const w = c.wikidata_id ? info.get(c.wikidata_id) : undefined;
+      if (!w) return c;
+      const title = c.wiki_title ?? w.eswiki ?? w.enwiki;
+      return {
+        ...c,
+        sitelinks: w.sitelinks,
+        wiki_title: title,
+        wiki_lang: c.wiki_title ? (c.wiki_lang ?? 'es') : w.eswiki ? 'es' : w.enwiki ? 'en' : null,
+        wiki_title_en: (c.wiki_lang ?? (w.eswiki ? 'es' : 'en')) === 'en' ? null : w.enwiki,
+      };
+    });
+  };
+  let radius = input.radius_m ?? Math.min(1200, Math.max(400, input.duration_min * 20));
+  let all = await gather(radius);
+  // Zona con poca historia documentada (ej. barrio residencial): ampliamos el radio una vez.
+  const wanted = targetStops(input.duration_min, group.pace);
+  const documented = (list: RawCandidate[]) => list.filter((c) => distanceMeters(start, c) <= radius * 1.25 && hasInfoSignal(c) && !isJunkCandidate(c)).length;
+  if (!input.radius_m && documented(all) < wanted + 2 && radius < 2500) {
+    radius = Math.min(2500, Math.round(radius * 2));
+    progress('Por acá hay poca historia documentada: amplío la búsqueda');
+    all = dedupeCandidates([...all, ...(await gather(radius))]);
   }
-  const mustSet = new Set([...must.keys].map((i) => all[i]));
-  // Fuera del radio solo queda lo que pidieron por nombre (hasta 3 km).
-  all = all.filter((c) => distanceMeters(start, c) <= (mustSet.has(c) ? 3000 : radius * 1.25));
 
-  const filtered = filterCandidates(all, { avoid: group.avoid, stepFree: group.stepFree });
+  // Lugares pedidos por nombre: primero entre los candidatos; los que no aparecen se buscan por nombre y lo que
+  // devuelve la búsqueda CUENTA como pedido (sin volver a comparar nombres: "Los portones" → "Portones Shopping").
+  const mustNames = askedMust;
+  const must = matchMustInclude(all, mustNames);
+  const mustSet = new Set([...must.keys].map((i) => all[i]));
+  const missingMust: string[] = [];
+  if (must.missing.length) {
+    const found = await Promise.all(must.missing.map(async (name) => ({ name, c: await deps.searchByName({ name, ...start, radius_m: Math.max(radius * 2, 3000) }) })));
+    for (const { name, c } of found) {
+      if (!c || distanceMeters(start, c) > 4000) {
+        missingMust.push(name);
+        continue;
+      }
+      const existing = all.find((o) => distanceMeters(o, c) <= 60 && mustMatchScore(o.name, c.name) >= 0.45);
+      if (existing) mustSet.add(existing);
+      else {
+        all.push(c);
+        mustSet.add(c);
+      }
+    }
+  }
+  if (missingMust.length) progress(`No encontré ${missingMust.join(', ')} cerca: si es otro nombre, decímelo y lo sumo`);
+  // Fuera del radio solo queda lo que pidieron por nombre (hasta 4 km).
+  all = all.filter((c) => mustSet.has(c) || distanceMeters(start, c) <= radius * 1.25);
+
+  // Lo pedido por nombre saltea los filtros (avoid, "no turístico", accesibilidad): lo pidió la persona.
+  const filtered: (RawCandidate & { exteriorOnly?: boolean })[] = [...filterCandidates(all.filter((c) => !mustSet.has(c)), { avoid: group.avoid, stepFree: group.stepFree }), ...all.filter((c) => mustSet.has(c))];
   if (filtered.length < 3) {
     throw new JobError('not_enough_candidates', 'No encontramos suficientes lugares con historia acá (mínimo 3). Probá con más tiempo o moviéndote un poco.');
   }
@@ -748,7 +836,7 @@ export async function composeTour(
   const keyed: Keyed[] = filtered
     .map((c, i) => {
       const kind = placeKind(c);
-      if (kind === 'food' && !wantsFood) return null;
+      if (kind === 'food' && !wantsFood && !mustSet.has(c)) return null;
       const exteriorOnly = !!c.exteriorOnly;
       const interior = !exteriorOnly && (kind === 'church' || kind === 'market' || ((kind === 'museum' || kind === 'theater') && group.paidEntries));
       const itin = brief.itinerary.find((it) => near(it, c) || (it.place_name && nameSimilarity(it.place_name, c.name) >= 0.6));
@@ -769,7 +857,9 @@ export async function composeTour(
         },
         group,
       );
-      return { ...c, key: `p${i + 1}`, kind, exteriorOnly, interior, score, dwell: dwellFor(kind, { interior, pace: group.pace }), must: isMust };
+      // Sin fuentes de dónde investigar, casi nunca entra (solo si no queda otra).
+      const finalScore = hasInfoSignal(c) || isMust ? score : score * 0.12;
+      return { ...c, key: `p${i + 1}`, kind, exteriorOnly, interior, score: finalScore, dwell: dwellFor(kind, { interior, pace: group.pace }), must: isMust };
     })
     .filter((c): c is Keyed => !!c && c.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -866,35 +956,41 @@ export async function composeTour(
     let rejected = 0;
     const now = new Date().toISOString();
 
-    // 1) Wikipedia: el artículo completo es la fuente; la cita se chequea en código contra ese texto.
-    const articles: WikiArticle[] = [];
-    const titled = [c, ...alsoNear(c.key, [...plan.keys, c.key]).filter((o) => o.wiki_title).slice(0, 1)].filter((x) => x.wiki_title);
-    for (const t of titled) {
-      const a = await deps.wikipediaArticle(t.wiki_title!, t.wiki_lang ?? 'es');
-      if (a && a.text.length > 300) articles.push(a);
-    }
-    for (const article of articles) {
-      const ex = await deps.llm.extractFacts({
-        system: EXTRACT_SYSTEM,
-        user: renderExtractUser({ place: c.name, city, article, audience, angle: null }),
-        config: { ...cfg, effort: 'low', maxTokens: 6000 },
-      });
-      addUsage(usage, ex.usage);
-      for (const f of ex.facts) {
-        if (quoteInText(f.quote, article.text)) {
-          pending.push({ text: f.text, quote: f.quote, kind: f.kind, source_url: article.url, source_title: `Wikipedia · ${article.title}`, verified: false, verified_at: now, origin: 'tour' });
-        } else rejected++;
-      }
-    }
+    // 1) Wikipedia (es + en, y el vecino más relevante): artículo completo en tramos; cita chequeada en código.
+    const near1 = alsoNear(c.key, [...plan.keys, c.key]).find((o) => o.wiki_title);
+    const wanted = [
+      c.wiki_title ? { title: c.wiki_title, lang: c.wiki_lang ?? 'es', max: 36_000 } : null,
+      c.wiki_title_en ? { title: c.wiki_title_en, lang: 'en', max: 30_000 } : null,
+      near1 ? { title: near1.wiki_title!, lang: near1.wiki_lang ?? 'es', max: 12_000 } : null,
+    ].filter((x): x is { title: string; lang: string; max: number } => !!x);
+    const articles = (await Promise.all(wanted.map((w) => deps.wikipediaArticle(w.title, w.lang, w.max)))).filter((a): a is WikiArticle => !!a && a.text.length > 300);
+    await Promise.all(
+      articles.flatMap((article) =>
+        chunkText(article.text, 12_000, 3).map(async (text) => {
+          const ex = await deps.llm.extractFacts({
+            system: EXTRACT_SYSTEM,
+            user: renderExtractUser({ place: c.name, city, article: { title: article.title, text }, audience, angle: null }),
+            config: { ...cfg, effort: 'low', maxTokens: 8000 },
+          });
+          addUsage(usage, ex.usage);
+          for (const f of ex.facts) {
+            if (quoteInText(f.quote, text)) {
+              pending.push({ text: f.text, quote: f.quote, kind: f.kind, source_url: article.url, source_title: `Wikipedia (${article.lang}) · ${article.title}`, verified: false, verified_at: now, origin: 'tour' });
+            } else rejected++;
+          }
+        }),
+      ),
+    );
 
-    // 2) Web: si faltan datos o fuentes distintas, y queda tiempo.
+    // 2) Web: si todavía faltan datos o fuentes distintas, y queda tiempo (la fase 2 profundiza después).
     const have = [...existing, ...pending];
-    if ((have.length < 6 || new Set(have.map((f) => f.source_url)).size < 2) && timeLeft() > 130_000) {
-      const angles = await Promise.race([anglesP, new Promise<Map<string, string>>((r) => setTimeout(() => r(new Map()), 45_000))]);
+    if ((have.length < 10 || new Set(have.map((f) => f.source_url)).size < 2) && timeLeft() > 100_000) {
+      const angles = await Promise.race([anglesP, new Promise<Map<string, string>>((r) => setTimeout(() => r(new Map()), 20_000))]);
       const r = await deps.llm.research({
         system: RESEARCH_SYSTEM,
         user: renderResearchUser({ place: c.name, city, country, lat: c.lat, lng: c.lng, known: have.map((f) => f.text), angle: angles.get(c.key) ?? null, interests: c.interests }),
-        config: { ...cfg, maxTokens: 8000 },
+        config: { ...cfg, maxTokens: 10_000, maxIterations: 12 },
+        maxUses: 5,
       });
       addUsage(usage, r.usage);
       stats.web_search_calls += r.web_search_calls;
@@ -938,6 +1034,9 @@ export async function composeTour(
   };
 
   plan.keys.forEach((k) => void researchFor(byKey.get(k)!));
+  // Reemplazos investigados por adelantado: si una parada queda sin datos, hay con qué cambiarla.
+  const spares = alternates.filter((c) => hasInfoSignal(c)).slice(0, 3);
+  spares.forEach((c) => void researchFor(c));
 
   // ── Director
   progress('Pensando la historia que hilvana el tour…');
@@ -1004,12 +1103,12 @@ export async function composeTour(
     keys = keys.filter((k) => k !== worst);
     walk = await deps.computeWalk(pathFor(keys));
   }
-  const estDurationMin = Math.round(walk.total_min + dwellOf(keys));
+  let estDurationMin = Math.round(walk.total_min + dwellOf(keys));
 
   // Arco por parada (del director, o uno simple si falló).
   const dirStops = new Map((director?.stops ?? []).map((s) => [s.key, s]));
   const roleFor = (i: number) => (i === 0 ? 'gancho' : i === keys.length - 1 ? 'cierre' : 'desarrollo');
-  const arc = keys.map((k, i) => {
+  const buildArc = () => keys.map((k, i) => {
     const c = byKey.get(k)!;
     const d = dirStops.get(k);
     return {
@@ -1021,6 +1120,7 @@ export async function composeTour(
       callbacks_to: (d?.callbacks_to ?? []).filter((x) => keys.indexOf(x) > -1 && keys.indexOf(x) < i),
     };
   });
+  let arc = buildArc();
   resolveAngles(new Map(arc.map((a) => [a.key, a.angle])));
   const title = director?.title?.trim() || (brief.place?.neighborhood ? `${brief.place.neighborhood} a pie` : `Tour de ${keys.length} paradas`);
   const thesis = director?.thesis?.trim() || '';
@@ -1032,6 +1132,41 @@ export async function composeTour(
   const factsByKey = new Map<string, Fact[]>();
   await Promise.all(keys.map(async (k) => factsByKey.set(k, await researchFor(byKey.get(k)!))));
   progress(`Verifiqué ${stats.facts_verified} datos nuevos${stats.facts_rejected ? ` (descarté ${stats.facts_rejected})` : ''}`);
+
+  // ── Paradas sin historia verificada (< 3 datos): se cambian por reemplazos ya investigados y se re-rutea.
+  const MIN_FACTS = 3;
+  const verifiedCount = (k: string) => (factsByKey.get(k) ?? []).filter((f) => f.verified).length;
+  const weak = keys.filter((k) => !byKey.get(k)!.must && verifiedCount(k) < MIN_FACTS);
+  if (weak.length) {
+    const spareFacts = await Promise.all(spares.map(async (c) => ({ c, facts: await researchFor(c) })));
+    const good = spareFacts.filter((x) => !keys.includes(x.c.key) && x.facts.filter((f) => f.verified).length >= MIN_FACTS);
+    good.forEach((x) => factsByKey.set(x.c.key, x.facts));
+    const keep = keys.filter((k) => !weak.includes(k));
+    // Si no alcanzan las fuertes + reemplazos, se completa con las flojas que más datos tienen (las de 0, últimas).
+    const fill = [...weak].sort((a, b) => verifiedCount(b) - verifiedCount(a)).slice(0, Math.max(0, 3 - keep.length - good.length));
+    const kept = [...keep, ...fill];
+    if (kept.length + good.length >= 3 && (good.length || fill.length < weak.length)) {
+      const replanned = planRoute({
+        ...baseProblem,
+        lastKey: lastKey && kept.includes(lastKey) ? lastKey : null,
+        budgetMin: input.duration_min * 1.1,
+        maxStops: keys.length,
+        candidates: [...kept.map((k) => routeCand(byKey.get(k)!, true)), ...good.map((x) => routeCand(x.c))],
+      });
+      if (replanned.keys.length >= 3) {
+        const swappedIn = replanned.keys.filter((k) => !keys.includes(k)).length;
+        keys = replanned.keys;
+        walk = await deps.computeWalk(pathFor(keys));
+        estDurationMin = Math.round(walk.total_min + dwellOf(keys));
+        arc = buildArc();
+        progress(
+          swappedIn
+            ? `Cambié ${weak.length === 1 ? 'una parada' : `${weak.length} paradas`} sin historia documentada por ${swappedIn === 1 ? 'otra' : 'otras'} con más para contar`
+            : `Saqué ${weak.length === 1 ? 'una parada' : `${weak.length} paradas`} sin historia documentada`,
+        );
+      }
+    }
+  }
 
   // ── Escritores (una parada por llamada, en paralelo) + chequeo
   progress('Escribiendo las paradas…');
@@ -1209,7 +1344,11 @@ export async function composeTour(
   }
   if (stops.length < 3) throw new JobError('generate_failed', 'No llegamos a armar suficientes paradas con datos verificados.');
 
-  return { title, thesis, storyline, stops, totalWalkM: Math.round(walk.total_m), estDurationMin, polyline: walk.polyline, stats, usage, audience, context };
+  const inTour = new Set(stops.map((s) => s.candidate));
+  const notIncluded = [...missingMust, ...mustNames.filter((name) => ![...mustSet].some((c) => inTour.has(c as Keyed) || stops.some((s) => mustMatchScore(name, s.candidate.name) >= 0.45)) && !missingMust.includes(name))];
+  if (notIncluded.length && !missingMust.length) progress(`No pude meter ${notIncluded.join(', ')} en el recorrido`);
+
+  return { title, thesis, storyline, stops, totalWalkM: Math.round(walk.total_m), estDurationMin, polyline: walk.polyline, stats, usage, audience, context, missingMust: notIncluded };
 }
 
 // ───────────────────────── Job (en segundo plano)
@@ -1236,6 +1375,7 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   let fatal: string | null = null;
   let composed: ComposedTour | null = null;
   let stopCount = 0;
+  let planLink: TourPlanLink | undefined;
 
   try {
     const brief = await loadTourBrief(
@@ -1361,6 +1501,18 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         payload: { summary: `El Scout armó «${composed.title}», un tour de ${stopRows.length} paradas`, tour_id: tourId },
         undoable: false,
       });
+      // El tour queda en el plan del día (bloque `tour` con tour_id): Plan, mapa y Ahora lo muestran y lo arrancan.
+      planLink = await attachTourToPlan(ctx, {
+        tourId,
+        tripId,
+        blockId: input.block_id ?? null,
+        title: composed.title,
+        durationMin: composed.estDurationMin || input.duration_min,
+        start: resolveStart(deps.now(), args.startAt),
+        participantIds: args.participantIds,
+        lat: input.start_lat,
+        lng: input.start_lng,
+      });
     }
     stopCount = stopRows.length;
   } catch (err) {
@@ -1373,12 +1525,14 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   const usage = composed?.usage ?? emptyUsage();
   const result: GenerateTourResult = {
     tour_id: tourId,
+    ...(planLink ? { plan: planLink } : {}),
     stop_count: stopCount,
     total_walk_m: composed?.totalWalkM ?? 0,
     est_duration_min: composed?.estDurationMin ?? 0,
     stats: { ...(composed?.stats ?? { web_search_calls: 0, places_reused: 0, places_new: 0, facts_verified: 0, facts_rejected: 0 }), duration_ms: Date.now() - startedAt },
     title: composed?.title ?? null,
     thesis: composed?.thesis ?? null,
+    missing_must: composed?.missingMust.length ? composed.missingMust : undefined,
     usage: {
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,

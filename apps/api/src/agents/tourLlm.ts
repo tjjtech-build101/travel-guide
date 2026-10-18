@@ -13,6 +13,8 @@ import {
   type CriticOutputT,
   DirectorOutput,
   type DirectorOutputT,
+  InterpretOutput,
+  type InterpretOutputT,
   ExtractOutput,
   type ExtractOutputT,
   JudgeOutput,
@@ -120,6 +122,8 @@ export interface TourLLM {
   verifyFact(args: LlmCall): Promise<{ result: VerifyOutputT | null; usage: Usage }>;
   /** Juez: ¿cada cita respalda su dato? Una llamada por lugar. */
   judgeFacts(args: LlmCall): Promise<{ verdicts: JudgeOutputT['verdicts']; usage: Usage }>;
+  /** Pedido libre ("notes") → lugares obligatorios, cosas a evitar y temas. */
+  interpret(args: LlmCall): Promise<{ request: InterpretOutputT; usage: Usage }>;
   /** Director: tesis, título, swaps y papel de cada parada. */
   direct(args: LlmCall): Promise<{ plan: DirectorOutputT; usage: Usage }>;
   /** Escritor: las capas de UNA parada, con citas [fN]. */
@@ -195,6 +199,11 @@ export function anthropicTourLlm(): TourLLM {
     async judgeFacts(call) {
       const r = await structured(JudgeOutput, call, 'la verificación');
       return { verdicts: r.value.verdicts, usage: r.usage };
+    },
+
+    async interpret(call) {
+      const r = await structured(InterpretOutput, call, 'el pedido');
+      return { request: r.value, usage: r.usage };
     },
 
     async direct(call) {

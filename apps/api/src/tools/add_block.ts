@@ -7,7 +7,8 @@ import { fromMin, toMin } from '../schedule';
 import type { ToolCtx, ToolOk } from './types';
 import { assertParticipants, defined, enforce, legMemberIds, propose } from './write';
 
-export async function addBlockImpl(input: ToolInput<'add_block'>, ctx: ToolCtx): Promise<ToolOk> {
+/** `extra`: columnas que no expone la herramienta (p. ej. tour_id cuando el Scout suma un tour al plan). */
+export async function addBlockImpl(input: ToolInput<'add_block'>, ctx: ToolCtx, extra: Record<string, unknown> = {}): Promise<ToolOk> {
   const { trip_id, leg_id, day_id, reason, participant_ids, ...fields } = input;
   const { admin } = ctx;
   if (ctx.plan && !ctx.plan.allowedLegIds.has(leg_id)) {
@@ -74,6 +75,7 @@ export async function addBlockImpl(input: ToolInput<'add_block'>, ctx: ToolCtx):
     sort_order,
     created_by: ctx.userId,
     created_by_agent: ctx.actor === 'agent',
+    ...extra,
   };
   const [who, date] = await Promise.all([actorLabel(ctx), dayDate(admin, day_id)]);
   const where = day_id ? `al ${fmtDay(date)}` : 'al banco de ideas';

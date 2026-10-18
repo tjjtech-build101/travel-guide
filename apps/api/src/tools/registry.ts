@@ -6,6 +6,7 @@ import { add_idea } from './add_idea';
 import { delete_trip } from './delete_trip';
 import { choose_option } from './choose_option';
 import { compose_days } from './compose_days';
+import { decide_proposal } from './decide_proposal';
 import { events_search } from './events_search';
 import { gap_suggestions } from './gap_suggestions';
 import { generate_indoor_tour } from './generate_indoor_tour';
@@ -48,6 +49,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   place_details,
   route_eta,
   undo,
+  decide_proposal,
   plan_trip,
   plan_transfers,
   trip_brief,

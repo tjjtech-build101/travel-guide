@@ -32,6 +32,8 @@ export async function tourReadyPayload(tourId: string, result: GenerateTourResul
     est_duration_min: result?.est_duration_min ?? 0,
     total_walk_m: result?.total_walk_m ?? 0,
     stops: list,
+    ...(result?.plan ? { plan: result.plan } : {}),
+    ...(result?.missing_must?.length ? { missing_must: result.missing_must } : {}),
   };
 }
 

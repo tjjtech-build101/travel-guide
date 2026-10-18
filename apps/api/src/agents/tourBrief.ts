@@ -201,17 +201,27 @@ export function briefQuestions(brief: TourBrief, group: GroupProfile, input: Bri
     });
   }
 
-  const main = eligible.slice(0, 3);
-  main.push({
-    id: 'must_include',
-    text: '¿Hay algo que sí o sí quieran ver?',
-    why: 'Lo meto en el recorrido aunque no esté en mi lista.',
+  const open: TourQuestion = {
+    id: 'notes',
+    text: '¿Qué te gustaría que tenga el tour?',
+    why: 'Contame con tus palabras qué esperás: lo armo alrededor de eso.',
     kind: 'text',
     options: [],
     default: null,
     optional: true,
-  });
-  return main;
+    placeholder: 'Ej.: historias de la época de las quintas, algo con misterio, ver casas lindas…',
+  };
+  const must: TourQuestion = {
+    id: 'must_include',
+    text: '¿Hay algún lugar que no te quieras perder?',
+    why: 'Lo meto en el recorrido sí o sí, aunque no esté en mi lista.',
+    kind: 'text',
+    options: [],
+    default: null,
+    optional: true,
+    placeholder: 'Ej.: los Portones de Carrasco, la Iglesia de Carrasco',
+  };
+  return [open, ...eligible.slice(0, 4), must];
 }
 
 export function briefSummary(brief: TourBrief, durationMin: number): string {
@@ -223,12 +233,29 @@ export function briefSummary(brief: TourBrief, durationMin: number): string {
   return `Tour de ${durationMin} min${where ? ` en ${where}` : ''}${who ? ` ${who}` : ''}, ${brief.local.text}.${weather}`.replace(/\s+/g, ' ').trim();
 }
 
+/** Guía de entrevista para la voz (temas en orden, adaptados: lo que ya se sabe se aclara para no repreguntarlo). */
+export function interviewGuide(brief: TourBrief, group: GroupProfile, questions: TourQuestion[]): string[] {
+  const names = brief.members.map((m) => m.name).filter(Boolean);
+  const top = groupTop(group.weights).slice(0, 3);
+  return [
+    'Qué esperan del tour hoy y qué los entusiasma (con sus palabras; repreguntá si es vago).',
+    'Si hay algún lugar que no se quieran perder: nombre exacto; si es ambiguo, aclaralo.',
+    top.length ? `Ya sé que les gusta ${top.join(', ')}: confirmá si hoy va por ahí o prefieren otra cosa.` : 'Qué temas les interesan (historia, arquitectura, curiosidades, comida, arte…).',
+    group.avoid.length ? `Ya sé que evitan ${group.avoid.join(', ')}: preguntá si hay algo más que no quieran.` : 'Si hay algo que no quieran (lugares, temas, subidas, multitudes).',
+    names.length > 1 ? `Van ${names.join(', ')}: confirmá si se suma alguien más y cómo vienen de energía.` : 'Con quién van y cómo vienen de energía.',
+    ...questions.filter((q) => q.id !== 'notes' && q.id !== 'must_include').map((q) => `${q.text} (${q.why})`),
+    'Resumí en una frase lo que entendiste y pedí confirmación antes de armarlo.',
+  ];
+}
+
 export function buildBriefResult(brief: TourBrief, group: GroupProfile, input: BriefInputLite, context: string[]): TourBriefResult {
+  const questions = briefQuestions(brief, group, input);
   return {
     summary: briefSummary(brief, input.duration_min),
     city: brief.place?.city ?? null,
     neighborhood: brief.place?.neighborhood ?? null,
     context,
-    questions: briefQuestions(brief, group, input),
+    questions,
+    interview: interviewGuide(brief, group, questions),
   };
 }
