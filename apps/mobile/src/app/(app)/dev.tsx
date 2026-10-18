@@ -1,12 +1,14 @@
 // Menú dev oculto (long-press en el título del header): usuario, LocationProvider + simulador de GPS (PRD 09),
 // último fix, Realtime, salir.
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../../features/auth/AuthProvider';
 import { SimulatorPanel } from '../../features/gps/SimulatorPanel';
 import { ClockDevSection } from '../../features/now/ClockDevSection';
+import { useNowDemo } from '../../features/now/v2/demo';
 import { env } from '../../lib/env';
 import { useLocationFix, useLocationProvider } from '../../location/LocationContext';
 import { useConnectionStore } from '../../realtime/connectionStore';
@@ -53,6 +55,26 @@ export default function DevMenu() {
       </Section>
 
       <ClockDevSection />
+
+      <Section title="Ahora">
+        <Button
+          label="Ubicación cerca del próximo bloque"
+          variant="secondary"
+          onPress={() => {
+            // Lo aplica la pantalla Ahora (GPS simulado a ~8 min a pie).
+            useNowDemo.getState().requestNear();
+            router.back();
+          }}
+        />
+        {__DEV__ ? (
+          <Button
+            label="Galería de Ahora"
+            variant="ghost"
+            onPress={() => router.push('/dev/now-gallery')}
+            style={{ marginTop: space.sm }}
+          />
+        ) : null}
+      </Section>
 
       <Section title="Conexión">
         <Row label="Realtime" value={realtime + (realtimeError ? ` (${realtimeError})` : '')} />

@@ -150,6 +150,10 @@ export const RouteEtaInput = z.object({
   stops: z.array(RouteStop).min(2).max(10),
   mode: z.enum(ROUTE_MODES),
   departure_time: z.string().optional().describe('ISO 8601'),
+  detail: z
+    .boolean()
+    .optional()
+    .describe('Con exactamente 2 paradas con lat/lng: devuelve además `detail` (polilínea y pasos) para mostrar la ruta en la app.'),
 });
 
 export const UndoInput = z.object({ undo_token: z.string().min(10) });

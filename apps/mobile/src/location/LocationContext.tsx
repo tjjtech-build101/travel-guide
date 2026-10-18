@@ -31,6 +31,8 @@ type LocationContextValue = {
   simStops: NamedPoint[];
   /** Carga un track en el simulador y lo recuerda entre reinicios. */
   loadSimTrack: (track: TrackPoint[], label: string, stops?: NamedPoint[]) => void;
+  /** Modo demo (`?loc=near`): pasa al simulado y lo deja quieto en ese punto (no se recuerda entre reinicios). */
+  placeSimulatedAt: (lat: number, lng: number, label?: string) => void;
 };
 
 const STORAGE_KEY = 'location.provider.kind';
@@ -53,18 +55,28 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
   const simulator = useRef(new SimulatedLocationProvider()).current;
   const providers = useMemo<Record<Kind, LocationProvider>>(() => ({ real, simulated: simulator }), [real, simulator]);
   const [kind, setKindState] = useState<Kind>('real');
+  // `wanted`: alguien pidió ubicación (start). `active`: el provider de `kind` está corriendo de verdad.
+  // El efecto de abajo es el único que prende/apaga providers, así `active` no puede quedar en true con el provider
+  // apagado (pasaba al cambiar de kind por fuera de setKind, o cuando Fast Refresh corría el cleanup que los apagaba:
+  // las pantallas veían active=true, no llamaban start() y quedaban en "No encontramos dónde estás").
+  const [wanted, setWanted] = useState(false);
   const [active, setActive] = useState(false);
+  // Elección explícita (setKind / modo demo) en esta sesión: el kind guardado (que llega async) no la pisa.
+  const chosen = useRef(false);
   const [simStops, setSimStops] = useState<NamedPoint[]>(SEED_STOPS);
+  // Si el modo demo ya ubicó el simulador, el track guardado (que carga async) no lo pisa.
+  const placed = useRef(false);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((v) => {
-        if (v === 'real' || v === 'simulated') setKindState(v);
+        if (!chosen.current && (v === 'real' || v === 'simulated')) setKindState(v);
       })
       .catch(() => {});
     // Track del simulador: el último cargado o, si no hay, el del seed (pausado en t=0).
     AsyncStorage.getItem(SIM_KEY)
       .then((raw) => {
+        if (placed.current) return;
         const stored = raw ? (JSON.parse(raw) as SimStored) : null;
         const parsed = stored ? parseTrack(stored.track) : null;
         if (stored && parsed?.ok) {
@@ -75,7 +87,9 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
           simulator.load(seedTrack(), SEED_TRACK_LABEL);
         }
       })
-      .catch(() => simulator.load(seedTrack(), SEED_TRACK_LABEL));
+      .catch(() => {
+        if (!placed.current) simulator.load(seedTrack(), SEED_TRACK_LABEL);
+      });
   }, [simulator]);
 
   // Recordar la velocidad elegida.
@@ -104,35 +118,64 @@ export function LocationContextProvider({ children }: { children: ReactNode }) {
     [simulator],
   );
 
-  const start = useCallback(async (which?: Kind): Promise<Error | null> => {
-    try {
-      await providers[which ?? kind].start();
-      setActive(true);
-      return null;
-    } catch (e) {
-      return e instanceof Error ? e : new Error(String(e));
-    }
-  }, [kind, providers]);
+  // Ciclo de vida: con ubicación pedida, corre SOLO el provider de `kind`. Cambiar de kind apaga el anterior y prende
+  // el nuevo; desmontar (o Fast Refresh) apaga y, si vuelve a correr el efecto, prende de nuevo.
+  useEffect(() => {
+    if (!wanted) return;
+    const provider = providers[kind];
+    let cancelled = false;
+    provider
+      .start()
+      .then(() => !cancelled && setActive(true))
+      .catch(() => !cancelled && setActive(false));
+    return () => {
+      cancelled = true;
+      provider.stop();
+      setActive(false);
+    };
+  }, [wanted, kind, providers]);
+
+  const placeSimulatedAt = useCallback(
+    (lat: number, lng: number, label?: string) => {
+      placed.current = true;
+      chosen.current = true;
+      simulator.placeAt(lat, lng, label);
+      if (kind !== 'simulated') {
+        setKindState('simulated');
+        AsyncStorage.setItem(STORAGE_KEY, 'simulated').catch(() => {});
+      }
+      setWanted(true);
+    },
+    [simulator, kind],
+  );
+
+  const start = useCallback(
+    async (which?: Kind): Promise<Error | null> => {
+      setWanted(true);
+      try {
+        // Idempotente: si ya corre, resuelve enseguida. Acá solo para devolver el error (permiso) a quien pidió.
+        await providers[which ?? kind].start();
+        return null;
+      } catch (e) {
+        return e instanceof Error ? e : new Error(String(e));
+      }
+    },
+    [kind, providers],
+  );
 
   const setKind = useCallback(
     (next: Kind) => {
+      chosen.current = true;
       if (next === kind) return;
-      const wasActive = active;
-      providers[kind].stop();
       setKindState(next);
       AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {});
-      if (wasActive) {
-        providers[next].start().catch(() => setActive(false));
-      }
     },
-    [kind, active, providers],
+    [kind],
   );
 
-  useEffect(() => () => Object.values(providers).forEach((p) => p.stop()), [providers]);
-
   const value = useMemo(
-    () => ({ provider: providers[kind], kind, setKind, start, active, simulator, simStops, loadSimTrack }),
-    [providers, kind, setKind, start, active, simulator, simStops, loadSimTrack],
+    () => ({ provider: providers[kind], kind, setKind, start, active, simulator, simStops, loadSimTrack, placeSimulatedAt }),
+    [providers, kind, setKind, start, active, simulator, simStops, loadSimTrack, placeSimulatedAt],
   );
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;
 }

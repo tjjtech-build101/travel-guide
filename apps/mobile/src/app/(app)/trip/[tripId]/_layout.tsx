@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { noteTripTab } from '../../../../features/route/nav';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
@@ -54,6 +55,8 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
     <TripIdProvider tripId={tripId}>
       <View style={styles.flex}>
         <Tabs
+          // Anota la tab visible: "Volver" de la ruta (tab oculta) vuelve ahí (features/route/nav).
+          screenListeners={({ route }) => ({ focus: () => noteTripTab(route.name) })}
           screenOptions={{
             headerShown: true,
             headerStyle: { backgroundColor: colors.bg },
@@ -86,6 +89,17 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* "Cómo llego" embebido: pantalla completa sin tab ni header (se abre con features/route/nav.openRoute).
+              Sin `href: null`: en expo-router 58 eso marca la tab como `hidden` y navegar a ella redirige a la primera. */}
+          <Tabs.Screen
+            name="route"
+            options={{
+              headerShown: false,
+              tabBarStyle: { display: 'none' },
+              tabBarButton: () => null,
+              tabBarItemStyle: { display: 'none' },
+            }}
+          />
           {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"
