@@ -26,6 +26,11 @@ assert.deepEqual(
 const placeStops = { mode: 'walk', stops: [{ google_place_id: 'x' }, { lat: 1, lng: 2 }] };
 assert.equal(withFreshPosition('route_eta', placeStops, here), placeStops, 'con place id no toca');
 assert.deepEqual(withFreshPosition('search_places', { query: 'a' }, null), { query: 'a' }, 'sin posición no toca');
+assert.deepEqual(withFreshPosition('where_am_i', {}, here), { lat: here.lat, lng: here.lng });
+assert.deepEqual(withFreshPosition('where_am_i', {}, { ...here, accuracy: 12 }), { lat: here.lat, lng: here.lng, accuracy_m: 12 });
+assert.deepEqual(withFreshPosition('search_places', {}, { ...here, accuracy: 12 }), { near: here }, 'near sin accuracy');
+const pinned = { lat: 1, lng: 2 };
+assert.equal(withFreshPosition('where_am_i', pinned, here), pinned, 'respeta coords del modelo (foco del mapa)');
 assert.deepEqual(withFreshPosition('weather', { lat: 1 }, here), { lat: 1 }, 'otras herramientas no');
 if (failures) {
   console.error(`fresh: ${failures} fallas`);

@@ -55,6 +55,9 @@ type GPlace = {
   googleMapsUri?: string;
   editorialSummary?: { text?: string };
   accessibilityOptions?: { wheelchairAccessibleEntrance?: boolean };
+  primaryType?: string;
+  primaryTypeDisplayName?: { text?: string };
+  viewport?: { low?: { latitude?: number; longitude?: number }; high?: { latitude?: number; longitude?: number } };
 };
 
 const PRICE_LEVELS: Record<string, number> = {
@@ -204,6 +207,46 @@ export async function placeDetails(googlePlaceId: string): Promise<PlaceDetails>
       google_maps_uri: p.googleMapsUri ?? null,
       editorial_summary: p.editorialSummary?.text ?? null,
     };
+  });
+}
+
+// ───────────────────────── where_am_i: lo más cercano por distancia, con viewport (para saber en qué lugar está adentro)
+
+export type Viewport = { low: { lat: number; lng: number }; high: { lat: number; lng: number } };
+export type NearbyRaw = PlaceSummary & { primary_type: string | null; primary_type_label: string | null; viewport: Viewport | null };
+
+const NEARBY_MASK = [SEARCH_MASK, 'places.primaryType', 'places.primaryTypeDisplayName', 'places.viewport'].join(',');
+
+function toViewport(v: GPlace['viewport']): Viewport | null {
+  const l = v?.low, h = v?.high;
+  if (l?.latitude == null || l.longitude == null || h?.latitude == null || h.longitude == null) return null;
+  return { low: { lat: l.latitude, lng: l.longitude }, high: { lat: h.latitude, lng: h.longitude } };
+}
+
+/**
+ * searchNearby ordenado por DISTANCIA (no popularidad) en un círculo chico. Con `types`, solo esos tipos.
+ * Sin key de Google: [] (where_am_i sigue con barrio/ciudad de OSM).
+ */
+export async function searchNearbyByDistance(args: { near: { lat: number; lng: number }; radius_m: number; types?: string[] }): Promise<NearbyRaw[]> {
+  if (!env().GOOGLE_MAPS_API_KEY) return [];
+  return cached(`nearby-dist:${JSON.stringify(args)}`, async () => {
+    const res = await googleFetch<{ places?: GPlace[] }>(`${BASE}/places:searchNearby`, {
+      method: 'POST',
+      fieldMask: NEARBY_MASK,
+      body: {
+        ...(args.types ? { includedTypes: args.types } : {}),
+        maxResultCount: 20,
+        rankPreference: 'DISTANCE',
+        languageCode: LANG,
+        locationRestriction: { circle: { center: { latitude: args.near.lat, longitude: args.near.lng }, radius: Math.min(args.radius_m, 50_000) } },
+      },
+    });
+    return (res.places ?? []).map((p) => ({
+      ...toSummary(p),
+      primary_type: p.primaryType ?? null,
+      primary_type_label: p.primaryTypeDisplayName?.text ?? null,
+      viewport: toViewport(p.viewport),
+    }));
   });
 }
 
