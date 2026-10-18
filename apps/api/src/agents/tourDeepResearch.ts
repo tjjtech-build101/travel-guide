@@ -15,7 +15,7 @@ import { distanceMeters } from '@build101/shared';
 import { env } from '../env';
 import { fetchPageText } from '../google/pageText';
 import { wikidataInfo, wikipediaArticle, wikipediaGeosearch, type WikiArticle } from '../google/wikipedia';
-import { runInBackground } from '../jobs';
+import { createJob, JobProgress, runInBackground } from '../jobs';
 import { appendFacts, normText, type LibraryFact } from '../places/library';
 import type { Db } from '../supabase';
 import { type Effort } from './llm';
@@ -363,6 +363,33 @@ export async function enrichStop(admin: Db, stopId: string, deps: DeepDeps = def
   return out;
 }
 
+/**
+ * enrichStop con registro en agent_jobs (kind 'enrich_stop'): queda a la vista si corrió, cuánto sumó o por qué falló
+ * (p. ej. sin crédito en Anthropic). Nunca tira.
+ */
+export async function enrichStopTracked(admin: Db, stopId: string, deps?: DeepDeps): Promise<void> {
+  let progress: JobProgress | null = null;
+  try {
+    const { data: stop } = await admin.from('tour_stops').select('tour_id,place_library(name),tours(owner_user_id,trip_id)').eq('id', stopId).maybeSingle();
+    const row = stop as unknown as { place_library: { name: string | null } | null; tours: { owner_user_id: string | null; trip_id: string | null } | null } | null;
+    const name = row?.place_library?.name ?? 'la parada';
+    if (row?.tours?.owner_user_id) {
+      const jobId = await createJob(admin, { kind: 'enrich_stop', trip_id: row.tours.trip_id, user_id: row.tours.owner_user_id, firstLine: `Investigando a fondo ${name}…` });
+      progress = new JobProgress(admin, jobId, [{ at: new Date().toISOString(), text: `Investigando a fondo ${name}…` }]);
+      await progress.set({ status: 'running' });
+    }
+    const r = await enrichStop(admin, stopId, deps);
+    await progress?.push(`+${r.facts_added} datos · ${r.words_before}→${r.words_after} palabras`);
+    await progress?.set({ status: 'done', error: null, result: r });
+  } catch (err) {
+    const msg = (err as Error).message.replace(/\s+/g, ' ').slice(0, 300);
+    console.error(`[deep-research] ${stopId}:`, msg);
+    await progress?.set({ status: 'failed', error: msg });
+  } finally {
+    await progress?.flush();
+  }
+}
+
 // ───────────────────────── Deps reales
 
 export function defaultDeepDeps(): DeepDeps {
@@ -426,7 +453,7 @@ export async function kickDeepResearch(admin: Db, stopIds: string[]): Promise<vo
           console.warn('[deep-research] no pude llamarme a mí mismo, corro acá:', (err as Error).message);
         }
       }
-      runInBackground(`enrich-stop/${id}`, enrichStop(admin, id));
+      runInBackground(`enrich-stop/${id}`, enrichStopTracked(admin, id));
     }),
   );
 }

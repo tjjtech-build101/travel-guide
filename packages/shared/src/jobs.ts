@@ -89,5 +89,7 @@ export type GenerateTourResult = {
   };
   title?: string | null;
   thesis?: string | null;
+  /** Lugares que la persona pidió por nombre y no quedaron en el tour (el Scout lo tiene que decir). */
+  missing_must?: string[];
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
 };

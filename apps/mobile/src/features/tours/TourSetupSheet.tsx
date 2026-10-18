@@ -136,8 +136,9 @@ export function TourSetupSheet({
                   <Text style={styles.why}>{q.why}</Text>
                   {q.kind === 'text' ? (
                     <TextInput
-                      style={styles.input}
-                      placeholder="Ej.: el Mercado del Puerto"
+                      style={[styles.input, q.id === 'notes' && styles.inputMulti]}
+                      multiline={q.id === 'notes'}
+                      placeholder={q.placeholder ?? 'Escribí acá'}
                       placeholderTextColor={colors.textMuted}
                       value={typeof answers[q.id] === 'string' ? (answers[q.id] as string) : ''}
                       onChangeText={(t) => {
@@ -199,6 +200,7 @@ const styles = StyleSheet.create({
     fontSize: font.body,
     color: colors.text,
   },
+  inputMulti: { minHeight: 88, paddingTop: space.sm, textAlignVertical: 'top' },
   muted: { fontSize: font.small, color: colors.textMuted, marginTop: space.sm },
   error: { fontSize: font.small, color: colors.danger },
   footer: { padding: space.lg, gap: space.xs, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },

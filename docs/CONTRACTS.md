@@ -447,3 +447,14 @@ Sin migración: usa `agent_proposals` tal cual. Lo que falta del PRD 11 es el mo
 - **`activity_feed.kind`** nuevos: `proposal_accepted` (deshacible: `payload.inverse` revierte todo; `payload.block_ids`), `proposal_rejected`, `proposal_expired`. La app invalida `blocks` y `agent_proposals` con cualquier `proposal_*`; si decidió otra persona y hay llamada abierta sobre el viaje, manda `[EVENTO:proposal_decided] {decision, summary}`.
 - **Voz**: las instrucciones listan las propuestas pendientes con su `proposal_id` en "Datos para herramientas" y el Scout solo llama `decide_proposal` con un sí o un no explícito.
 - **Tours en el plan**: cuando `generate_tour` termina con `trip_id`, el tour queda en el plan. Con `block_id` se enlaza ese bloque (`blocks.tour_id`); si no, se agrega un bloque `type='tour'` con `tour_id` hoy (zona del viaje) a la hora de inicio redondeada a 5 min, con la regla de `add_block` (personal → aplica; compartido y lo pidió el Scout → propuesta). `GenerateTourResult.plan` y `TourReadyEvent.plan` = `TourPlanLink` (`linked|applied` con `block_id`, `proposed` con `proposal_id`, o `none` con `reason`). `addBlockImpl` acepta columnas extra (solo `tour_id` hoy).
+---
+
+## Cambios tours v3 (entrevista, lugares pedidos, paradas con historia, research en vivo) — en código
+
+- **Lugares pedidos (`must_include`)**: se comparan por palabras significativas ("Los portones de Carrasco" ≈ "Portones Shopping"); lo que devuelve la búsqueda por nombre cuenta como pedido; saltean los filtros (avoid, "no turístico", accesibilidad) y pueden estar hasta a 4 km. Lo que no se pudo incluir va en `GenerateTourResult.missing_must` y en `[EVENTO:tour_ready].missing_must`: el Scout lo dice.
+- **Pedido libre (`notes`)**: el generador lo interpreta (Claude) y suma lugares obligatorios, cosas a evitar y temas.
+- **Paradas con historia**: se priorizan lugares con fuentes (Wikipedia/Wikidata, reseñas, resumen de Google, datos propios); si la zona es pobre se amplía el radio (hasta 2,5 km); después de investigar, las paradas con < 3 datos verificados se cambian por reemplazos ya investigados (o salen). Fase 1 suma Wikipedia en inglés y web si hay < 10 datos.
+- **`tour_brief`** devuelve además `interview: string[]` (guía de entrevista para la voz) y arranca con la pregunta abierta `notes` ("¿Qué te gustaría que tenga el tour?"); `TourQuestion.placeholder` opcional; `TOUR_QUESTION_IDS` suma `notes`.
+- **Voz**: entrevista conversacional de 3-6 intercambios con resumen y confirmación antes de `generate_tour`; nunca dejar afuera un lugar pedido. En el tour: si la respuesta no está en `facts`, `research` en el momento (nunca "no sé"); `research_ready` se cuenta entero.
+- **`research`**: verifica citas en código contra la página (Claude solo si no se puede bajar), hasta 5 búsquedas, respuesta hasta ~130 palabras.
+- **Observabilidad**: cada investigación profunda queda en `agent_jobs` con `kind='enrich_stop'` (resultado o error).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeTour, dedupeCandidates, filterCandidates, matchMustInclude, nameSimilarity, type RawCandidate } from './tourGenerator';
+import { composeTour, dedupeCandidates, filterCandidates, hasInfoSignal, matchMustInclude, mustMatchScore, nameSimilarity, type RawCandidate } from './tourGenerator';
 import { brief, fakeDeps, fakeLlm, input } from './tourTestKit';
 
 const cand = (over: Partial<RawCandidate> = {}): RawCandidate => ({
@@ -74,6 +74,18 @@ describe('filterCandidates', () => {
   });
 });
 
+describe('mustMatchScore / hasInfoSignal', () => {
+  it('"Los portones de Carrasco" ≈ "Portones Shopping" (palabra significativa en común)', () => {
+    expect(mustMatchScore('Los portones de Carrasco', 'Portones Shopping')).toBeGreaterThanOrEqual(0.45);
+    expect(mustMatchScore('Los portones de Carrasco', 'Plaza Lieja y Nariño')).toBeLessThan(0.45);
+  });
+  it('sin Wikipedia, reseñas ni datos → no hay de dónde contar', () => {
+    expect(hasInfoSignal(cand({ name: 'Plaza Pasaje Capri' }))).toBe(false);
+    expect(hasInfoSignal(cand({ wiki_title: 'Teatro Solís' }))).toBe(true);
+    expect(hasInfoSignal(cand({ rating_count: 500 }))).toBe(true);
+  });
+});
+
 describe('matchMustInclude', () => {
   it('encuentra por nombre parcial o parecido y devuelve los que faltan', () => {
     const cands = [cand({ name: 'Mercado del Puerto' }), cand({ name: 'Teatro Solís' })];
@@ -126,5 +138,39 @@ describe('composeTour (dependencias falsas)', () => {
     deps.searchGoogle = async () => [];
     deps.searchWikipedia = async () => [];
     await expect(composeTour({ input: input(), brief: brief(), progress: () => {}, startedAt: Date.now() }, deps)).rejects.toThrow(/mínimo 3/);
+  });
+
+  it('lugar pedido que no está entre los candidatos: se busca por nombre y entra aunque sea "shopping" y esté lejos', async () => {
+    const deps = fakeDeps(fakeLlm());
+    deps.searchByName = async () => ({ source: 'google', google_place_id: 'gp', name: 'Portones Shopping', lat: -34.9066, lng: -56.2235, interests: [], google_types: ['shopping_mall'], category_hint: 'shopping_mall', facts: [] });
+    const t = await composeTour({ input: input({ must_include: ['Los portones de Carrasco'], duration_min: 60 }), brief: brief(), progress: () => {}, startedAt: Date.now() }, deps);
+    expect(t.stops.map((s) => s.candidate.name)).toContain('Portones Shopping');
+    expect(t.missingMust).toEqual([]);
+  });
+
+  it('el pedido libre (notes) también suma lugares obligatorios', async () => {
+    const deps = fakeDeps(fakeLlm());
+    deps.searchByName = async () => ({ source: 'google', google_place_id: 'gp', name: 'Portones Shopping', lat: -34.9066, lng: -56.2235, interests: [], facts: [] });
+    const lines: string[] = [];
+    const t = await composeTour({ input: input({ notes: 'quiero historia y no me quiero perder los portones' }), brief: brief(), progress: (l) => lines.push(l), startedAt: Date.now() }, deps);
+    expect(lines.some((l) => /no te querés perder: Los portones de Carrasco/.test(l))).toBe(true);
+    expect(t.stops.map((s) => s.candidate.name)).toContain('Portones Shopping');
+  });
+
+  it('si un lugar pedido no aparece en ningún lado, lo avisa (missingMust)', async () => {
+    const lines: string[] = [];
+    const t = await composeTour({ input: input({ must_include: ['Castillo Inventado'] }), brief: brief(), progress: (l) => lines.push(l), startedAt: Date.now() }, fakeDeps(fakeLlm()));
+    expect(t.missingMust).toEqual(['Castillo Inventado']);
+    expect(lines.some((l) => /No encontré Castillo Inventado/.test(l))).toBe(true);
+  });
+
+  it('una parada que quedó sin datos verificados se cambia por un reemplazo investigado', async () => {
+    const deps = fakeDeps(fakeLlm());
+    const base = deps.wikipediaArticle;
+    deps.wikipediaArticle = async (title, lang) => (title === 'Plaza Independencia' ? null : base(title, lang));
+    const lines: string[] = [];
+    const t = await composeTour({ input: input({ duration_min: 30 }), brief: brief(), progress: (l) => lines.push(l), startedAt: Date.now() }, deps);
+    expect(t.stops.map((s) => s.candidate.name)).not.toContain('Plaza Independencia');
+    expect(t.stops.every((s) => s.facts.filter((f) => f.verified).length >= 3)).toBe(true);
   });
 });
