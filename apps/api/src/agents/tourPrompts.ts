@@ -7,7 +7,7 @@ import { SCOUT } from '@build101/shared';
 export const EXTRACT_SYSTEM = `Sos el investigador de contenido de ${SCOUT.name}, un guía de viajes rioplatense. Te paso el texto de un artículo sobre un lugar (es nuestra fuente) y la ficha del grupo que va a hacer el tour. Extraé los datos que hacen buena una parada de tour.
 
 Reglas:
-- Entre 6 y 12 datos atómicos. Cada "text" es una afirmación autocontenida con el sujeto explícito ("El Teatro Solís se inauguró en 1856", no "se inauguró en 1856").
+- Extraé TODO lo confiable que sirva para contar el lugar: normalmente entre 10 y 25 datos atómicos por texto (más si el texto es largo y rico; menos solo si no hay más). Cada "text" es una afirmación autocontenida con el sujeto explícito ("El Teatro Solís se inauguró en 1856", no "se inauguró en 1856").
 - "quote": la oración del artículo que lo respalda, copiada TEXTUAL (carácter por carácter, sin resumir ni traducir). Se chequea automáticamente contra el artículo: si no coincide, el dato se descarta.
 - Solo lo que dice el artículo. Nada de conocimiento propio.
 - Priorizá, en este orden: historias con personajes, conflictos o giros; el antes y el después del lugar; detalles que se pueden VER hoy (materiales, inscripciones, marcas, formas); curiosidades, récords y mitos; cifras que impresionan; y lo que conecte con los intereses del grupo.
@@ -28,7 +28,7 @@ export function renderExtractUser(a: { place: string; city: string; article: { t
 export const RESEARCH_SYSTEM = `Sos el investigador de contenido de ${SCOUT.name}, un guía de viajes rioplatense. Te paso un lugar, lo que ya sabemos y el ángulo que busca el director. Buscá con web_search y web_fetch lo que FALTA para contar una gran parada, y reportalo con report_facts.
 
 Reglas:
-- Entre 3 y 6 datos nuevos, atómicos y autocontenidos (con el sujeto explícito). No repitas lo que ya sabemos.
+- Entre 4 y 12 datos nuevos, atómicos y autocontenidos (con el sujeto explícito). No repitas lo que ya sabemos. Abrí (web_fetch) las mejores páginas y sacá todo lo útil de cada una, no solo un dato.
 - Buscá ángulos: personajes y anécdotas documentadas, conflictos, qué había antes, detalles visibles hoy, mitos desmentidos, conexiones con el resto de la ciudad.
 - Preferí fuentes institucionales u oficiales (el sitio del lugar, gobierno, patrimonio, universidades, museos) y prensa seria; evitá blogs de turismo y agregadores.
 - Cada dato con: source_url EXACTA de la página donde aparece (no la de la búsqueda), source_title corto, y quote copiada TEXTUAL de esa página (se chequea automáticamente).
@@ -124,9 +124,10 @@ CÓMO SE CUENTA BIEN:
 
 CAPAS:
 - look_at: 1-2 frases, qué mirar exactamente.
-- narration_short: 40-80 palabras (~25 s): el gancho y la historia central.
-- narration_more: 80-150 palabras: OTRA historia o un zoom, no repite la corta.
-- narration_secret: 40-100 palabras: lo que casi nadie sabe (el fact más raro). Si no hay, un detalle para descubrir con la vista.
+- Largos: los que te pida el mensaje (LARGOS). Si no te pide nada: narration_short 90-140 palabras (~1 min), narration_more 200-320, narration_secret 100-180. Usá muchos FACTS: el grupo quiere escuchar mucho, con riqueza de detalle, no un resumen. Si no hay FACTS para llenar el largo, no rellenes: mejor más corto que inventado.
+- narration_short: el gancho y la historia central, con los datos más fuertes.
+- narration_more: OTRAS historias, personajes y detalles (no repite la corta): es la capa más larga y rica.
+- narration_secret: lo que casi nadie sabe (los facts más raros, curiosidades, mitos). Si no hay, un detalle para descubrir con la vista.
 - myth_vs_fact: solo si un fact desmiente una creencia popular; si no, null.
 - photo_spot: dónde pararse y qué encuadrar (tené en cuenta la luz si te paso la hora y la puesta del sol); null si no aplica.
 - kid_mission: si van chicos, una misión concreta y posible ahí mismo (contar, buscar, encontrar, imitar), en una o dos frases dirigidas al chico; si no van chicos, null salvo que sea muy buena.
@@ -145,6 +146,8 @@ export function renderWriterUser(a: {
   alreadyTold: string[];
   sunset: string | null;
   feedback: string[];
+  /** Largos pedidos (palabras). */
+  lengths?: { short: string; more: string; secret: string };
 }): string {
   const s = a.stop;
   const lines = [
@@ -159,6 +162,7 @@ export function renderWriterUser(a: {
       : 'Es la ÚLTIMA parada: transition_to_next y nav_to_next en null; cerrá el tour.',
     a.alreadyTold.length ? `Ya escucharon de este lugar las capas: ${a.alreadyTold.join(', ')} (no repitas lo central).` : '',
     `FACTS (verificados; citá con [fN]):\n${a.facts.length ? a.facts.map((f) => `[${f.id}] ${f.text}`).join('\n') : '(ninguno: describí lo que se ve y hacé preguntas, sin datos duros)'}`,
+    a.lengths ? `LARGOS: narration_short ${a.lengths.short} palabras · narration_more ${a.lengths.more} · narration_secret ${a.lengths.secret}.` : '',
     a.feedback.length ? `CORRECCIONES de la versión anterior (aplicalas):\n${a.feedback.map((f) => `- ${f}`).join('\n')}` : '',
   ];
   return lines.filter(Boolean).join('\n\n');

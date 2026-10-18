@@ -9,6 +9,12 @@ import type { ToolCtx } from '../tools/types';
 import { tour_brief } from '../tools/tour_brief';
 import { startGenerateTour } from './tourGenerator';
 import { fakeDeps, fakeLlm, input } from './tourTestKit';
+import { enrichStop, type DeepDeps } from './tourDeepResearch';
+import { get_stop_content } from '../tools/tour_live';
+import { emptyUsage } from './schemas';
+
+// La fase 2 real (Claude/Wikipedia) no corre en tests: acá se prueba enrichStop con dependencias falsas.
+process.env.TOUR_DEEP_RESEARCH = 'false';
 
 function localSupabase(): { url: string; service: string } | null {
   try {
@@ -80,5 +86,51 @@ describe.skipIf(!local)('tour director (integración, Supabase local + fakes)', 
       expect(facts.length).toBeGreaterThan(0);
       expect(facts.every((f) => f.verified && f.quote)).toBe(true);
     }
+  }, 60_000);
+
+  it('enrichStop: suma el dossier a place_library, alarga las capas y get_stop_content devuelve los facts', async () => {
+    const start = await startGenerateTour(input({ trip_id: DEMO_TRIP_ID }), ctx, fakeDeps(fakeLlm()));
+    created.tours.push(start.tour_id);
+    created.jobs.push(start.job_id);
+    await start.run();
+    const { data: stops } = await admin.from('tour_stops').select('id,place_id,narration_more').eq('tour_id', start.tour_id).order('sort_order');
+    const stop = stops![0];
+    created.places.push(...stops!.map((s) => s.place_id as string));
+    const u = emptyUsage();
+    const many = Array.from({ length: 12 }, (_, i) => `Dato profundo número ${i + 1} sobre la historia del lugar en el siglo XIX`);
+    const deep: DeepDeps = {
+      llm: {
+        ...fakeLlm(),
+        async extractFacts() {
+          return { usage: u, facts: many.map((t, i) => ({ text: t, quote: `Frase ${i + 1} del artículo con datos verificables.`, kind: 'story' as const })) };
+        },
+        async research() {
+          return { usage: u, facts: [], web_search_calls: 0 };
+        },
+        async writeStop() {
+          const long = (n: number, tag: string) => Array.from({ length: n }, () => `Miren con calma este rincón que guarda historias ${tag}.`).join(' ');
+          return {
+            usage: u,
+            stop: { look_at: 'La fachada.', narration_short: long(14, 'cortas'), narration_more: long(40, 'largas'), narration_secret: long(20, 'secretas'), myth_vs_fact: null, photo_spot: null, kid_mission: null, transition_to_next: null, nav_to_next: null },
+          };
+        },
+      },
+      config: { effort: 'low', maxTokens: 1000, maxIterations: 2, fallbacks: false, writerEffort: 'low' },
+      wikipediaArticle: async (title, lang) => ({ title, lang, url: `https://${lang}.wikipedia.org/wiki/x`, text: many.map((_, i) => `Frase ${i + 1} del artículo con datos verificables.`).join('\n') + '\n' + 'Relleno. '.repeat(60) }),
+      findWikiTitles: async () => ({ es: 'Lugar', en: null }),
+      fetchPageText: async () => null,
+      now: () => Date.now(),
+    };
+    const r = await enrichStop(admin, stop.id as string, deep);
+    expect(r.facts_added).toBeGreaterThanOrEqual(12);
+    expect(r.rewritten).toBe(true);
+    expect(r.words_after).toBeGreaterThan(r.words_before);
+    const { data: after } = await admin.from('tour_stops').select('narration_more').eq('id', stop.id).single();
+    expect((after!.narration_more as string).split(/\s+/).length).toBeGreaterThan((stop.narration_more as string).split(/\s+/).length);
+
+    const content = await get_stop_content({ stop_id: stop.id as string, layer: 'short' }, ctx);
+    const data = content.data as { facts?: string[]; layers_left?: string[] };
+    expect(data.facts!.length).toBeGreaterThanOrEqual(12);
+    expect(data.layers_left).toContain('more');
   }, 60_000);
 });

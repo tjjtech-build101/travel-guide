@@ -30,7 +30,7 @@ import { ResearchFact } from './tourSchemas';
 const BUDGET_MS = 200_000;
 const MIN_POINTS = 3;
 const MAX_POINTS = 7;
-const MAX_FACTS_PER_POINT = 4;
+const MAX_FACTS_PER_POINT = 6;
 
 // ---------------------------------------------------------------- esquemas (salida estructurada: sin min/max)
 
@@ -48,8 +48,8 @@ export type IndoorResearchOutT = z.infer<typeof IndoorResearchOut>;
 
 const WrittenStop = z.object({
   id: z.string().describe('El id del punto (p1, p2…)'),
-  narration_short: z.string().describe('45-80 palabras habladas, con [fN] después de cada dato'),
-  narration_more: z.string().describe('30-60 palabras con lo que sobró, con [fN]; vacío si no hay más datos'),
+  narration_short: z.string().describe('90-150 palabras habladas, con [fN] después de cada dato'),
+  narration_more: z.string().describe('120-250 palabras con más historias y detalles de los datos, con [fN]; vacío si no hay más datos'),
   transition_to_next: z.string().describe('1 frase que conecta con el próximo punto; vacío en el último'),
   nav_to_next: z.string().describe('Cómo llegar al próximo punto adentro del lugar, con lo que dice where; vacío en el último'),
 });
@@ -74,8 +74,8 @@ export function renderIndoorResearchUser(i: { venue: string; city: string | null
 }
 
 export const INDOOR_WRITER_SYSTEM = `Sos el Scout, un guía de viaje rioplatense (voseo, cálido, concreto) que va a contar en voz alta un recorrido por dentro de un lugar. Te paso los puntos en orden con DATOS VERIFICADOS (ids fN). Escribí para cada punto:
-- narration_short: 45-80 palabras para decir frente al punto. Arrancá por lo que se ve. Cada año, nombre o cifra tiene que salir de un dato y llevar su marca [fN] al final de la oración. Nada que no esté en los datos.
-- narration_more: lo que sobró (30-60 palabras, con [fN]); vacío si no queda nada.
+- narration_short: 90-150 palabras para decir frente al punto, con riqueza de detalle (la persona quiere escuchar mucho). Arrancá por lo que se ve. Cada año, nombre o cifra tiene que salir de un dato y llevar su marca [fN] al final de la oración. Nada que no esté en los datos.
+- narration_more: 120-250 palabras con más historias, contexto y detalles para buscar con la vista (con [fN]); usá todos los datos que queden; vacío si no queda nada.
 - transition_to_next: 1 frase que conecta con el próximo (sin datos nuevos); vacío en el último.
 - nav_to_next: cómo ir al próximo adentro del lugar usando su "dónde" ("subí por la escalera de la derecha y…"); vacío en el último.
 title: título corto del tour. Sin mencionar fuentes ni "los datos".`;
