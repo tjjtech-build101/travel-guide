@@ -410,3 +410,14 @@ implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDe
 - **Herramienta del celu `at_stop`** `{stop_id?, name?}` (en `VOICE_CLIENT_TOOLS`): "llegué / estoy frente a X" → marca la llegada en el motor y devuelve la parada. `next_stop` en un tour interno además sale de la parada actual.
 - **`look_at_photo`** con `tour_id` de un tour interno: compara contra las paradas del tour (no lo cercano por GPS) y devuelve `tour_stop: {stop_id, name} | null`; el celu marca la llegada y `[EVENTO:photo_result]` lleva `tour_stop`. En tour interno no crea lugares nuevos desde la cámara.
 - **Reglas de voz**: `INDOOR_TOUR_RULES` (se suman a `TOUR_RULES` si el tour es manual; también en `tour_started`). Llegada marcada por la persona → narra directo, sin "¿te cuento?".
+
+---
+
+## Cambios tour director · investigación profunda (fase 2) — en código
+
+- Apenas `generate_tour` deja el tour `ready`, cada parada se investiga a fondo en **su propia invocación** (`POST /internal/enrich-stop {stop_id}`, token HMAC `x-internal-token` con la service key; solo lo llama la propia API). `start_tour` lo lanza una vez para tours que no pasaron por esto (marca `tours.brief.deep_research_at`), solo en paradas con < 15 facts verificados.
+- Investigación profunda (`apps/api/src/agents/tourDeepResearch.ts`): Wikipedia es + en completas en tramos, 3 búsquedas web por ángulo (historia/personajes · arquitectura/arte/detalles · curiosidades/mitos/presente), citas chequeadas en código, juez en lotes. Todo se suma a `place_library.facts` (`appendFacts`). En paradas no curadas, las capas se reescriben largas (short 120-180, more 300-450, secret 150-250 palabras) y `sources` suma las nuevas fuentes.
+- `get_stop_content` suma `layers_left` (capas con contenido que la persona no escuchó) y `facts` (dossier del lugar: hasta 80 datos verificados). Aditivo.
+- Capas de la generación inicial más largas (short 90-140, more 200-320, secret 100-180). Tour interno: short 90-150, more 120-250, hasta 6 datos por punto.
+- Voz (`TOUR_RULES`): cada capa se cuenta entera; al terminar se ofrece la siguiente (`layers_left`) y después se sigue con `facts`; las preguntas del lugar se responden primero con `facts`. `research` responde hasta ~130 palabras con hasta 8 datos.
+- Env de la API: `TOUR_DEEP_RESEARCH` (default `true`; `false` la apaga), `API_PUBLIC_URL` (opcional; si no, `VERCEL_PROJECT_PRODUCTION_URL` en producción o `VERCEL_URL`).

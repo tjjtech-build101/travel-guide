@@ -130,6 +130,10 @@ export type StopContentResult = {
   text: string | null;
   sources: { url: string; title?: string }[];
   already_told: boolean;
+  /** Capas con contenido que esta persona todavía no escuchó (en orden: more, secret, myth, kid, photo). */
+  layers_left?: StopLayer[];
+  /** Dossier del lugar: todos los datos verificados (para seguir contando y responder preguntas sin inventar). */
+  facts?: string[];
 };
 
 /** data de next_stop. */

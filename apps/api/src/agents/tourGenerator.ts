@@ -33,6 +33,7 @@ import { appendFacts, type LibraryFact } from '../places/library';
 import type { Db } from '../supabase';
 import type { ToolCtx } from '../tools/types';
 import { runEventsSearch } from './eventsSearch';
+import { kickDeepResearch } from './tourDeepResearch';
 import { type Effort, JobError } from './llm';
 import { addUsage, emptyUsage, estimateCostUsd, type Usage } from './schemas';
 import { checkNarration, quoteInText, sourcesFor, stripCitations, wordCount, type CitedFact } from './tourCheck';
@@ -1121,7 +1122,7 @@ export async function composeTour(
     return checkWritten(k, i, res.stop);
   };
 
-  const needsRetry = (d: Draft) => wordCount(d.written.narration_short) < 25 || wordCount(d.written.narration_more) < 40 || d.dropped.length > 2;
+  const needsRetry = (d: Draft) => wordCount(d.written.narration_short) < 50 || wordCount(d.written.narration_more) < 90 || d.dropped.length > 2;
   const retryFeedback = (d: Draft) => [
     ...(d.dropped.length ? [`Se borraron estas oraciones porque tenían datos que no están en FACTS (no los repitas; contá otra cosa o citá bien): ${d.dropped.map((s) => `"${s}"`).join(' · ')}`] : []),
     'Cada oración con año, cifra, siglo o nombre propio termina con su cita [fN].',
@@ -1348,6 +1349,10 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
 
     // Bloque "tour" del itinerario → se liga al tour recién armado (si no, "Empezar tour" nunca lo encuentra).
     if (input.block_id) await admin.from('blocks').update({ tour_id: tourId }).eq('id', input.block_id);
+
+    // Fase 2: investigación profunda de cada parada, una invocación por parada (mientras caminan a la primera).
+    await kickDeepResearch(admin, stopRows.map((r) => r.id as string)).catch((err) => console.warn('[generate_tour] deep research:', readable(err)));
+    await admin.from('tours').update({ brief: { ...extra.brief, deep_research_at: new Date().toISOString() } }).eq('id', tourId);
 
     if (tripId) {
       await insertFeed(ctx, {
