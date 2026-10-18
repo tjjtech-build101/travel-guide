@@ -6,9 +6,12 @@ import { clearAnchorCache } from './anchors';
 import {
   type BriefDeps,
   type BriefLLM,
+  briefDone,
   clearIssuedQuestions,
   clearUnderstandingCache,
   holidayLines,
+  normalizeQuestions,
+  normalizeUnderstanding,
   parseAskedQuestions,
   type ResearchFn,
   seasonLine,
@@ -16,7 +19,7 @@ import {
   tripBrief,
   tripShapes,
 } from './briefLlm';
-import { type BriefOutputT, questionMessage, type ShapeVariantT } from './briefPrompts';
+import { BRIEF_SYSTEM, type BriefOutputT, questionMessage, renderBriefUser, type ShapeVariantT } from './briefPrompts';
 import { ctxFor, FakeDb, seedTrip, U } from './orchestrationTestKit';
 
 type Q = BriefOutputT['questions'][number];
@@ -87,10 +90,11 @@ beforeEach(() => {
 });
 
 describe('trip_brief', () => {
-  it('input: conversación obligatoria y round 1-3', () => {
+  it('input: conversación obligatoria y round 1-4', () => {
     expect(toolDefs.trip_brief.input.safeParse({ conversation }).success).toBe(true);
     expect(toolDefs.trip_brief.input.safeParse({ conversation, round: 2 }).success).toBe(true);
-    expect(toolDefs.trip_brief.input.safeParse({ conversation, round: 4 }).success).toBe(false);
+    expect(toolDefs.trip_brief.input.safeParse({ conversation, round: 4 }).success).toBe(true);
+    expect(toolDefs.trip_brief.input.safeParse({ conversation, round: 5 }).success).toBe(false);
     expect(toolDefs.trip_brief.input.safeParse({ conversation: [] }).success).toBe(false);
   });
 
@@ -126,7 +130,7 @@ describe('trip_brief', () => {
     ));
     expect(userMsg).toContain('Próximo sábado: 2026-10-24');
     expect(userMsg).toContain('Juan (organizador)');
-    expect(userMsg).toContain('Ronda 1 de 3');
+    expect(userMsg).toContain('Ronda 1 de 4');
     expect(r.summary).toBe('Entendí: 5 días entre Montevideo y Buenos Aires.');
     expect(r.questions.map((x) => x.id)).toEqual(['arrival', 'lodging', 'budget', 'pace']);
     expect(r.questions[0]).toMatchObject({ kind: 'text', default: null, options: [], dimension: 'arrival' });
@@ -233,6 +237,108 @@ describe('preguntas ya hechas en la conversación', () => {
   });
 });
 
+// ───────────────────────── Repreguntas: rondas 1-4 que profundizan
+
+describe('entrevista en rondas: repreguntas que profundizan', () => {
+  const traful = 'Una semana en Villa Traful y Villa La Angostura con mi novia, vamos en auto. Cabaña, fogón y relax, algo de trekking y el Bosque Sumergido';
+  const trafulUnderstood = (over: Partial<BriefOutputT['understood']> = {}) =>
+    understood({
+      destinations: [{ city: 'Villa Traful', country: 'Argentina' }, { city: 'Villa La Angostura', country: 'Argentina' }],
+      start_date: '2026-11-10',
+      days: 7,
+      party: 'couple',
+      names: [],
+      interests: [{ tag: 'naturaleza', weight: 5 }, { tag: 'deporte', weight: 3 }],
+      must: ['Bosque Sumergido'],
+      avoid: [],
+      notes: ['en auto'],
+      ...over,
+    });
+  const conv2 = [
+    { role: 'user' as const, text: traful },
+    { role: 'assistant' as const, text: questionMessage({ id: 'salida', dimension: 'dates', text: '¿Cuándo salen?' }) },
+    { role: 'user' as const, text: '10 de noviembre' },
+    { role: 'assistant' as const, text: questionMessage({ id: 'trekking_nivel', dimension: 'interests', text: '¿Qué trekkings se animan?' }) },
+    { role: 'user' as const, text: 'Medio día' },
+    { role: 'assistant' as const, text: questionMessage({ id: 'extras', dimension: 'extras', text: '¿Qué no se quieren perder?' }) },
+    { role: 'user' as const, text: 'Bosque Sumergido (buceo/kayak), Camino de los 7 Lagos' },
+    { role: 'assistant' as const, text: questionMessage({ id: 'alojamiento', dimension: 'lodging', text: '¿Dónde quieren dormir?' }) },
+    { role: 'user' as const, text: 'Cabaña, fogón y relax' },
+  ];
+
+  it('briefDone: nunca antes de la ronda 3 si queda algo útil; en la 4 siempre; sin destino nunca', () => {
+    expect(briefDone({ round: 1, ready: true, questions: 3, modelDone: true })).toBe(false);
+    expect(briefDone({ round: 2, ready: true, questions: 2, modelDone: true })).toBe(false);
+    expect(briefDone({ round: 2, ready: true, questions: 0, modelDone: false })).toBe(true); // no queda nada útil
+    expect(briefDone({ round: 3, ready: true, questions: 2, modelDone: false })).toBe(false);
+    expect(briefDone({ round: 3, ready: true, questions: 2, modelDone: true })).toBe(true);
+    expect(briefDone({ round: 4, ready: true, questions: 3, modelDone: false })).toBe(true);
+    expect(briefDone({ round: 4, ready: false, questions: 0, modelDone: true })).toBe(false);
+  });
+
+  it('repregunta con id nuevo: pasa en extras/interests/lodging aunque la dimensión ya esté; no en duration/dates', () => {
+    const u = normalizeUnderstanding(trafulUnderstood(), {});
+    const asked = parseAskedQuestions(conv2);
+    const qs = normalizeQuestions(
+      [
+        q('bosque_sumergido_modo', { dimension: 'extras', text: '¿Bucean con equipo (tienen certificación) o kayak/snorkel?' }),
+        q('trekking_largo', { dimension: 'interests', text: '¿Se animan a un día entero al Cerro Bayo?' }),
+        q('cabana_tipo', { dimension: 'lodging', kind: 'multi', text: '¿Cabaña con hidromasaje, vista al lago o cerca del pueblo?' }),
+        q('cuantos_dias', { dimension: 'duration', text: '¿Cuántos días se quedan?' }),
+        q('fecha_vuelta', { dimension: 'dates', text: '¿Qué día vuelven?' }),
+        q('extras', { dimension: 'extras', text: '¿Algo más que quieran hacer?' }), // id repetido → afuera
+      ],
+      u,
+      { asked },
+    );
+    expect(qs.map((x) => x.id)).toEqual(['bosque_sumergido_modo', 'trekking_largo', 'cabana_tipo']);
+  });
+
+  it('ronda 1 (sin respuestas): los gustos que ya dijo no se vuelven a preguntar', () => {
+    const u = normalizeUnderstanding(trafulUnderstood(), {});
+    const qs = normalizeQuestions([q('gustos', { dimension: 'interests', text: '¿Qué les copa?' })], u, { asked: [] });
+    expect(qs).toEqual([]);
+  });
+
+  it('ronda 2 con done del modelo: igual sigue (profundiza); ronda 4: termina aunque haya preguntas', async () => {
+    let user2 = '';
+    const brief: BriefLLM['brief'] = async ({ user }) => {
+      user2 = user;
+      return {
+        value: out({
+          understood: trafulUnderstood(),
+          questions: [
+            q('bosque_sumergido_modo', { dimension: 'extras', text: '¿Bucean con equipo o kayak/snorkel?' }),
+            q('siete_lagos_ritmo', { dimension: 'extras', text: '¿El Camino de los 7 Lagos en el día o paran a dormir?' }),
+          ],
+          done: true,
+        }),
+        usage: emptyUsage(),
+      };
+    };
+    const r2 = await tripBrief({ conversation: conv2, round: 2 }, ctxFor(new FakeDb(), U.juan), deps({ brief }));
+    expect(r2).toMatchObject({ round: 2, done: false });
+    expect(r2.questions.map((x) => x.id)).toEqual(['bosque_sumergido_modo', 'siete_lagos_ritmo']);
+    expect(user2).toContain('Ronda 2 de 4. Profundizá en lo que contestó');
+    expect(user2).toContain('«Bosque Sumergido (buceo/kayak), Camino de los 7 Lagos»');
+
+    const r4 = await tripBrief({ conversation: conv2, round: 4 }, ctxFor(new FakeDb(), U.juan), deps({ brief }));
+    expect(r4).toMatchObject({ round: 4, done: true });
+    expect(user2).toContain('Ronda 4 de 4. Es la última');
+  });
+
+  it('el prompt estático trae ejemplos de ronda 2 que profundizan (Villa Traful, Mundial) y no habla de 3 rondas', () => {
+    expect(BRIEF_SYSTEM).toContain('bosque_sumergido_modo');
+    expect(BRIEF_SYSTEM).toContain('siete_lagos_ritmo');
+    expect(BRIEF_SYSTEM).toContain('cabana_tipo');
+    expect(BRIEF_SYSTEM).toContain('entradas_categoria');
+    expect(BRIEF_SYSTEM).not.toMatch(/máximo 3/);
+    const user = renderBriefUser({ today: '2026-10-17', profiles: [], existingLegs: [], conversation: conv2, ask: 'brief', round: 3 });
+    expect(user).toContain('Ronda 3 de 4.');
+    expect(user).not.toContain('done=false');
+  });
+});
+
 // ───────────────────────── Caso real: Mundial de Rugby 2027
 
 const mundialStory = 'Me quiero ir a Australia con amigos a ver el mundial de rugby de 2027';
@@ -277,13 +383,13 @@ const auVariant = (label: string, over: Partial<ShapeVariantT> = {}): ShapeVaria
 });
 
 describe('entrevista en rondas: Mundial de Rugby 2027', () => {
-  it('ronda 1 → 2 → 3: no repite lo ya preguntado, máx. 4, effort según ronda, done en la 3; después formas con anclas', async () => {
+  it('ronda 1 → 2 → 3: no repite lo ya preguntado, máx. 4, effort según ronda, done en la 3 si el modelo dice; después formas con anclas', async () => {
     const calls: { round: string; effort: string; user: string }[] = [];
     const research = vi.fn<ResearchFn>(async () => ({ anchors: researchedAnchors, researched: true, notes: ['El cruce de cuartos depende del grupo.'], event: 'Rugby World Cup 2027' }));
     let shapesUser = '';
     const llm: BriefLLM = {
       brief: async ({ user, config }) => {
-        const round = /Ronda (\d) de 3/.exec(user)?.[1] ?? 'understand';
+        const round = /Ronda (\d) de 4/.exec(user)?.[1] ?? 'understand';
         calls.push({ round, effort: config.effort, user });
         if (round === '1') {
           return {
@@ -328,7 +434,7 @@ describe('entrevista en rondas: Mundial de Rugby 2027', () => {
               summary: 'Listo: Pumas desde grupos, 5 amigos desde Buenos Aires, vuelos internos.',
               understood: mundialUnderstood({ travelers: 5, origin: 'Buenos Aires', budget: 'mid', anchors: [{ ...mundialAnchor, name: 'Partidos de los Pumas en el Mundial de Rugby 2027', tickets: 'want', note: 'desde grupos' }] }),
               questions: [q('pace', { optional: true })],
-              done: false,
+              done: true, // desde la ronda 3 manda el modelo
             }),
             usage: emptyUsage(),
           };
@@ -388,7 +494,7 @@ describe('entrevista en rondas: Mundial de Rugby 2027', () => {
     expect(r2.done).toBe(false);
     expect(r2.coverage?.travelers).toBe('known');
 
-    // Ronda 3: done siempre.
+    // Ronda 3: el modelo dice que alcanza → done.
     const conv3 = [
       ...conv2,
       ...r2.questions.flatMap((x) => [

@@ -88,7 +88,9 @@ export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleto
   if (status === 'done') {
     // main (fb4199d) sacó el cartel "Listo" genérico para dejar la pantalla limpia: solo vuelve cuando trae algo
     // accionable del planificador colaborativo (menú para elegir, días armados, lugares para elegir, cobertura).
-    if (!isCompose && result?.stage !== 'menu' && !coverage.length && !choices) return null;
+    // Menú solo si de verdad trajo opciones (stage 'menu' con 0 opciones no tiene nada para elegir).
+    const hasMenu = !isCompose && result?.stage === 'menu' && (result?.options ?? 0) > 0;
+    if (!isCompose && !hasMenu && !coverage.length && !choices) return null;
     if (Date.now() - new Date(row.updated_at).getTime() > DONE_VISIBLE_MS && !jobIdProp) return null;
     if (undone) {
       return (
@@ -113,15 +115,20 @@ export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleto
         Alert.alert('No pude deshacer', res.error.message);
       }
     };
-    const menuStage = !isCompose && result?.stage === 'menu';
+    const menuStage = hasMenu;
     const summary = menuStage
-      ? `Listo: armé el menú${result?.options ? ` con ${plural(result.options, 'opción', 'opciones')}` : ''} para ${plural(result?.legs ?? legCount, 'tramo', 'tramos')}. Ahora elijan qué va.`
+      ? `Listo: armé ${plural(result?.options ?? 0, 'opción', 'opciones')} para ${plural(result?.legs ?? legCount, 'tramo', 'tramos')}.`
       : isCompose
         ? `Listo: armé los días con ${plural(composeResult?.blocks ?? blockCount, 'bloque', 'bloques')}`
         : `Listo: ${plural(result?.legs ?? legCount, 'tramo', 'tramos')}, ${plural(result?.days ?? 0, 'día', 'días')}, ${plural(result?.blocks ?? blockCount, 'bloque', 'bloques')}`;
     return (
       <View style={styles.chip} accessibilityLiveRegion="polite">
         <Text style={styles.chipText}>{summary}</Text>
+        {menuStage ? (
+          <Text style={styles.chipSub}>
+            Armé una lista de imperdibles y opciones por ciudad: marcá lo que les copa y después armo los días.
+          </Text>
+        ) : null}
         {!menuStage && choices > 0 ? (
           <Text style={styles.chipSub}>Te dejé {plural(choices, 'lugar', 'lugares')} para elegir</Text>
         ) : null}
@@ -132,7 +139,7 @@ export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleto
         ) : null}
         <View style={styles.chipActions}>
           {menuStage ? (
-            <ChipLink label="Elegir del menú" onPress={() => router.push({ pathname: '/trip/[tripId]/menu', params: { tripId } })} />
+            <ChipLink label="Elegir qué hacer en cada lugar" onPress={() => router.push({ pathname: '/trip/[tripId]/menu', params: { tripId } })} />
           ) : null}
           {!menuStage && cov.mustTotal > 0 ? (
             <ChipLink label={`${cov.mustCovered}/${cov.mustTotal} imperdibles`} onPress={() => setCoverageOpen(true)} />

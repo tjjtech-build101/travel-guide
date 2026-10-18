@@ -292,7 +292,7 @@ export const TripBriefInput = z.object({
   conversation: PlannerConversation.describe('Lo que contó el usuario + preguntas/respuestas anteriores'),
   start_date: IsoDate.optional(),
   end_date: IsoDate.optional(),
-  round: z.number().int().min(1).max(3).optional().describe('v2: ronda de la entrevista (1-3). Default 1.'),
+  round: z.number().int().min(1).max(4).optional().describe('Ronda de la entrevista (1-4): 1 = lo básico, 2-4 = repreguntas sobre lo que contestó. Default 1.'),
 });
 
 export const TripShapesInput = z.object({

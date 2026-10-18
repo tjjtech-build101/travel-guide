@@ -13,6 +13,7 @@ import type {
 } from '@build101/shared';
 
 import { formatDay } from '../../lib/format';
+import { clampDays, daysInclusive, daysLabel, decodeRange } from './calendarModel';
 
 export type Turn = { role: 'user' | 'assistant'; text: string };
 /** Respuesta a una TripQuestion: value (single/text/date) o lista de values (multi). */
@@ -36,13 +37,76 @@ export const DEMO_STORY =
 const MAX_TEXT = 2000;
 const MAX_TURNS = 40;
 
-/** Conversación base: el saludo, lo que contó la persona y la fecha si la eligió. */
-export function baseConversation(story: string, startDate: string | null): Turn[] {
+/** Lo elegido en Contame además del texto: fecha de llegada, de salida y cuántos días. */
+export type TellExtras = { endDate?: string | null; days?: number | null };
+
+/** Conversación base: el saludo, lo que contó la persona y la fecha/duración si las eligió. */
+export function baseConversation(story: string, startDate: string | null, extras: TellExtras = {}): Turn[] {
   const conv: Turn[] = [{ role: 'assistant', text: TELL_PROMPT }];
   const clean = story.trim();
   if (clean) conv.push({ role: 'user', text: clean.slice(0, MAX_TEXT) });
   if (startDate) conv.push({ role: 'user', text: `Fecha de inicio elegida: ${startDate}` });
+  if (startDate && extras.endDate) conv.push({ role: 'user', text: `Fecha de vuelta elegida: ${extras.endDate}` });
+  if (extras.days) conv.push({ role: 'user', text: `Duración elegida: ${daysLabel(extras.days)}` });
   return conv;
+}
+
+// ───────────────────────── Respuestas
+// Una respuesta es un value (single/text/date) o una lista (multi). Además de los values de las opciones puede llevar:
+//  · texto libre ("Otra cosa…"): FREE_PREFIX + texto (uno solo por pregunta; en multi se suma a lo elegido);
+//  · cantidad de días a mano (preguntas de duración): DAYS_PREFIX + N;
+//  · fecha o rango del calendario (preguntas de fecha): "YYYY-MM-DD" o "YYYY-MM-DD/YYYY-MM-DD".
+// Así sigue siendo string | string[] (persistido sin migrar) y la conversación lleva labels + texto libre.
+
+export const FREE_PREFIX = '__free__:';
+export const DAYS_PREFIX = '__days__:';
+const MAX_FREE = 400;
+
+export function isFree(v: string): boolean {
+  return v.startsWith(FREE_PREFIX);
+}
+
+function isDays(v: string): boolean {
+  return v.startsWith(DAYS_PREFIX);
+}
+
+function asList(v: AnswerValue | undefined): string[] {
+  return Array.isArray(v) ? v : v ? [v] : [];
+}
+
+/** Pregunta de cuántos días (lleva el control "Otra cantidad"). */
+export function isDurationQuestion(q: Pick<TripQuestion, 'dimension' | 'kind'>): boolean {
+  return q.dimension === 'duration' && q.kind !== 'text';
+}
+
+/** Lo escrito en "Otra cosa…" (o null). */
+export function freeTextOf(v: AnswerValue | undefined): string | null {
+  const f = asList(v).find(isFree);
+  return f ? f.slice(FREE_PREFIX.length) : null;
+}
+
+/** La cantidad de días puesta a mano (o null). */
+export function daysOf(v: AnswerValue | undefined): number | null {
+  const d = asList(v).find(isDays);
+  const n = d ? Number(d.slice(DAYS_PREFIX.length)) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Escribe (o borra, si queda vacío) el texto libre. Single/date: reemplaza lo elegido. Multi: se suma a las opciones.
+ * Se guarda tal cual (para no comerse espacios mientras se tipea); el recorte va en answerText.
+ */
+export function setFreeText(q: TripQuestion, current: AnswerValue | undefined, text: string): AnswerValue {
+  const free = text.length && text.trim() ? [FREE_PREFIX + text.slice(0, MAX_FREE)] : [];
+  if (q.kind === 'multi') return [...asList(current).filter((v) => !isFree(v)), ...free];
+  return free[0] ?? '';
+}
+
+/** Cantidad de días a mano (1-60): reemplaza la opción elegida (en multi, reemplaza solo la cantidad anterior). */
+export function setDays(q: TripQuestion, current: AnswerValue | undefined, n: number): AnswerValue {
+  const value = DAYS_PREFIX + clampDays(n);
+  if (q.kind === 'multi') return [...asList(current).filter((v) => !isDays(v)), value];
+  return value;
 }
 
 /** Defaults de cada pregunta (lo que se preselecciona y lo que usa "Saltar preguntas"). */
@@ -56,27 +120,58 @@ export function defaultAnswers(questions: TripQuestion[]): Answers {
   return out;
 }
 
-/** Selección de un chip: single reemplaza, multi alterna. */
+/** Selección de un chip: single reemplaza (también el texto libre), multi alterna (el texto libre queda). */
 export function toggleAnswer(q: TripQuestion, current: AnswerValue | undefined, value: string): AnswerValue {
   if (q.kind !== 'multi') return value;
-  const cur = Array.isArray(current) ? current : current ? [current] : [];
+  const cur = asList(current);
   return cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value];
 }
 
-export function isAnswered(v: AnswerValue | undefined): boolean {
-  return Array.isArray(v) ? v.length > 0 : !!v?.trim();
+/** ¿Está elegida esta opción? */
+export function isSelected(current: AnswerValue | undefined, value: string): boolean {
+  return asList(current).includes(value);
 }
 
-/** Lo que "dice" la persona al contestar: los labels de las opciones (no los values). */
+export function isAnswered(v: AnswerValue | undefined): boolean {
+  return asList(v).some((x) => (isFree(x) ? !!x.slice(FREE_PREFIX.length).trim() : !!x.trim()));
+}
+
+/** Una parte de la respuesta, como la "dice" la persona. */
+function partText(q: TripQuestion, value: string): string | null {
+  if (isFree(value)) return value.slice(FREE_PREFIX.length).trim() || null;
+  if (isDays(value)) {
+    const n = daysOf(value);
+    return n ? daysLabel(n) : null;
+  }
+  const range = q.kind === 'date' ? decodeRange(value) : null;
+  if (range?.start) {
+    const a = `${formatDay(range.start)} (${range.start})`;
+    return range.end ? `${a} al ${formatDay(range.end)} (${range.end}), ${daysLabel(daysInclusive(range.start, range.end))}` : a;
+  }
+  if (q.kind === 'text') return value.trim() || null;
+  return q.options.find((o) => o.value === value)?.label ?? (value.trim() || null);
+}
+
+/** Lo que "dice" la persona al contestar: los labels de las opciones (no los values) + el texto libre, con comas. */
 export function answerText(q: TripQuestion, v: AnswerValue | undefined): string | null {
   if (!isAnswered(v)) return null;
-  const label = (value: string) => q.options.find((o) => o.value === value)?.label ?? value;
-  if (q.kind === 'date') {
-    const iso = Array.isArray(v) ? v[0]! : v!;
-    return /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${formatDay(iso)} (${iso})` : label(iso);
-  }
-  if (Array.isArray(v)) return v.map(label).join(', ');
-  return q.kind === 'text' ? v!.trim() : label(v!);
+  const parts = asList(v)
+    .map((x) => partText(q, x))
+    .filter((x): x is string => !!x);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/**
+ * Elegir un rango en el calendario de una pregunta de fecha completa sola las preguntas de duración
+ * (como cantidad de días a mano). Devuelve las respuestas nuevas.
+ */
+export function withDateAnswer(questions: TripQuestion[], answers: Answers, q: TripQuestion, value: string): Answers {
+  const next: Answers = { ...answers, [q.id]: value };
+  const range = decodeRange(value);
+  if (!range?.start || !range.end) return next;
+  const n = clampDays(daysInclusive(range.start, range.end));
+  for (const d of questions) if (d.id !== q.id && isDurationQuestion(d)) next[d.id] = setDays(d, undefined, n);
+  return next;
 }
 
 /**
@@ -97,8 +192,10 @@ export function conversationWithAnswers(base: Turn[], questions: TripQuestion[],
 
 // ───────────────────────── Entrevista en rondas (trip_brief v2)
 
-/** Máximo de rondas de la entrevista (TripBriefInput.round 1-3). */
-export const MAX_ROUNDS = 3;
+/** Máximo de rondas de la entrevista (TripBriefInput.round 1-4). */
+export const MAX_ROUNDS = 4;
+/** Hasta esta ronda se repregunta aunque la API diga done (si trajo preguntas): la persona quiere ir a fondo. */
+export const MIN_ROUNDS = 3;
 
 /** Preguntas sin repetir id (gana la primera aparición). */
 export function uniqueQuestions(questions: TripQuestion[]): TripQuestion[] {
@@ -121,9 +218,13 @@ export function mergeRoundAnswers(prev: Answers, keep: TripQuestion[], incoming:
   return { ...defaultAnswers(incoming), ...kept };
 }
 
-/** ¿Después de esta ronda (1-based) va otra o ya pasamos a las formas? */
+/**
+ * ¿Después de esta ronda (1-based) va otra o ya pasamos a las formas? Si la ronda trajo preguntas, se repregunta
+ * hasta la ronda 3 aunque diga done; después, solo si no dice done (tope: 4 rondas).
+ */
 export function wantsAnotherRound(brief: Pick<TripBriefResult, 'done' | 'questions'>, round: number): boolean {
-  return !brief.done && round < MAX_ROUNDS && brief.questions.length > 0;
+  if (round >= MAX_ROUNDS || !brief.questions.length) return false;
+  return !brief.done || round < MIN_ROUNDS;
 }
 
 /** Ronda que llegó sin nada para preguntar (o done sin preguntas): se salta directo a las formas. */
@@ -131,10 +232,12 @@ export function skipRound(brief: Pick<TripBriefResult, 'done' | 'questions'>): b
   return brief.questions.length === 0;
 }
 
-/** Indicador sutil arriba de las preguntas. */
-export function roundLabel(round: number, brief: Pick<TripBriefResult, 'done'>): string {
-  if (round <= 1) return brief.done ? 'Con esto ya casi lo tengo' : `Ronda 1 de ${MAX_ROUNDS} · lo básico`;
-  return brief.done || round >= MAX_ROUNDS ? 'Últimas preguntas para afinar' : `Ronda ${round} de ${MAX_ROUNDS} · unas preguntas más para afinar`;
+const ROUND_TOPIC = ['lo básico', 'repreguntas sobre lo que me contaste', 'un poco más a fondo', 'últimos detalles'];
+
+/** Indicador sutil arriba de las preguntas: "Ronda 2 · repreguntas sobre lo que me contaste" (sin total fijo). */
+export function roundLabel(round: number): string {
+  const r = Math.max(1, Math.min(round, MAX_ROUNDS));
+  return `Ronda ${r} · ${ROUND_TOPIC[r - 1]}`;
 }
 
 export const TRIP_KIND_LABEL: Record<TripKind, string> = {
@@ -208,16 +311,27 @@ export function clampConversation(conv: Turn[]): Turn[] {
   return conv.map((t) => ({ role: t.role, text: t.text.slice(0, MAX_TEXT) })).slice(-MAX_TURNS);
 }
 
-/** Fecha de inicio: la elegida al contar o, si no, la que contestó en una pregunta de fecha. */
-export function effectiveStartDate(startDate: string | null, questions: TripQuestion[], answers: Answers): string | null {
-  if (startDate) return startDate;
+/** El primer rango de calendario contestado en una pregunta de fecha (o null). */
+function answeredRange(questions: TripQuestion[], answers: Answers) {
   for (const q of questions) {
     if (q.kind !== 'date') continue;
-    const v = answers[q.id];
-    const iso = Array.isArray(v) ? v[0] : v;
-    if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+    for (const v of asList(answers[q.id])) {
+      const r = decodeRange(v);
+      if (r?.start) return r;
+    }
   }
   return null;
+}
+
+/** Fecha de inicio: la elegida al contar o, si no, la que contestó en una pregunta de fecha. */
+export function effectiveStartDate(startDate: string | null, questions: TripQuestion[], answers: Answers): string | null {
+  return startDate ?? answeredRange(questions, answers)?.start ?? null;
+}
+
+/** Fecha de vuelta: la de Contame (si hay inicio ahí) o la salida del rango de una pregunta de fecha. */
+export function effectiveEndDate(startDate: string | null, endDate: string | null, questions: TripQuestion[], answers: Answers): string | null {
+  if (startDate) return endDate && endDate >= startDate ? endDate : null;
+  return answeredRange(questions, answers)?.end ?? null;
 }
 
 /** La forma elegida tal como la espera plan_trip (sin id/label/pitch/tradeoffs/recommended). */
@@ -276,6 +390,7 @@ export function understandingForPlan(u: TripUnderstanding): TripUnderstanding {
 export function planTripInput(opts: {
   conversation: Turn[];
   startDate: string | null;
+  endDate?: string | null;
   shape: TripShape | null;
   mode: PlanMode;
   /** Lo que entendió trip_brief en la ÚLTIMA ronda (gustos, anclas, tipo de viaje, origen). */
@@ -285,6 +400,7 @@ export function planTripInput(opts: {
     conversation: clampConversation(opts.conversation),
     ...(opts.understanding ? { understanding: understandingForPlan(opts.understanding) } : {}),
     ...(opts.startDate ? { start_date: opts.startDate } : {}),
+    ...(opts.startDate && opts.endDate && opts.endDate >= opts.startDate ? { end_date: opts.endDate } : {}),
     ...(opts.shape ? { skeleton: skeletonFromShape(opts.shape), ...(opts.shape.title ? { title: opts.shape.title.slice(0, 80) } : {}) } : {}),
     mode: opts.mode,
   };

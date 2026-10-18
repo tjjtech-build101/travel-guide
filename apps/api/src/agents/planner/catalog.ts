@@ -1,8 +1,9 @@
 // Catálogo del destino (PRD 31): la pieza que garantiza que no se pierda nada importante de una ciudad.
-// - getCatalog: investiga (generate) → crítico independiente busca lo que falta (review) → merge/dedupe → resuelve
-//   cada ítem en Places (nunca inventado) → descarta lo que no existe o cae lejos → horarios y popularidad de lo
-//   importante → valida el tier ("imperdible" exige ≥2 fuentes o mucha notoriedad) → cachea en destination_catalog
-//   (global por ciudad, 30 días). Una sola corrida por ciudad a la vez (mapa de promesas en memoria).
+// - getCatalog: investiga (generate, tope 90 s) → resuelve cada ítem en Places (nunca inventado; tope 30 s, si se
+//   corta guarda lo resuelto) → descarta lo que no existe o cae lejos → horarios y popularidad de lo importante →
+//   valida el tier ("imperdible" exige ≥2 fuentes o mucha notoriedad) → GUARDA en destination_catalog (global por
+//   ciudad, 30 días, model "+first-pass") → en segundo plano, un crítico independiente busca lo que falta (review)
+//   y actualiza la fila. Una sola corrida por ciudad a la vez (mapas de promesas en memoria).
 // - legEvents: eventos con fecha del tramo (reusa el investigador de eventos de PRD 16).
 // - scoreItem / scoreItemFor: afinidad × notoriedad × ajustes, igual idea que scoreForGroup de tourRoute.ts.
 // - buildLegOptions: el menú del tramo por secciones, con preselección hasta ~85% de la capacidad de los días.
@@ -28,10 +29,11 @@ import { placeHoursAndPopularity, searchPlaces as googleSearchPlaces, type Place
 import { EVENTS_SYSTEM, renderEventsUser } from '../eventsPrompts';
 import { EventsSearchOutput, type EventItemT } from '../eventsSchemas';
 import { sanitizeEvents } from '../eventsSearch';
-import { emptyUsage, type Usage } from '../schemas';
+import { emptyUsage } from '../schemas';
 import { captureViaTool } from '../tourLlm';
 import { normalizeNotability } from '../tourRoute';
 import type { Db } from '../../supabase';
+import { runInBackground } from '../../jobs';
 import { research } from './catalogLlm';
 import { diversityCaps, diversityKind, type DiversityKind } from './check';
 import type {
@@ -201,39 +203,131 @@ async function mapLimit<T, R>(xs: T[], limit: number, fn: (x: T, i: number) => P
   return out;
 }
 
-const sumUsage = (...us: Usage[]): Usage =>
-  us.reduce(
-    (a, u) => ({
-      input_tokens: a.input_tokens + u.input_tokens,
-      output_tokens: a.output_tokens + u.output_tokens,
-      cache_read_input_tokens: a.cache_read_input_tokens + u.cache_read_input_tokens,
-      cache_creation_input_tokens: a.cache_creation_input_tokens + u.cache_creation_input_tokens,
-      web_search_requests: a.web_search_requests + u.web_search_requests,
-    }),
-    emptyUsage(),
-  );
-
 function abortIf(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error('Se canceló el armado del catálogo.');
 }
 
+/** Señal que se dispara a los `ms` o cuando se dispara `parent`. clear() suelta el timer. */
+function deadline(ms: number, parent?: AbortSignal): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const onParent = () => controller.abort();
+  if (parent?.aborted) controller.abort();
+  else parent?.addEventListener('abort', onParent, { once: true });
+  const timer = setTimeout(() => controller.abort(), ms);
+  (timer as { unref?: () => void }).unref?.();
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onParent);
+    },
+  };
+}
+
+/** Corre fn con su propio tope: si se pasa (o se cancela el padre), aborta y tira. */
+async function withStageTimeout<T>(ms: number, parent: AbortSignal | undefined, what: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const d = deadline(ms, parent);
+  const why = () => new Error(parent?.aborted ? 'Se canceló el armado del catálogo.' : `Se cortó por tiempo ${what}.`);
+  try {
+    return await Promise.race([
+      fn(d.signal),
+      new Promise<never>((_, reject) => {
+        if (d.signal.aborted) reject(why());
+        else d.signal.addEventListener('abort', () => reject(why()), { once: true });
+      }),
+    ]);
+  } catch (err) {
+    // Lo que tire fn por el abort (AbortError del SDK) se informa como corte por tiempo / cancelación.
+    throw d.signal.aborted ? why() : err;
+  } finally {
+    d.clear();
+  }
+}
+
+/**
+ * mapLimit que se corta cuando se dispara `stop`: devuelve lo que llegó a terminar (undefined = no se llegó).
+ * Lo que queda en vuelo sigue solo y se ignora.
+ */
+async function mapUntil<T, R>(xs: T[], limit: number, stop: AbortSignal, fn: (x: T, i: number) => Promise<R>): Promise<(R | undefined)[]> {
+  const out = new Array<R | undefined>(xs.length).fill(undefined);
+  if (!xs.length || stop.aborted) return out;
+  let next = 0;
+  const worker = async () => {
+    while (next < xs.length && !stop.aborted) {
+      const i = next++;
+      const r = await fn(xs[i], i);
+      if (!stop.aborted) out[i] = r;
+    }
+  };
+  let onStop: () => void = () => {};
+  const stopped = new Promise<void>((res) => {
+    onStop = () => res();
+    stop.addEventListener('abort', onStop, { once: true });
+  });
+  await Promise.race([Promise.all(Array.from({ length: Math.min(limit, xs.length) }, worker)), stopped]);
+  stop.removeEventListener('abort', onStop);
+  return [...out];
+}
+
 // ───────────────────────── getCatalog
 
-export type CatalogOpts = { signal?: AbortSignal; onProgress?: (text: string) => void; maxAgeDays?: number };
+/** Topes por etapa (ms). El tramo entero tiene legTimeoutMs (150 s): generate + Places tienen que entrar holgados. */
+export const CATALOG_TIMEOUTS = { generateMs: 90_000, placesMs: 30_000, reviewMs: 120_000 };
 
-type CatalogRowLite = { items: CatalogItem[] | null; lodging_zones: CatalogResult['lodging_zones'] | null; updated_at: string | null };
+/** destination_catalog.model: catálogo completo (con la revisión del crítico) o solo la primera pasada. */
+export const CATALOG_MODEL = 'claude-opus-5-5';
+export const CATALOG_MODEL_FIRST_PASS = `${CATALOG_MODEL}+first-pass`;
+
+export type CatalogOpts = {
+  signal?: AbortSignal;
+  onProgress?: (text: string) => void;
+  maxAgeDays?: number;
+  timeouts?: Partial<typeof CATALOG_TIMEOUTS>;
+  /**
+   * Cómo correr la revisión del crítico después de guardar la primera pasada. Default: runInBackground (jobs.ts).
+   * null = no revisar (la fila queda como primera pasada y se revisa la próxima vez que alguien la pida).
+   */
+  background?: ((label: string, p: Promise<unknown>) => void) | null;
+};
+
+type CatalogRowLite = {
+  items: CatalogItem[] | null;
+  lodging_zones: CatalogResult['lodging_zones'] | null;
+  updated_at: string | null;
+  model?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+};
 
 const inflight = new Map<string, Promise<CatalogResult>>();
+/** Revisiones en segundo plano en curso (una por ciudad). */
+const reviewing = new Map<string, Promise<void>>();
 
-/** Catálogo de una ciudad: de la caché si es fresco (≤30 días y ≥15 ítems); si no, lo investiga y lo guarda. */
+/** Para tests: la revisión en curso de una ciudad (o undefined). */
+export function pendingReview(city: Pick<CityRef, 'city' | 'country'>): Promise<void> | undefined {
+  return reviewing.get(cityKey(city.city, city.country));
+}
+
+/**
+ * Catálogo de una ciudad: de la caché si es fresco (≤30 días y ≥15 ítems); si no, lo investiga y lo guarda.
+ * La primera pasada (generate + Places) se guarda apenas termina; la revisión del crítico corre en segundo plano y
+ * actualiza la fila después. Si la fila en caché quedó sin revisar, se la revisa en segundo plano y se devuelve igual.
+ */
 export async function getCatalog(admin: Db, city: CityRef, deps: CatalogDeps, opts: CatalogOpts = {}): Promise<CatalogResult> {
   const key = cityKey(city.city, city.country);
-  const { data: row } = await admin.from('destination_catalog').select('items,lodging_zones,updated_at').eq('city_key', key).maybeSingle();
+  const { data: row } = await admin.from('destination_catalog').select('items,lodging_zones,updated_at,model,lat,lng').eq('city_key', key).maybeSingle();
   const cached = row as CatalogRowLite | null;
   const maxAgeMs = (opts.maxAgeDays ?? CATALOG_MAX_AGE_DAYS) * 86_400_000;
   const fresh =
     !!cached?.updated_at && deps.now().getTime() - Date.parse(cached.updated_at) < maxAgeMs && (cached.items?.length ?? 0) >= CATALOG_MIN_ITEMS;
-  if (fresh) return { items: cached!.items ?? [], lodging_zones: cached!.lodging_zones ?? [], cached: true, usage: emptyUsage() };
+  if (fresh) {
+    opts.onProgress?.(`Uso lo que ya investigué de ${city.city}`);
+    if (cached!.model === CATALOG_MODEL_FIRST_PASS) {
+      const center = cached!.lat != null && cached!.lng != null ? { lat: cached!.lat, lng: cached!.lng } : null;
+      scheduleReview(admin, key, city, deps, opts, { items: cached!.items ?? [], lodging_zones: cached!.lodging_zones ?? [], center, pending: [] });
+    }
+    return { items: cached!.items ?? [], lodging_zones: cached!.lodging_zones ?? [], cached: true, usage: emptyUsage() };
+  }
 
   // Dos tramos en la misma ciudad (o dos viajes a la vez): una sola investigación.
   const running = inflight.get(key);
@@ -249,35 +343,20 @@ export async function getCatalog(admin: Db, city: CityRef, deps: CatalogDeps, op
   return p;
 }
 
-async function buildCatalog(admin: Db, key: string, city: CityRef, deps: CatalogDeps, opts: CatalogOpts): Promise<CatalogResult> {
-  const say = (t: string) => opts.onProgress?.(t);
-  const { signal } = opts;
+type Center = { lat: number; lng: number } | null;
+type Entry = { raw: RawCatalogItem; place: PlaceSummary | null };
 
-  say(`Investigando qué no te podés perder en ${city.city}…`);
-  const gen = await deps.research({ city, mode: 'generate', known: [], signal });
-  abortIf(signal);
-  const firstPass = mergeRawItems([gen.items], city.city);
-
-  say(`Buscando lo que se le escapa a las guías de ${city.city}…`);
-  let review: Awaited<ReturnType<CatalogDeps['research']>> = { items: [], lodging_zones: [], usage: emptyUsage() };
-  try {
-    review = await deps.research({ city, mode: 'review', known: firstPass.map((i) => i.name), signal });
-  } catch (err) {
-    console.warn('[catalog] la revisión falló, sigo con la primera pasada:', (err as Error).message);
-  }
-  abortIf(signal);
-  const raws = mergeRawItems([firstPass, review.items], city.city);
-
-  // Centro: el que vino o geocodificamos la ciudad.
-  let center = city.lat != null && city.lng != null ? { lat: city.lat, lng: city.lng } : null;
-  if (!center) {
-    const [c] = await deps.searchPlaces({ query: [city.city, city.country].filter(Boolean).join(', '), max_results: 1 }).catch(() => [] as PlaceSummary[]);
-    if (c?.lat != null && c.lng != null) center = { lat: c.lat, lng: c.lng };
-  }
-
-  say(`Ubicando ${raws.length} lugares en el mapa…`);
-  const resolved = await mapLimit(raws, RESOLVE_CONCURRENCY, async (r) => {
-    if (signal?.aborted) return null;
+/**
+ * Resuelve candidatos en Places (+ horarios de lo importante + zonas para alojarse) con un tope de tiempo total.
+ * Si se acaba el tiempo: devuelve lo resuelto y en `pending` lo que no se llegó a ubicar (para el segundo plano).
+ */
+async function resolveInPlaces(
+  raws: RawCatalogItem[],
+  lodgingRaw: { zone: string; why: string }[],
+  ctx: { city: CityRef; center: Center; deps: CatalogDeps; stop: AbortSignal },
+): Promise<{ entries: Entry[]; hours: Map<string, Awaited<ReturnType<CatalogDeps['placeHours']>>>; pending: RawCatalogItem[]; lodging_zones: CatalogResult['lodging_zones']; timedOut: boolean }> {
+  const { city, center, deps, stop } = ctx;
+  const resolved = await mapUntil(raws, RESOLVE_CONCURRENCY, stop, async (r): Promise<Entry | null> => {
     const dayTrip = r.category === 'day_trip';
     const [place] = await deps
       .searchPlaces({ query: r.query, near: center ?? undefined, radius_m: dayTrip ? DAY_TRIP_RADIUS_M : CITY_RADIUS_M, max_results: 1 })
@@ -290,15 +369,15 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
     }
     return { raw: r, place };
   });
-  abortIf(signal);
+  const pending = raws.filter((_, i) => resolved[i] === undefined);
 
   // Dedupe por google_place_id (dos nombres para el mismo lugar).
-  const byPlace = new Map<string, { raw: RawCatalogItem; place: PlaceSummary | null }>();
-  const noPlace: { raw: RawCatalogItem; place: null }[] = [];
+  const byPlace = new Map<string, Entry>();
+  const noPlace: Entry[] = [];
   for (const r of resolved) {
     if (!r) continue;
     if (!r.place) {
-      noPlace.push(r as { raw: RawCatalogItem; place: null });
+      noPlace.push(r);
       continue;
     }
     const prev = byPlace.get(r.place.google_place_id);
@@ -312,16 +391,27 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
     .filter((e) => e.place && (e.raw.tier === 'must' || HOURS_CATS.includes(e.raw.category)))
     .sort((a, b) => TIER_RANK[b.raw.tier] - TIER_RANK[a.raw.tier] || HOURS_CATS.indexOf(a.raw.category) - HOURS_CATS.indexOf(b.raw.category))
     .slice(0, HOURS_MAX);
-  if (wantHours.length) say(`Chequeando horarios de ${wantHours.length} lugares…`);
   const hours = new Map<string, Awaited<ReturnType<CatalogDeps['placeHours']>>>();
-  await mapLimit(wantHours, RESOLVE_CONCURRENCY, async (e) => {
-    if (signal?.aborted) return;
+  await mapUntil(wantHours, RESOLVE_CONCURRENCY, stop, async (e) => {
     const id = e.place!.google_place_id;
-    hours.set(id, await deps.placeHours(id).catch(() => null));
+    const h = await deps.placeHours(id).catch(() => null);
+    if (!stop.aborted) hours.set(id, h);
   });
-  abortIf(signal);
 
-  const usedIds = new Set<string>();
+  // Zonas para alojarse: con su punto (para que el armado sepa dónde "duerme" el grupo si no reservó). Sin tiempo: sin punto.
+  const zones = lodgingRaw.slice(0, 4);
+  const points = await mapUntil(zones, RESOLVE_CONCURRENCY, stop, async (z) => {
+    const [p] = await deps
+      .searchPlaces({ query: `${z.zone}, ${city.city}`, near: center ?? undefined, radius_m: CITY_RADIUS_M, max_results: 1 })
+      .catch(() => [] as PlaceSummary[]);
+    return p ?? null;
+  });
+  const lodging_zones = zones.map((z, i) => ({ zone: z.zone, why: z.why, lat: points[i]?.lat ?? null, lng: points[i]?.lng ?? null }));
+  return { entries, hours, pending, lodging_zones, timedOut: stop.aborted };
+}
+
+/** Entradas resueltas → CatalogItem (tier validado, horarios, notoriedad). `usedIds` evita ids repetidos. */
+function toItems(entries: Entry[], hours: Map<string, Awaited<ReturnType<CatalogDeps['placeHours']>>>, usedIds: Set<string>): CatalogItem[] {
   const uniqueId = (name: string) => {
     const base = slugify(name);
     let id = base;
@@ -329,8 +419,7 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
     usedIds.add(id);
     return id;
   };
-
-  const items: CatalogItem[] = entries.map(({ raw, place }) => {
+  return entries.map(({ raw, place }) => {
     const h = place ? hours.get(place.google_place_id) : null;
     const periods = h?.periods?.length ? h.periods : null;
     const fromPeriods = closedDaysFromPeriods(periods);
@@ -362,16 +451,17 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
       rating_count: h?.rating_count ?? null,
     };
   });
-  items.sort((a, b) => TIER_RANK[b.tier] - TIER_RANK[a.tier] || b.notability - a.notability);
+}
 
-  // Zonas para alojarse: con su punto (para que el armado sepa dónde "duerme" el grupo si no reservó).
-  const lodging_zones = await mapLimit(gen.lodging_zones.slice(0, 4), RESOLVE_CONCURRENCY, async (z) => {
-    const [p] = await deps
-      .searchPlaces({ query: `${z.zone}, ${city.city}`, near: center ?? undefined, radius_m: CITY_RADIUS_M, max_results: 1 })
-      .catch(() => [] as PlaceSummary[]);
-    return { zone: z.zone, why: z.why, lat: p?.lat ?? null, lng: p?.lng ?? null };
-  });
+const sortItems = (items: CatalogItem[]) => items.sort((a, b) => TIER_RANK[b.tier] - TIER_RANK[a.tier] || b.notability - a.notability);
 
+async function saveCatalog(
+  admin: Db,
+  key: string,
+  city: CityRef,
+  center: Center,
+  data: { items: CatalogItem[]; lodging_zones: CatalogResult['lodging_zones']; model: string; now: Date },
+): Promise<void> {
   const { error } = await admin.from('destination_catalog').upsert(
     {
       city_key: key,
@@ -379,18 +469,125 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
       country: city.country,
       lat: center?.lat ?? null,
       lng: center?.lng ?? null,
-      items,
-      lodging_zones,
-      model: 'claude-opus-5-5',
-      updated_at: deps.now().toISOString(),
+      items: data.items,
+      lodging_zones: data.lodging_zones,
+      model: data.model,
+      updated_at: data.now.toISOString(),
     },
     { onConflict: 'city_key' },
   );
   if (error) console.warn('[catalog] no pude guardar el catálogo:', error.message);
+}
 
-  const musts = items.filter((i) => i.tier === 'must').length;
-  say(`Encontré ${items.length} lugares, ${musts} imperdibles`);
-  return { items, lodging_zones, cached: false, usage: sumUsage(gen.usage, review.usage) };
+/**
+ * Primera pasada: generate (tope generateMs) → Places (tope placesMs; si se corta, guarda lo resuelto) → guarda
+ * (model first-pass) → revisión en segundo plano. Si se cancela el tramo en Places, igual guarda lo que hay.
+ */
+async function buildCatalog(admin: Db, key: string, city: CityRef, deps: CatalogDeps, opts: CatalogOpts): Promise<CatalogResult> {
+  const say = (t: string) => opts.onProgress?.(t);
+  const { signal } = opts;
+  const t = { ...CATALOG_TIMEOUTS, ...opts.timeouts };
+
+  say(`Investigando qué no te podés perder en ${city.city}…`);
+  const gen = await withStageTimeout(t.generateMs, signal, `investigando ${city.city}`, (s) =>
+    deps.research({ city, mode: 'generate', known: [], signal: s }),
+  );
+  abortIf(signal);
+  const raws = mergeRawItems([gen.items], city.city);
+
+  // Places (centro + lugares + horarios + zonas) comparte un solo tope.
+  const places = deadline(t.placesMs, signal);
+  try {
+    let center: Center = city.lat != null && city.lng != null ? { lat: city.lat, lng: city.lng } : null;
+    if (!center) {
+      const [c] = (await mapUntil([0], 1, places.signal, () =>
+        deps.searchPlaces({ query: [city.city, city.country].filter(Boolean).join(', '), max_results: 1 }).catch(() => [] as PlaceSummary[]),
+      ))[0] ?? [];
+      if (c?.lat != null && c.lng != null) center = { lat: c.lat, lng: c.lng };
+    }
+
+    say(`Ubicando ${raws.length} lugares en el mapa…`);
+    const r = await resolveInPlaces(raws, gen.lodging_zones, { city, center, deps, stop: places.signal });
+    if (r.timedOut) {
+      console.warn(`[catalog] ${city.city}: Places se cortó por tiempo; guardo ${r.entries.length} y quedan ${r.pending.length} para después`);
+      say(`Ubiqué ${r.entries.length} lugares de ${raws.length}; el resto lo completo después`);
+    }
+    const items = sortItems(toItems(r.entries, r.hours, new Set()));
+    await saveCatalog(admin, key, city, center, { items, lodging_zones: r.lodging_zones, model: CATALOG_MODEL_FIRST_PASS, now: deps.now() });
+    scheduleReview(admin, key, city, deps, opts, { items, lodging_zones: r.lodging_zones, center, pending: r.pending });
+
+    const musts = items.filter((i) => i.tier === 'must').length;
+    say(`Encontré ${items.length} lugares, ${musts} imperdibles`);
+    return { items, lodging_zones: r.lodging_zones, cached: false, usage: gen.usage };
+  } finally {
+    places.clear();
+  }
+}
+
+type ReviewBase = { items: CatalogItem[]; lodging_zones: CatalogResult['lodging_zones']; center: Center; pending: RawCatalogItem[] };
+
+function scheduleReview(admin: Db, key: string, city: CityRef, deps: CatalogDeps, opts: CatalogOpts, base: ReviewBase): void {
+  const bg = opts.background === undefined ? runInBackground : opts.background;
+  if (!bg || reviewing.has(key)) return;
+  const t = { ...CATALOG_TIMEOUTS, ...opts.timeouts };
+  const p = reviewCatalog(admin, key, city, deps, base, t)
+    .catch((err) => console.warn(`[catalog] revisión de ${city.city}:`, (err as Error).message))
+    .finally(() => reviewing.delete(key));
+  reviewing.set(key, p);
+  bg(`catalog/review ${city.city}`, p);
+}
+
+/**
+ * Segundo plano: el crítico busca lo que falta (tope reviewMs), se ubica en Places lo nuevo + lo que no se llegó a
+ * ubicar en la primera pasada, y se actualiza la fila. Si el crítico falla, la fila queda como primera pasada (se
+ * vuelve a intentar la próxima vez), pero lo pendiente que se haya ubicado igual se guarda.
+ */
+async function reviewCatalog(admin: Db, key: string, city: CityRef, deps: CatalogDeps, base: ReviewBase, t: typeof CATALOG_TIMEOUTS): Promise<void> {
+  let reviewOk = true;
+  let reviewItems: RawCatalogItem[] = [];
+  try {
+    const known = [...base.items.map((i) => i.name), ...base.pending.map((r) => r.name)];
+    const review = await withStageTimeout(t.reviewMs, undefined, `revisando ${city.city}`, (s) => deps.research({ city, mode: 'review', known, signal: s }));
+    reviewItems = review.items;
+  } catch (err) {
+    reviewOk = false;
+    console.warn(`[catalog] la revisión de ${city.city} falló, queda la primera pasada:`, (err as Error).message);
+  }
+  const knownKeys = new Set(base.items.map((i) => nameKey(i.name)));
+  const fresh = mergeRawItems([base.pending, reviewItems], city.city).filter((r) => !knownKeys.has(nameKey(r.name)));
+  if (!fresh.length && !reviewOk) return;
+
+  const places = deadline(t.placesMs);
+  try {
+    const r = await resolveInPlaces(fresh, [], { city, center: base.center, deps, stop: places.signal });
+    // Lo nuevo que cae en un lugar que ya estaba: suma fuentes (puede subir a imperdible) en vez de duplicar.
+    const items = base.items.map((i) => ({ ...i }));
+    const byPlace = new Map(items.filter((i) => i.google_place_id).map((i) => [i.google_place_id!, i]));
+    const added: Entry[] = [];
+    for (const e of r.entries) {
+      const prev = e.place ? byPlace.get(e.place.google_place_id) : undefined;
+      if (!prev) {
+        added.push(e);
+        continue;
+      }
+      const seen = new Set(prev.sources.map((s) => s.url));
+      prev.sources = [...prev.sources, ...e.raw.sources.filter((s) => !seen.has(s.url))];
+      prev.notability = itemNotability(prev.rating_count, prev.sources);
+      const wanted = TIER_RANK[e.raw.tier] > TIER_RANK[prev.tier] ? e.raw.tier : prev.tier;
+      prev.tier = validateTier(wanted, prev.sources, prev.notability);
+    }
+    const merged = sortItems([...items, ...toItems(added, r.hours, new Set(items.map((i) => i.id)))]);
+    const complete = reviewOk && !r.pending.length;
+    await saveCatalog(admin, key, city, base.center, {
+      items: merged,
+      lodging_zones: base.lodging_zones,
+      model: complete ? CATALOG_MODEL : CATALOG_MODEL_FIRST_PASS,
+      now: deps.now(),
+    });
+    console.log(`[catalog] revisión de ${city.city}: +${added.length} lugares (${merged.length} en total)${complete ? '' : ', queda incompleto'}`);
+  } finally {
+    places.clear();
+  }
 }
 
 // ───────────────────────── Eventos del tramo
@@ -424,18 +621,24 @@ function bestTimeFor(hhmm: string | null): CatalogItem['best_time'] {
   return 'night';
 }
 
+/** Tope de la búsqueda de eventos del tramo (corre en paralelo con el catálogo). */
+export const EVENTS_TIMEOUT_MS = 60_000;
+
 /** Eventos con fecha dentro del tramo como ítems de catálogo (category 'event'). Si algo falla: [] (nunca rompe el plan). */
 export async function legEvents(
   city: CityRef,
   dates: string[],
   deps: Pick<CatalogDeps, 'searchPlaces'> & EventsDeps,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<CatalogItem[]> {
   const sorted = [...dates].sort();
   if (!sorted.length) return [];
   const [from, to] = [sorted[0], sorted[sorted.length - 1]];
   try {
-    const raw = await (deps.searchEvents ?? searchEventsLive)({ city: city.city, country: city.country, date_from: from, date_to: to, signal: opts.signal });
+    const search = deps.searchEvents ?? searchEventsLive;
+    const raw = await withStageTimeout(opts.timeoutMs ?? EVENTS_TIMEOUT_MS, opts.signal, `buscando eventos en ${city.city}`, (signal) =>
+      search({ city: city.city, country: city.country, date_from: from, date_to: to, signal }),
+    );
     const inLeg = new Set(sorted);
     const events = sanitizeEvents(raw, from, to).filter((e) => inLeg.has(e.date));
     // El mismo evento en varias fechas = un ítem con varias event_dates.

@@ -1,4 +1,4 @@
-// Flujo "Nuevo viaje" (PRD 01 + PRD 31): contame → lo que entendí (trip_brief, 1-3 rondas) → formas (trip_shapes) →
+// Flujo "Nuevo viaje" (PRD 01 + PRD 31): contame → lo que entendí (trip_brief, 1-4 rondas) → formas (trip_shapes) →
 // ¿cómo lo armamos? → plan_trip. Persistido con zustand + AsyncStorage: si falla algo o se cierra la app,
 // no se pierde lo escrito ni lo que ya devolvió la API. Las llamadas viven en flow.ts.
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -6,6 +6,7 @@ import type { PlanTripStart, TripBriefResult, TripShape } from '@build101/shared
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import { addDays, clampDays, daysInclusive } from './calendarModel';
 import type { AnswerValue, Answers, PlanMode } from './model';
 
 export type Phase = 'tell' | 'brief' | 'shapes' | 'build';
@@ -19,7 +20,11 @@ type NewTripState = {
   /** Lo que contó la persona (texto libre). */
   story: string;
   startDate: string | null;
-  /** Rondas de la entrevista (trip_brief round 1..3), en orden. */
+  /** Salida elegida en el calendario de Contame (solo con startDate). */
+  endDate: string | null;
+  /** "¿Cuántos días?" de Contame (1-60) o null. */
+  days: number | null;
+  /** Rondas de la entrevista (trip_brief round 1..4), en orden. */
   rounds: TripBriefResult[];
   /** inputKey con el que se pidió cada ronda (si cambia lo anterior, se vuelve a pedir). */
   roundKeys: string[];
@@ -41,6 +46,10 @@ type NewTripState = {
   back: () => void;
   setStory: (story: string) => void;
   setStartDate: (date: string | null) => void;
+  /** Llegada/salida del calendario; con salida, los días se completan solos. */
+  setDates: (start: string | null, end: string | null) => void;
+  /** Días a mano; si hay llegada, mueve la salida para que cierre. */
+  setDays: (days: number | null) => void;
   /** Guarda la ronda `index` (descarta las posteriores: se pidieron con otras respuestas) y la muestra. */
   setRound: (index: number, brief: TripBriefResult, key: string, answers: Answers) => void;
   setRoundIndex: (index: number) => void;
@@ -58,6 +67,8 @@ const initial = {
   phase: 'tell' as Phase,
   story: '',
   startDate: null,
+  endDate: null,
+  days: null,
   rounds: [] as TripBriefResult[],
   roundKeys: [] as string[],
   roundIndex: 0,
@@ -86,7 +97,18 @@ export const useNewTripStore = create<NewTripState>()(
         if (i > 0) set({ phase: PHASE_ORDER[i - 1]!, loading: null });
       },
       setStory: (story) => set({ story }),
-      setStartDate: (startDate) => set({ startDate }),
+      setStartDate: (startDate) => set((s) => ({ startDate, endDate: startDate && s.endDate && s.endDate > startDate ? s.endDate : null })),
+      setDates: (start, end) =>
+        set((s) => {
+          if (!start) return { startDate: null, endDate: null };
+          if (end && end > start) return { startDate: start, endDate: end, days: clampDays(daysInclusive(start, end)) };
+          return { startDate: start, endDate: s.days ? addDays(start, s.days - 1) : null };
+        }),
+      setDays: (days) =>
+        set((s) => {
+          const n = days == null ? null : clampDays(days);
+          return { days: n, endDate: s.startDate && n ? addDays(s.startDate, n - 1) : null };
+        }),
       setRound: (index, brief, key, answers) =>
         set((s) => ({
           rounds: [...s.rounds.slice(0, index), brief],
@@ -118,6 +140,8 @@ export const useNewTripStore = create<NewTripState>()(
         phase: s.phase,
         story: s.story,
         startDate: s.startDate,
+        endDate: s.endDate,
+        days: s.days,
         rounds: s.rounds,
         roundKeys: s.roundKeys,
         roundIndex: s.roundIndex,

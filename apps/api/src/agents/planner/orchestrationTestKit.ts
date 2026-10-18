@@ -349,12 +349,13 @@ export type ModuleCalls = {
  * Módulos falsos: catálogo fijo (o error por ciudad), menú = must (preseleccionados) + recomendados, armado = 1
  * actividad por pick repartida en los días + una cena "elegí 1 de 2" por día.
  */
-export function fakeModules(opts: { failCity?: string; smallCity?: string } = {}): { m: PlannerModules; calls: ModuleCalls } {
+export function fakeModules(opts: { failCity?: string; failCities?: string[]; smallCity?: string } = {}): { m: PlannerModules; calls: ModuleCalls } {
   const calls: ModuleCalls = { getCatalog: [], compose: [] };
   const m: PlannerModules = {
-    async getCatalog(_admin, city) {
+    async getCatalog(_admin, city, _deps, catOpts) {
       calls.getCatalog.push(city.city);
-      if (city.city === opts.failCity) throw new Error('Google sin key');
+      catOpts?.onProgress?.(`Investigando qué no te podés perder en ${city.city}…`);
+      if (city.city === opts.failCity || opts.failCities?.includes(city.city)) throw new Error('Google sin key');
       const items = city.city === opts.smallCity ? catalogItems().slice(0, 3) : catalogItems(city.city.slice(0, 3).toLowerCase());
       return { items, lodging_zones: [], cached: false, usage: emptyUsage() };
     },
