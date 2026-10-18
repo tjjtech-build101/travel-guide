@@ -51,6 +51,8 @@ const appConfig = ({ config }: ConfigContext): ExpoConfig => ({
   userInterfaceStyle: 'light',
   ios: {
     bundleIdentifier: BUNDLE_ID,
+    // Equipo pago para firmar la app y la extensión de widgets (App Group). IOS_TEAM_ID=XXXXXXXXXX npx expo run:ios --device
+    ...(process.env.IOS_TEAM_ID ? { appleTeamId: process.env.IOS_TEAM_ID } : {}),
     supportsTablet: false,
     infoPlist: {
       NSLocationWhenInUseUsageDescription: PERMS.locationWhenInUse,
@@ -60,6 +62,8 @@ const appConfig = ({ config }: ConfigContext): ExpoConfig => ({
       NSPhotoLibraryUsageDescription: PERMS.photos,
       UIBackgroundModes: ['audio', 'location'],
     },
+    // "Salí ya / vas tarde" atraviesan los modos de concentración (interruptionLevel timeSensitive).
+    ...(PERSONAL_TEAM ? {} : { entitlements: { 'com.apple.developer.usernotifications.time-sensitive': true } }),
   },
   android: {
     package: 'dev.build101.companion',

@@ -57,13 +57,17 @@
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
     "test:plan": "tsx src/features/plan/selectors.test.ts",
+    "test:errors": "tsx src/lib/errors.test.ts",
+    "test:proposals": "tsx src/features/plan/proposals.test.ts",
     "test:voice": "tsx src/voice/echo.test.ts",
     "test:now": "tsx src/features/now/selectors.test.ts",
     "test:profile": "tsx src/features/profile/model.test.ts",
     "test:map": "tsx src/features/map/model.test.ts",
+    "test:menu": "tsx src/features/menu/model.test.ts",
     "test:fresh": "tsx src/location/freshPositionTools.test.ts",
     "lint": "expo lint",
-    "test:schedule": "tsx src/schedule/delivery.test.ts"
+    "test:schedule": "tsx src/schedule/delivery.test.ts",
+    "test:scout": "tsx src/scout/behavior.test.ts"
   },
   "private": true,
   "expo": {

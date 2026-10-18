@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from '../features/auth/AuthProvider';
 import { SimPill } from '../features/gps/SimPill';
+import { GuideOverlay } from '../features/guide/GuideOverlay';
 import { queryClient } from '../lib/queryClient';
 import { LocationContextProvider } from '../location/LocationContext';
 import { useNotificationTapRouter } from '../schedule/notifications';
@@ -24,6 +25,8 @@ import { ConnectionBanner } from '../ui/ConnectionBanner';
 import { VoiceProvider } from '../voice/VoiceProvider';
 import { setFontsReady } from '../ui/Text';
 import { colors, fonts } from '../ui/theme';
+
+export { ScreenErrorBoundary as ErrorBoundary } from '../ui/ErrorBoundary';
 
 const FONT_FILES = {
   [fonts.displayMedium]: Fredoka_500Medium,
@@ -48,6 +51,8 @@ export default function RootLayout() {
               </VoiceProvider>
               <ConnectionBanner />
               <SimPill />
+              {/* La guía del Scout (primera vez en cada pantalla): arriba de todo. */}
+              <GuideOverlay />
             </LocationContextProvider>
           </AuthProvider>
         </QueryClientProvider>

@@ -1,11 +1,11 @@
-// Avatar del Scout: la cabeza del personaje (assets/scout, ver ScoutImage) dentro de un anillo
-// animado (reanimated) según el estado de la llamada:
+// Avatar del Scout: la cabeza del personaje, viva (scout/ScoutRig: parpadea, escucha, piensa y mueve la boca con
+// la voz) dentro de un anillo animado (reanimated) según el estado de la llamada:
 //   listening → anillo verde que late lento · speaking → anillo rojo (pañuelo) con ondas rápidas
 //   thinking  → arco bronce que gira · idle/otros → anillo quieto.
 // El nombre sale de SCOUT (packages/shared/src/scout.ts): nunca hardcodearlo.
 import { SCOUT } from '@build101/shared';
 import { useEffect } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -18,13 +18,13 @@ import Animated, {
 import Svg, { Circle } from 'react-native-svg';
 
 import type { ScoutState } from '../voice/useScout';
-import { SCOUT_HEAD } from './ScoutImage';
+import { ScoutRig, type ScoutPose } from '../scout/ScoutRig';
 import { Text } from './Text';
 import { colors, font, space } from './theme';
 
 export type ScoutAvatarState = ScoutState;
 
-const RING: Record<ScoutAvatarState, string> = {
+export const SCOUT_RING: Record<ScoutAvatarState, string> = {
   idle: colors.khaki,
   connecting: colors.bronze,
   listening: colors.primary,
@@ -47,10 +47,12 @@ type Props = {
   state?: ScoutAvatarState;
   /** Muestra el texto del estado debajo ("Te escucho…"). */
   showLabel?: boolean;
+  /** Pose/gesto puntual (p. ej. 'thumbs' cuando algo salió bien). */
+  pose?: ScoutPose | null;
 };
 
-export function ScoutAvatar({ size = 96, state = 'idle', showLabel = false }: Props) {
-  const color = RING[state];
+export function ScoutAvatar({ size = 96, state = 'idle', showLabel = false, pose }: Props) {
+  const color = SCOUT_RING[state];
   const ringW = Math.max(3, Math.round(size * 0.04));
   const outer = size + ringW * 4;
   const label = SCOUT_STATE_LABEL[state];
@@ -74,7 +76,7 @@ export function ScoutAvatar({ size = 96, state = 'idle', showLabel = false }: Pr
             },
           ]}
         />
-        <ScoutFace size={size} />
+        <ScoutFace size={size} state={state} pose={pose} />
       </View>
       {showLabel ? <Text style={[styles.label, { color: state === 'idle' ? colors.textMuted : color }]}>{label || ' '}</Text> : null}
     </View>
@@ -152,11 +154,11 @@ function SpinArc({ size, color, width, active }: { size: number; color: string; 
   );
 }
 
-/** La cabeza del Scout (PNG de assets/scout/head, generado con `pnpm scout:build`). */
-export function ScoutFace({ size }: { size: number }) {
+/** La cabeza del Scout, animada según el estado. */
+export function ScoutFace({ size, state = 'idle', pose }: { size: number; state?: ScoutAvatarState; pose?: ScoutPose | null }) {
   return (
     <View style={[styles.face, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Image source={SCOUT_HEAD} style={{ width: size, height: size }} fadeDuration={0} />
+      <ScoutRig width={size} framing="head" mode={state} pose={pose} />
     </View>
   );
 }

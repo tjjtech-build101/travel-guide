@@ -5,6 +5,7 @@ import { createMiddleware } from 'hono/factory';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { ACTOR_HEADER, type Actor } from '@build101/shared';
 import { env, missingSupabaseEnv } from './env';
+import { providerFailure } from './errors';
 import { anonClient, serviceClient, userClient } from './supabase';
 import type { ToolCtx } from './tools/types';
 
@@ -29,6 +30,15 @@ function subFrom(payload: JWTPayload): string | null {
 
 /** Devuelve el user id (sub) si el JWT es válido, o null. */
 export async function verifySupabaseJwt(token: string): Promise<string | null> {
+  const r = await checkSupabaseJwt(token);
+  return typeof r === 'string' ? r : null;
+}
+
+/**
+ * Como verifySupabaseJwt, pero distingue "token inválido" (null) de "no pude verificar porque Supabase no
+ * responde" ('unavailable'): lo segundo no tiene que desloguear a nadie.
+ */
+async function checkSupabaseJwt(token: string): Promise<string | null | 'unavailable'> {
   try {
     const { payload } = await jwtVerify(token, getJwks());
     const sub = subFrom(payload);
@@ -49,8 +59,12 @@ export async function verifySupabaseJwt(token: string): Promise<string | null> {
   try {
     const { data, error } = await anonClient().auth.getUser(token);
     if (!error && data.user) return data.user.id;
+    // 5xx / red del lado de Supabase: no es culpa del token.
+    if (error && (((error as { status?: number }).status ?? 0) >= 500 || /fetch failed|network/i.test(error.message))) {
+      return 'unavailable';
+    }
   } catch {
-    // red caída: no autenticado
+    return 'unavailable';
   }
   return null;
 }
@@ -71,17 +85,21 @@ export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, n
   const missing = missingSupabaseEnv();
   if (missing.length) {
     return c.json(
-      { ok: false, error: { code: 'not_configured', message: `Faltan variables: ${missing.join(', ')}` } },
+      { ok: false, error: { code: 'not_configured', provider: 'supabase', message: `Faltan variables del servidor: ${missing.join(', ')}` } },
       503,
     );
   }
   const jwt = bearer(c.req.header('authorization'));
   if (!jwt) {
-    return c.json({ ok: false, error: { code: 'unauthorized', message: 'Falta el header Authorization: Bearer <JWT>.' } }, 401);
+    return c.json({ ok: false, error: { code: 'unauthorized', message: 'No hay sesión iniciada.', detail: 'Falta el header Authorization: Bearer <JWT>.' } }, 401);
   }
-  const userId = await verifySupabaseJwt(jwt);
+  const userId = await checkSupabaseJwt(jwt);
+  if (userId === 'unavailable') {
+    const f = providerFailure('provider_unavailable', 'supabase', 'No pude verificar el JWT: Supabase Auth no responde.');
+    return c.json({ ok: false, error: f.toError() }, 503);
+  }
   if (!userId) {
-    return c.json({ ok: false, error: { code: 'unauthorized', message: 'JWT inválido o vencido.' } }, 401);
+    return c.json({ ok: false, error: { code: 'unauthorized', message: 'Tu sesión venció.', detail: 'JWT inválido o vencido.' } }, 401);
   }
   c.set('ctx', {
     userId,

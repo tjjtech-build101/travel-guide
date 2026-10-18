@@ -14,6 +14,7 @@
 import { create } from 'zustand';
 
 import { env } from '../lib/env';
+import { errorLine } from '../lib/errors';
 import { useVoiceStore, type VoiceStore } from './store';
 
 /** Estado de la llamada con el Scout. ScoutAvatar dibuja 'listening' | 'speaking' | 'thinking'. */
@@ -92,7 +93,7 @@ export function scoutStateOf(v: Pick<VoiceStore, 'status' | 'speaking' | 'respon
 useVoiceStore.subscribe((v) => {
   const next = {
     state: scoutStateOf(v),
-    error: v.status === 'error' ? (v.error?.message ?? 'No pude conectar') : null,
+    error: v.status === 'error' ? errorLine(v.error, { doing: 'conectar la llamada' }) : null,
     focus: v.status === 'idle' ? null : ((v.args?.focus as ScoutFocus | undefined) ?? null),
   };
   const cur = useScoutStore.getState();

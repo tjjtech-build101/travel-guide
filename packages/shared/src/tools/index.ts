@@ -1,9 +1,13 @@
 // Registro único de herramientas: la API, Claude (Tool Runner) y OpenAI Realtime usan estas definiciones.
 import { z } from 'zod';
+import type { Provider } from '../errors';
 import {
   AddBlockInput,
   AddIdeaInput,
   DeleteTripInput,
+  ChooseOptionInput,
+  ComposeDaysInput,
+  DecideProposalInput,
   EventsSearchInput,
   GenerateTourInput,
   GetDayPlanInput,
@@ -14,11 +18,14 @@ import {
   PlaceDetailsInput,
   PlanTransfersInput,
   PlanTripInput,
+  ReactOptionInput,
   RemoveBlockInput,
   RouteEtaInput,
   SearchPlacesInput,
   ShouldGenerateTourInput,
   TourBriefInput,
+  TripBriefInput,
+  TripShapesInput,
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
@@ -86,6 +93,11 @@ export const toolDefs = {
       'Investiga en la web una pregunta que no podés responder con lo que tenés (año, origen, quién, curiosidad) y verifica cada dato contra su fuente. Si ya lo teníamos guardado devuelve al toque { cached: true, answer, facts }; si no, es un trabajo en segundo plano (~30-60 s): devuelve { job_id } y la respuesta llega después. Nunca inventes mientras tanto.',
     input: ResearchInput,
   },
+  decide_proposal: {
+    description:
+      'Acepta o rechaza una propuesta pendiente del grupo (agent_proposals). Aceptar aplica todos sus cambios juntos (o ninguno) y devuelve undo_token. Solo con un sí o no explícito de la persona.',
+    input: DecideProposalInput,
+  },
   look_at_photo: {
     description:
       'Mira una foto (Claude visión + GPS + orientación + lugares cercanos con datos verificados): qué lugar es, inscripciones y su traducción, y una narración corta. Guarda la foto en photos.',
@@ -95,6 +107,30 @@ export const toolDefs = {
     description:
       'Arma un viaje entero (tramos, días y bloques) a partir de la conversación. Es un trabajo en segundo plano: devuelve { job_id, trip_id } y el progreso se ve en agent_jobs.',
     input: PlanTripInput,
+  },
+  // PRD 31 · planificador colaborativo
+  trip_brief: {
+    description:
+      'Antes de plan_trip: lee lo que contó el usuario + perfiles y devuelve lo que entendió, contexto y 0-4 preguntas con opciones que cambian el plan. Síncrona.',
+    input: TripBriefInput,
+  },
+  trip_shapes: {
+    description:
+      'Propone 2-3 formas del viaje (reparto de días entre destinos, escapadas) con pros y contras. Síncrona. La elegida va a plan_trip como skeleton.',
+    input: TripShapesInput,
+  },
+  react_option: {
+    description: 'Reacciona a una opción del menú del tramo: love (me copa), no (paso), must (sí o sí) o null (sacar).',
+    input: ReactOptionInput,
+  },
+  compose_days: {
+    description:
+      'Arma los días de los tramos con lo que el grupo eligió en el menú (imperdibles, reacciones), con lugares para elegir entre 2-3 opciones. Trabajo en segundo plano: devuelve { job_id, trip_id }.',
+    input: ComposeDaysInput,
+  },
+  choose_option: {
+    description: 'Elige una de las opciones de un lugar del día (blocks.choice_group): confirma esa y manda las otras al banco de ideas.',
+    input: ChooseOptionInput,
   },
   tour_brief: {
     description:
@@ -155,7 +191,11 @@ export type ToolName = keyof typeof toolDefs;
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 
-export type ToolError = { code: string; message: string; issues?: unknown };
+/**
+ * `code`: ver packages/shared/src/errors.ts. `provider`: quién falló (solo en los provider_*).
+ * `detail`: texto técnico crudo para depurar (la app lo muestra solo en desarrollo).
+ */
+export type ToolError = { code: string; message: string; issues?: unknown; provider?: Provider; detail?: string };
 export type ToolResponse<T = unknown> =
   | { ok: true; data: T; undo_token?: string; feed_id?: string }
   | { ok: false; error: ToolError };

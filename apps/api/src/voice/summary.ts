@@ -4,6 +4,7 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { VoiceSummary, type TranscriptLine, type VoiceSummaryResult } from '@build101/shared';
 import { PLANNER_MODEL } from '../agents/llm';
 import { env } from '../env';
+import { jobErrorFields, notConfigured, providerFailure } from '../errors';
 import { JobProgress } from '../jobs';
 import type { Db } from '../supabase';
 
@@ -20,7 +21,7 @@ const SYSTEM = [
 
 export const anthropicSummary: SummaryLLM = async ({ system, user }) => {
   const apiKey = env().ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('Falta ANTHROPIC_API_KEY');
+  if (!apiKey) throw notConfigured('Anthropic (ANTHROPIC_API_KEY)', 'anthropic');
   const client = new Anthropic({ apiKey });
   const format = betaZodOutputFormat(VoiceSummary);
   // Mismo patrón que agents/llm.ts: output_config no está tipado en el SDK 0.70 → cast.
@@ -35,7 +36,7 @@ export const anthropicSummary: SummaryLLM = async ({ system, user }) => {
     stop_reason: string | null;
     content: { type: string; text?: string }[];
   };
-  if (msg.stop_reason === 'refusal') throw new Error('Claude no quiso resumir (refusal).');
+  if (msg.stop_reason === 'refusal') throw providerFailure('provider_refused', 'anthropic', 'refusal', 'Claude no quiso resumir la charla.');
   const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
   return format.parse(text);
 };
@@ -129,7 +130,7 @@ export async function runVoiceSummary(args: {
     // Las acciones se muestran igual aunque falle el texto (PRD 05).
     const result: VoiceSummaryResult = { voice_session_id: session.id, summary: '', memories: 0, duration_s, actions };
     await progress.push('No pude armar el resumen');
-    await progress.set({ status: 'failed', error: (err as Error).message, result });
+    await progress.set({ status: 'failed', ...jobErrorFields(err), result });
     throw err;
   }
 }

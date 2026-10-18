@@ -5,6 +5,7 @@ import {
   completedSections,
   draftFromProfile,
   emptyDraft,
+  sectionAnswered,
   needsOnboarding,
   nextStars,
   patchFromDraft,
@@ -87,6 +88,14 @@ test('secciones completas y needsOnboarding', () => {
   ok(needsOnboarding({ onboarded_at: null }), 'null → onboarding');
   ok(!needsOnboarding({ onboarded_at: '2026-10-17T12:00:00Z' }), 'ya hecho');
   ok(!needsOnboarding(null), 'sin perfil cargado no redirige');
+});
+
+test('sectionAnswered: vacío no cuenta, con algo marcado sí', () => {
+  const d = emptyDraft();
+  eq(sectionAnswered('interests', d), false);
+  eq(sectionAnswered('interests', { ...d, interests: { comida: 2 } }), true);
+  eq(sectionAnswered('style', { ...d, travel_style: 'mixed' }), true);
+  eq(sectionAnswered('dietary', d), false);
 });
 
 if (failures) throw new Error(`${failures} test(s) fallaron`);

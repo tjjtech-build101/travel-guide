@@ -18,9 +18,11 @@ import {
   type GenerateTourResult,
   type InterestTag,
   type ToolInput,
+  type TourPlanLink,
 } from '@build101/shared';
-import { dbError, notFound } from '../errors';
+import { dbError, jobErrorFields, notFound, orFallback, rethrowIfFatal } from '../errors';
 import { insertFeed } from '../feed';
+import { attachTourToPlan } from './tourPlan';
 import { tourWeather } from '../google/openMeteo';
 import { reverseGeocode } from '../google/osm';
 import { overpassCandidates } from '../google/overpass';
@@ -346,7 +348,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
     searchGoogle: async ({ lat, lng, radius_m, food, dietary }) => {
       const groups = [...GOOGLE_TYPE_GROUPS];
       if (food) groups.push(dietary.some((d) => /vegan|vegetar/i.test(d)) ? VEG_TYPES : FOOD_TYPES);
-      const rich = (await Promise.all(groups.map((types) => searchPlacesRich({ near: { lat, lng }, radius_m, types }).catch(() => [])))).flat();
+      const rich = (await Promise.all(groups.map((types) => searchPlacesRich({ near: { lat, lng }, radius_m, types }).catch(orFallback([]))))).flat();
       if (rich.length) {
         return rich
           .filter((p) => p.lat != null && p.lng != null)
@@ -368,7 +370,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
       }
       // Sin key de Google (o si falló todo): búsqueda por texto (OSM de fallback), como antes.
       const queries = ['tourist_attraction', 'historical_landmark', 'museum', 'church', 'park'];
-      const results = await Promise.all(queries.map((query) => searchPlaces({ query, near: { lat, lng }, radius_m, max_results: 10 }).catch(() => [])));
+      const results = await Promise.all(queries.map((query) => searchPlaces({ query, near: { lat, lng }, radius_m, max_results: 10 }).catch(orFallback([]))));
       return results.flat().map((p) => {
         const osm = p.google_place_id.startsWith('osm:');
         return {
@@ -386,7 +388,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
       });
     },
     searchByName: async ({ name, lat, lng, radius_m }) => {
-      const [p] = await searchPlaces({ query: name, near: { lat, lng }, radius_m, max_results: 1 }).catch(() => []);
+      const [p] = await searchPlaces({ query: name, near: { lat, lng }, radius_m, max_results: 1 }).catch(orFallback([]));
       if (!p || p.lat == null || p.lng == null) return null;
       const osm = p.google_place_id.startsWith('osm:');
       return {
@@ -403,7 +405,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
       };
     },
     searchWikipedia: async ({ lat, lng, radius_m }) => {
-      const res = await wikipediaGeosearch({ lat, lng, radius_m, limit: 40 }).catch(() => []);
+      const res = await wikipediaGeosearch({ lat, lng, radius_m, limit: 40 }).catch(orFallback([]));
       return res.map((r) => ({
         source: 'wikipedia' as const,
         wikidata_id: r.wikidata_id,
@@ -417,7 +419,7 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
       }));
     },
     searchOverpass: async ({ lat, lng, radius_m }) => {
-      const res = await overpassCandidates({ lat, lng, radius_m }).catch(() => []);
+      const res = await overpassCandidates({ lat, lng, radius_m }).catch(orFallback([]));
       return res.map((o) => ({
         source: 'osm' as const,
         osm_id: o.osm_id,
@@ -433,9 +435,9 @@ export function defaultDeps(admin: Db, userId: string): TourDeps {
         facts: [],
       }));
     },
-    wikidataInfo: (ids) => wikidataInfo(ids).catch(() => new Map()),
-    wikipediaIntros: (titles, lang) => wikipediaIntros(titles, lang).catch(() => new Map()),
-    wikipediaArticle: (title, lang) => wikipediaArticle(title, lang).catch(() => null),
+    wikidataInfo: (ids) => wikidataInfo(ids).catch(orFallback(new Map())),
+    wikipediaIntros: (titles, lang) => wikipediaIntros(titles, lang).catch(orFallback(new Map())),
+    wikipediaArticle: (title, lang) => wikipediaArticle(title, lang).catch(orFallback(null)),
     fetchPageText,
     computeWalk: async (stops) => {
       if (stops.length < 2) return { total_min: 0, total_m: 0, polyline: null, legs: [] };
@@ -554,8 +556,7 @@ function defaultDepsLazy(admin: ToolCtx['admin'], userId: string): TourDeps {
 
 function readable(err: unknown): string {
   if (err instanceof JobError) return err.message;
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.replace(/\s+/g, ' ').slice(0, 300);
+  return jobErrorFields(err).error;
 }
 
 /** Limitador de concurrencia: run(fn) espera turno. */
@@ -818,6 +819,7 @@ export async function composeTour(
     let p = research.get(c.key);
     if (!p) {
       p = runResearch(() => researchPlace(c)).catch((err) => {
+        rethrowIfFatal(err);
         console.warn(`[generate_tour] investigación de ${c.name} falló:`, readable(err));
         return c.facts.filter((f) => f.verified);
       });
@@ -895,6 +897,7 @@ export async function composeTour(
         rejected += fresh.length - verified.length;
       } catch (err) {
         // Sin juez, nos quedamos con los que pasaron el chequeo textual de la cita (ya es un filtro fuerte).
+        rethrowIfFatal(err);
         console.warn('[generate_tour] juez falló, uso el chequeo de cita:', readable(err));
         verified = fresh.map((f) => ({ ...f, verified: true }));
       }
@@ -934,6 +937,7 @@ export async function composeTour(
     addUsage(usage, d.usage);
     director = d.plan;
   } catch (err) {
+    rethrowIfFatal(err);
     console.warn('[generate_tour] director falló, sigo con un arco simple:', readable(err));
   }
 
@@ -1103,6 +1107,8 @@ export async function composeTour(
     drafts.set(k, d);
   });
   results.forEach((r, i) => r.status === 'rejected' && console.warn(`[generate_tour] escritor de ${keys[i]} falló:`, readable(r.reason)));
+  // Sin créditos / key inválida: decirlo, no "no llegamos a armar suficientes paradas".
+  for (const r of results) if (r.status === 'rejected') rethrowIfFatal(r.reason);
 
   // ── Crítico (si queda tiempo) → reescribe las flojas
   const okKeys = () => keys.filter((k) => drafts.has(k) && wordCount(drafts.get(k)!.written.narration_short) >= 15);
@@ -1143,6 +1149,7 @@ export async function composeTour(
         });
       }
     } catch (err) {
+      rethrowIfFatal(err);
       console.warn('[generate_tour] crítico falló, sigo sin revisión:', readable(err));
     }
   }
@@ -1201,8 +1208,10 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   progress.startHeartbeat(() => 'Sigo investigando y escribiendo…', deps.heartbeatMs ?? 10_000);
 
   let fatal: string | null = null;
+  let fatalErr: unknown = null;
   let composed: ComposedTour | null = null;
   let stopCount = 0;
+  let planLink: TourPlanLink | undefined;
 
   try {
     const brief = await loadTourBrief(
@@ -1324,11 +1333,24 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         payload: { summary: `El Scout armó «${composed.title}», un tour de ${stopRows.length} paradas`, tour_id: tourId },
         undoable: false,
       });
+      // El tour queda en el plan del día (bloque `tour` con tour_id): Plan, mapa y Ahora lo muestran y lo arrancan.
+      planLink = await attachTourToPlan(ctx, {
+        tourId,
+        tripId,
+        blockId: input.block_id ?? null,
+        title: composed.title,
+        durationMin: composed.estDurationMin || input.duration_min,
+        start: resolveStart(deps.now(), args.startAt),
+        participantIds: args.participantIds,
+        lat: input.start_lat,
+        lng: input.start_lng,
+      });
     }
     stopCount = stopRows.length;
   } catch (err) {
     console.error(`[generate_tour/${jobId}]`, err);
     fatal = readable(err);
+    fatalErr = err;
   } finally {
     progress.stopHeartbeat();
   }
@@ -1336,6 +1358,7 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   const usage = composed?.usage ?? emptyUsage();
   const result: GenerateTourResult = {
     tour_id: tourId,
+    ...(planLink ? { plan: planLink } : {}),
     stop_count: stopCount,
     total_walk_m: composed?.totalWalkM ?? 0,
     est_duration_min: composed?.estDurationMin ?? 0,
@@ -1353,10 +1376,11 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   if (fatal) {
     await admin.from('tours').update({ status: 'failed' }).eq('id', tourId);
     await progress.push(`Se trancó: ${fatal}`);
-    await progress.set({ status: 'failed', error: fatal, result });
+    const f = jobErrorFields(fatalErr);
+    await progress.set({ status: 'failed', error: fatal, error_code: f.error_code, error_provider: f.error_provider, result });
   } else {
     await progress.push(`¡Listo! «${composed?.title}» · ${stopCount} paradas`);
-    await progress.set({ status: 'done', error: null, result });
+    await progress.set({ status: 'done', error: null, error_code: null, error_provider: null, result });
   }
   await progress.flush();
 }

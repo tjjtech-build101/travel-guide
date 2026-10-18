@@ -138,10 +138,13 @@ describe('sesión de OpenAI Realtime', () => {
     expect(turnDetection(vadConfig({ VOICE_VAD: 'server_vad' }))).toMatchObject({ type: 'server_vad', silence_duration_ms: 700 });
   });
 
-  it('createClientSecret: error de OpenAI → upstream 502 sin tirar la key', async () => {
+  it('createClientSecret: error de OpenAI → 502 clasificado sin tirar la key', async () => {
     process.env.OPENAI_API_KEY = 'sk-test-secreta';
     const fake = (async () => new Response(JSON.stringify({ error: { message: 'bad tool' } }), { status: 400 })) as typeof fetch;
-    await expect(createClientSecret({}, fake)).rejects.toMatchObject({ status: 502, code: 'upstream_error' });
+    await expect(createClientSecret({}, fake)).rejects.toMatchObject({ status: 502, code: 'provider_unavailable', provider: 'openai' });
+    const broke = (async () =>
+      new Response(JSON.stringify({ error: { code: 'insufficient_quota', message: 'You exceeded your current quota' } }), { status: 429 })) as typeof fetch;
+    await expect(createClientSecret({}, broke)).rejects.toMatchObject({ status: 402, code: 'provider_no_credits', provider: 'openai' });
     await expect(createClientSecret({}, fake)).rejects.not.toThrow(/sk-test/);
     const ok = (async () => new Response(JSON.stringify({ value: 'ek_1', expires_at: 1 }))) as typeof fetch;
     await expect(createClientSecret({}, ok)).resolves.toEqual({ value: 'ek_1', expires_at: 1 });

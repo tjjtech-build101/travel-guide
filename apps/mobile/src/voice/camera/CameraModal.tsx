@@ -4,10 +4,12 @@ import type { LookAtPhotoOutput } from '@build101/shared';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
 import { ActivityIndicator, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { callTool } from '../../lib/api';
+import { describeError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { currentLocation, useVoiceStore } from '../store';
@@ -17,7 +19,17 @@ type Phase =
   | { kind: 'viewfinder' }
   | { kind: 'looking'; uri: string; slow: boolean }
   | { kind: 'result'; uri: string; out: LookAtPhotoOutput }
-  | { kind: 'error'; uri: string | null; message: string; retry: (() => void) | null };
+  | {
+      kind: 'error';
+      uri: string | null;
+      message: string;
+      /** Qué hacer / por qué (la causa real que arma lib/errors). */
+      sub?: string;
+      /** Detalle técnico (solo en desarrollo). */
+      detail?: string;
+      action?: 'login' | 'settings';
+      retry: (() => void) | null;
+    };
 
 const PREFERRED_SIZES = ['1280x720', 'Medium', 'High'];
 const RETRIES = 2;
@@ -64,7 +76,7 @@ function CameraScreen() {
   const send = async (uri: string, base64: string, attempt = 0): Promise<void> => {
     const t0 = Date.now();
     const fix = currentLocation();
-    if (!fix) return setPhase({ kind: 'error', uri, message: 'No tengo tu ubicación todavía.', retry: () => void send(uri, base64) });
+    if (!fix) return setPhase({ kind: 'error', uri, message: 'No tengo tu ubicación todavía.', sub: 'Esperá unos segundos a que el GPS te ubique y reintentá.', retry: () => void send(uri, base64) });
     const slowTimer = setTimeout(() => setPhase((p) => (p.kind === 'looking' ? { ...p, slow: true } : p)), 2500);
     const res = await callTool<'look_at_photo', LookAtPhotoOutput>(
       'look_at_photo',
@@ -87,8 +99,22 @@ function CameraScreen() {
       const retryable = res.error.code === 'network_error' || res.error.code.startsWith('http_5') || res.error.code === 'internal';
       if (retryable && attempt < RETRIES) return send(uri, base64, attempt + 1);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      const message = res.error.code === 'vision_unavailable' ? 'Ahora no puedo mirar fotos.' : 'No pude mandar la foto.';
-      return setPhase({ kind: 'error', uri, message, retry: () => void send(uri, base64) });
+      const again = () => void send(uri, base64);
+      // Código viejo de la API (antes de los provider_*): la visión no está disponible.
+      if (res.error.code === 'vision_unavailable') {
+        return setPhase({ kind: 'error', uri, message: 'Ahora no puedo mirar fotos.', sub: 'Probá de nuevo en un rato.', detail: res.error.message, retry: again });
+      }
+      // La causa real: sin créditos, key inválida, sin conexión, sesión vencida…
+      const v = describeError(res.error, { doing: 'mirar la foto' });
+      return setPhase({
+        kind: 'error',
+        uri,
+        message: v.title,
+        sub: v.hint ?? v.body,
+        detail: v.detail ? `${v.code} · ${v.detail}` : v.code,
+        action: v.action,
+        retry: v.retryable || v.code === 'unknown' ? again : null,
+      });
     }
     const out = res.data;
     console.log(`[camera] disparo → resultado ${Date.now() - t0} ms · servidor ${JSON.stringify(out.timings)}`);
@@ -117,7 +143,14 @@ function CameraScreen() {
       setPhase({ kind: 'looking', uri: pic.uri, slow: false });
       await send(pic.uri, pic.base64);
     } catch (e) {
-      setPhase({ kind: 'error', uri: null, message: 'No pude sacar la foto.', retry: () => setPhase({ kind: 'viewfinder' }) });
+      setPhase({
+        kind: 'error',
+        uri: null,
+        message: 'No pude sacar la foto.',
+        sub: 'La cámara no respondió. Probá de nuevo.',
+        detail: e instanceof Error ? e.message : String(e),
+        retry: () => setPhase({ kind: 'viewfinder' }),
+      });
       console.warn('[camera]', e);
     }
   };
@@ -171,8 +204,28 @@ function CameraScreen() {
           {phase.kind === 'error' ? (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>{phase.message}</Text>
+              {phase.sub ? <Text style={styles.cardSub}>{phase.sub}</Text> : null}
+              {__DEV__ && phase.detail ? (
+                <Text style={styles.cardDetail} numberOfLines={3} selectable>
+                  {phase.detail}
+                </Text>
+              ) : null}
               <View style={styles.row}>
-                {phase.retry ? <Button label="Reintentar" onPress={phase.retry} /> : <Button label="Otra foto" onPress={() => setPhase({ kind: 'viewfinder' })} />}
+                {phase.action === 'login' ? (
+                  <Button
+                    label="Volver a entrar"
+                    onPress={() => {
+                      close();
+                      router.replace('/login');
+                    }}
+                  />
+                ) : phase.action === 'settings' ? (
+                  <Button label="Abrir Ajustes" onPress={() => void Linking.openSettings()} />
+                ) : phase.retry ? (
+                  <Button label="Reintentar" onPress={phase.retry} />
+                ) : (
+                  <Button label="Otra foto" onPress={() => setPhase({ kind: 'viewfinder' })} />
+                )}
                 <Button label="Cerrar" variant="ghost" onPress={close} />
               </View>
             </View>
@@ -233,6 +286,8 @@ const styles = StyleSheet.create({
   shutterInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
   card: { alignSelf: 'stretch', backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.sm, alignItems: 'center' },
   cardTitle: { fontSize: font.h3, fontWeight: '800', color: colors.text, textAlign: 'center' },
+  cardSub: { fontSize: font.body, color: colors.textMuted, textAlign: 'center' },
+  cardDetail: { fontSize: 11, color: colors.textMuted, textAlign: 'center' },
   row: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
   inscription: { alignSelf: 'stretch', backgroundColor: colors.surfaceMuted, borderRadius: radius.md, padding: space.sm },
   insOriginal: { fontSize: font.small, fontStyle: 'italic', color: colors.text },

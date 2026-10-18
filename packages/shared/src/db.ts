@@ -141,6 +141,8 @@ export interface BlockRow {
   sources: unknown[] | null;
   tour_id: Uuid | null;
   sort_order: number;
+  /** PRD 31: bloques con el mismo choice_group son opciones de un mismo lugar del día ("elegí 1"). */
+  choice_group?: Uuid | null;
   created_by: Uuid | null;
   created_by_agent: boolean;
   created_at: string;
@@ -194,6 +196,10 @@ export interface AgentJobRow {
   progress: { at: string; text: string }[] | null;
   result: unknown;
   error: string | null;
+  /** Código de packages/shared/src/errors.ts (o uno de dominio: skeleton_failed, not_enough_candidates, …). */
+  error_code: string | null;
+  /** Proveedor que falló, si fue un provider_*. */
+  error_provider: string | null;
   created_at: string;
   updated_at: string;
 }

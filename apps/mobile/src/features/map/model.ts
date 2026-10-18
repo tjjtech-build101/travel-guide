@@ -3,6 +3,7 @@
 import type { DayRow } from '@build101/shared';
 
 import type { ScoutFocus } from '../../voice/useScout';
+import { collapseChoices } from '../plan/choices';
 import { LEG_COLORS, legColorMap, TYPE_LABEL } from '../plan/labels';
 import { compareBlocks, hhmm, shortDay, type PlanBlock, type PlanLeg } from '../plan/selectors';
 
@@ -28,13 +29,15 @@ export type MapPoint = {
   end?: string | null;
   place?: string | null;
   typeLabel?: string | null;
+  /** Bloques: descripción del plan (el gancho del ▶ "Ver el día"). */
+  description?: string | null;
 };
 
 export type MapLine = { id: string; color: string; coords: LngLat[]; dashed: boolean };
 
 export type MapScope = { kind: 'trip' } | { kind: 'day'; dayId: string };
 
-export type MapTour = { id: string; title: string; stops: { id: string; name: string; lat: number; lng: number; google_place_id: string | null }[] };
+export type MapTour = { id: string; title: string; thesis?: string | null; stops: { id: string; name: string; lat: number; lng: number; google_place_id: string | null }[] };
 
 export type MapModel = {
   points: MapPoint[];
@@ -150,9 +153,10 @@ export function buildMapModel({
 
   const leg = legs.find((l) => l.days.some((d) => d.id === scope.dayId));
   const color = (leg && colors.get(leg.id)) ?? LEG_COLORS[0];
-  const dayBlocks = blocks
-    .filter((b) => b.day_id === scope.dayId && (!b.plan_variant || b.plan_variant === 'main'))
-    .sort(compareBlocks);
+  // Un lugar "elegí 1 de N" pendiente es un solo pin: la opción recomendada (PRD 31).
+  const dayBlocks = collapseChoices(
+    blocks.filter((b) => b.day_id === scope.dayId && (!b.plan_variant || b.plan_variant === 'main')),
+  ).sort(compareBlocks);
   const visible = dayBlocks.filter((b) => !b.masked);
   const located = visible.filter(hasCoords);
   const unlocated = visible.filter((b) => !hasCoords(b));
@@ -174,6 +178,7 @@ export function buildMapModel({
     end: hhmm(b.end_time) || null,
     place: b.place_name,
     typeLabel: TYPE_LABEL[b.type] ?? null,
+    description: b.description,
   }));
   const lines: MapLine[] =
     located.length > 1
@@ -246,17 +251,137 @@ export function focusForCoordinate(lat: number, lng: number): ScoutFocus {
   return { lat, lng, label: 'Este punto del mapa' };
 }
 
-/** GeoJSON de los puntos (props: id, kind, color, order, label) para ShapeSource. */
-export function pointsGeoJSON(points: MapPoint[]) {
+/**
+ * GeoJSON de los puntos para ShapeSource. Props: id, kind, color, order (número a dibujar), status y label.
+ * Las paradas de tour van sin número en el mapa (si no, chocan con los números de los bloques del día);
+ * terminados en gris; `label` solo para el elegido y ahora/próximo (el resto, limpio).
+ */
+export function pointsGeoJSON(points: MapPoint[], status: Map<string, PointStatus> = new Map(), selectedId: string | null = null) {
   return {
     type: 'FeatureCollection' as const,
-    features: points.map((p) => ({
-      type: 'Feature' as const,
-      id: p.id,
-      properties: { id: p.id, kind: p.kind, color: p.color, order: p.order == null ? '' : String(p.order), label: p.label },
-      geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-    })),
+    features: points.map((p) => {
+      const st = status.get(p.id) ?? '';
+      const showLabel = p.id === selectedId || st === 'now' || st === 'next';
+      return {
+        type: 'Feature' as const,
+        id: p.id,
+        properties: {
+          id: p.id,
+          kind: p.kind,
+          color: st === 'done' ? DONE_COLOR : p.color,
+          order: p.kind === 'stop' || p.order == null ? '' : String(p.order),
+          status: st,
+          label: showLabel ? shortTitle(p.label) : '',
+        },
+        geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
+      };
+    }),
   };
+}
+
+/** Pines ya hechos: caqui apagado, como en la lista. */
+export const DONE_COLOR = '#B9A88A';
+
+function shortTitle(s: string, max = 26): string {
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
+
+// ── Chips del selector ──────────────────────────────────────────────────────────────────────────
+
+/** "Dom 18/10" → "Dom 18" (la ciudad va como separador entre chips, no en cada uno). */
+export function chipDay(date: string): string {
+  return shortDay(date).replace(/\/\d+$/, '');
+}
+
+/** Ciudad a mostrar antes de cada chip: solo cuando cambia respecto del anterior. */
+export function citySeparators(options: DayOption[], legCity: (legId: string) => string): (string | null)[] {
+  let prev: string | null = null;
+  return options.map((o) => {
+    const city = legCity(o.legId);
+    const out = city !== prev ? city : null;
+    prev = city;
+    return out;
+  });
+}
+
+// ── Distancias (aproximadas, sin route_eta) ─────────────────────────────────────────────────────
+
+export function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/** Minutos a pie: línea recta × 1,3 (las calles no son rectas) a 80 m/min. Null si es lejísimos (> 60 min). */
+export function walkMinutes(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number | null {
+  const min = Math.max(1, Math.round((distanceM(a, b) * 1.3) / 80));
+  return min > 60 ? null : min;
+}
+
+export function formatKm(m: number): string {
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+}
+
+// ── ▶ "Ver el día con el Scout" ─────────────────────────────────────────────────────────────────
+
+export type PreviewStep =
+  | { kind: 'intro'; title: string; body: string }
+  | { kind: 'stop'; point: MapPoint; title: string; body: string }
+  | { kind: 'outro'; title: string; body: string };
+
+/** Primera oración (o un recorte prolijo) de un texto: un gancho, no un párrafo. */
+export function hookOf(text: string | null | undefined, max = 140): string | null {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  const first = t.match(/^.+?[.!?](\s|$)/)?.[0].trim() ?? t;
+  return first.length <= max ? first : `${first.slice(0, max - 1).replace(/\s+\S*$/, '')}…`;
+}
+
+/**
+ * Guion del recorrido animado del día: intro (la tesis del tour si hay, si no el resumen), una escena por
+ * bloque con ubicación (hora + título + un gancho) y el cierre ("¿Arrancamos?").
+ */
+export function previewSteps(points: MapPoint[], tours: MapTour[], dayLabel: string): PreviewStep[] {
+  const blocks = points.filter((p) => p.kind === 'block');
+  if (!blocks.length) return [];
+  let total = 0;
+  for (let i = 1; i < blocks.length; i++) total += distanceM(blocks[i - 1], blocks[i]) * 1.3;
+  const thesisTour = tours.find((t) => t.thesis && blocks.some((b) => b.tourId === t.id));
+  const summary = `${blocks.length} ${blocks.length === 1 ? 'lugar' : 'lugares'}${blocks.length > 1 ? ` · ~${formatKm(total)} de recorrido` : ''}`;
+  const steps: PreviewStep[] = [
+    {
+      kind: 'intro',
+      title: dayLabel,
+      body: thesisTour ? `${thesisTour.thesis!.replace(/\.$/, '')}. ${summary}.` : `Te muestro el día: ${summary}.`,
+    },
+  ];
+  for (const p of blocks) {
+    const tour = p.tourId ? tours.find((t) => t.id === p.tourId) : undefined;
+    const hook =
+      hookOf(p.description) ??
+      (tour ? `${tour.stops.length} paradas${tour.thesis ? `: ${hookOf(tour.thesis)}` : ''}` : null) ??
+      [p.typeLabel, p.place && !sameish(p.place, p.label) ? p.place : null].filter(Boolean).join(' · ');
+    steps.push({ kind: 'stop', point: p, title: [p.start, p.label].filter(Boolean).join(' · '), body: hook });
+  }
+  steps.push({ kind: 'outro', title: '¿Arrancamos?', body: 'Si querés cambiar algo, decímelo y lo acomodo.' });
+  return steps;
+}
+
+/** ¿El lugar ya está dicho en el título? ("Visita guiada al Teatro Solís" / "Teatro Solís"). */
+export function sameish(place: string, title: string): boolean {
+  const n = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return n(title).includes(n(place));
+}
+
+/** Rumbo (grados) de a → b, para que la cámara mire hacia donde va el Scout. */
+export function bearing(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = Math.PI / 180;
+  const y = Math.sin((b.lng - a.lng) * rad) * Math.cos(b.lat * rad);
+  const x = Math.cos(a.lat * rad) * Math.sin(b.lat * rad) - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos((b.lng - a.lng) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
 }
 
 export function linesGeoJSON(lines: MapLine[]) {

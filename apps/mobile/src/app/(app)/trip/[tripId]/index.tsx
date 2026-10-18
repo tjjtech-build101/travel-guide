@@ -7,9 +7,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { GuideTarget, useGuide } from '../../../../features/guide/useGuide';
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
 import { ActionToast } from '../../../../features/plan/components/ActionToast';
+import { ChoiceCard } from '../../../../features/plan/components/ChoiceCard';
+import { MenuEntry } from '../../../../features/menu/components';
+import { menuLegStates } from '../../../../features/menu/model';
+import { useChooseOption, useLegOptions } from '../../../../features/menu/queries';
 import { Segmented } from '../../../../features/plan/components/Controls';
 import {
   DayEmpty,
@@ -48,7 +53,7 @@ import {
 import { ToursTab } from '../../../../features/planning/ToursTab';
 import { generateTourForBlock } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
-import { errorDetail, useTrip } from '../../../../features/trips/queries';
+import { useTrip } from '../../../../features/trips/queries';
 import type { AvatarPerson } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
 import { EmptyState, ErrorState } from '../../../../ui/States';
@@ -94,6 +99,9 @@ function ItineraryView() {
   const blocks = usePlanBlocks(tripId);
   const proposals = usePendingProposals(tripId);
   const perms = usePermissions(tripId);
+  // PRD 31: menú colaborativo por tramo + lugares "elegí 1 de N".
+  const legOptions = useLegOptions(tripId);
+  const choose = useChooseOption(tripId);
 
   const ensureTrip = usePlanMapStore((s) => s.ensureTrip);
   const filter = usePlanMapStore((s) => s.filter);
@@ -148,6 +156,14 @@ function ItineraryView() {
     return set;
   }, [sections]);
 
+  const menuStates = useMemo(
+    () => (legs && legOptions.data ? menuLegStates(legs, legOptions.data, blocks.data ?? []) : []),
+    [legs, legOptions.data, blocks.data],
+  );
+  const openMenu = useCallback((legId?: string) => {
+    router.push({ pathname: '/trip/[tripId]/menu', params: { tripId, ...(legId ? { legId } : {}) } });
+  }, [tripId]);
+
   const blocksByDay = useMemo(() => {
     const m = new Map<string, PlanBlock[]>();
     for (const b of blocks.data ?? []) if (b.day_id) m.set(b.day_id, [...(m.get(b.day_id) ?? []), b]);
@@ -183,8 +199,8 @@ function ItineraryView() {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken<PlanRow>[] }) => {
     for (const v of viewableItems) {
       const r = v.item;
-      if (r && (r.kind === 'day' || r.kind === 'block' || r.kind === 'dayEmpty')) {
-        const dayId = r.kind === 'block' ? r.block.day_id : r.day.id;
+      if (r && (r.kind === 'day' || r.kind === 'block' || r.kind === 'dayEmpty' || r.kind === 'choice')) {
+        const dayId = r.kind === 'block' ? r.block.day_id : r.kind === 'choice' ? r.blocks[0].day_id : r.day.id;
         if (dayId) {
           visibleDay.current = { legId: r.leg.id, dayId };
           return;
@@ -237,6 +253,7 @@ function ItineraryView() {
             (legs ?? []).flatMap((l) => l.days),
           ),
       },
+      ...menuStates.map((m) => ({ label: `Ver menú de ${m.city}`, onPress: () => openMenu(m.legId) })),
       ...(sections?.groups.some((g) => g.parallel)
         ? [{ label: parallelView ? 'Ver una rama' : 'Ver tramos en paralelo', onPress: () => setParallelView(!parallelView) }]
         : []),
@@ -262,9 +279,12 @@ function ItineraryView() {
     void proposals.refetch();
   };
 
+  // Primera vez en un viaje con días: el Scout muestra cómo moverse (tramos, filtro, tabs y él mismo).
+  useGuide('trip', !loading && !hardError && !!legs?.length);
+
   if (loading) return <PlanSkeleton />;
   if (hardError || !sections || !legs) {
-    return <ErrorState message="No pudimos cargar el plan" detail={errorDetail(overview.error ?? blocks.error)} onRetry={retry} />;
+    return <ErrorState message="No pudimos cargar el plan" error={overview.error ?? blocks.error} doing="cargar el plan" onRetry={retry} />;
   }
 
   if (legs.length === 0) {
@@ -323,6 +343,17 @@ function ItineraryView() {
             people={people}
             onPress={onPressBlock}
             onGenerateTour={onGenerateTour}
+          />
+        );
+      case 'choice':
+        return (
+          <ChoiceCard
+            blocks={item.blocks}
+            legColor={legColors.get(item.leg.id) ?? colors.primary}
+            canChoose={perms.canEditLeg(item.leg.id)}
+            choosing={choose.isPending ? (choose.variables?.blockId ?? null) : null}
+            onChoose={(b) => choose.mutate({ blockId: b.id, title: b.title })}
+            onPress={onPressBlock}
           />
         );
       case 'ghost':
@@ -384,32 +415,39 @@ function ItineraryView() {
         <AgentJobProgress tripId={tripId} showSkeleton={false} />
       </View>
       <View style={styles.top}>
-        <LegStrip
-          groups={sections.groups}
-          legColors={legColors}
-          activeLegIds={activeLegIds}
-          onPress={(leg, group) => {
-            if (group.parallel && !parallelView) setBranchByDate(selectBranch(branchByDate, group, leg.id));
-            select({ legId: leg.id });
-            // Esperar a que se recalculen las filas si cambió la rama.
-            requestAnimationFrame(() => scrollToLeg(leg.id));
-          }}
-        />
-        <View style={styles.bar}>
-          <Segmented
-            options={FILTER_OPTIONS}
-            value={filter}
-            onChange={(f) => {
-              void Haptics.selectionAsync().catch(() => {});
-              setFilter(f);
+        <GuideTarget id="plan.legs">
+          <LegStrip
+            groups={sections.groups}
+            legColors={legColors}
+            activeLegIds={activeLegIds}
+            onPress={(leg, group) => {
+              if (group.parallel && !parallelView) setBranchByDate(selectBranch(branchByDate, group, leg.id));
+              select({ legId: leg.id });
+              // Esperar a que se recalculen las filas si cambió la rama.
+              requestAnimationFrame(() => scrollToLeg(leg.id));
             }}
           />
-          <IconButton onPress={tripMenu} label="Más opciones del viaje">
-            <DotsIcon color={colors.text} />
-          </IconButton>
+        </GuideTarget>
+        <View style={styles.bar}>
+          <GuideTarget id="plan.filter" style={styles.flexRow}>
+            <Segmented
+              options={FILTER_OPTIONS}
+              value={filter}
+              onChange={(f) => {
+                void Haptics.selectionAsync().catch(() => {});
+                setFilter(f);
+              }}
+            />
+          </GuideTarget>
+          <GuideTarget id="plan.more">
+            <IconButton onPress={tripMenu} label="Más opciones del viaje">
+              <DotsIcon color={colors.text} />
+            </IconButton>
+          </GuideTarget>
         </View>
       </View>
       <ProposalBanner count={pendingCount} onPress={() => openProposals(tripId)} />
+      <MenuEntry states={menuStates} onOpen={openMenu} />
       {stale ? <StaleBanner /> : null}
 
       <FlashList
@@ -446,6 +484,7 @@ const styles = StyleSheet.create({
   job: { paddingHorizontal: space.lg },
   top: { paddingTop: space.xs, gap: space.sm, backgroundColor: colors.bg },
   bar: { flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingLeft: space.lg, paddingRight: space.sm },
+  flexRow: { flex: 1, flexDirection: 'row' },
   // Espacio abajo para el FAB y el botón flotante de voz (PRD 05).
   list: { paddingHorizontal: space.lg, paddingBottom: FAB_SIZE + space.xxl * 2 },
   idea: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },

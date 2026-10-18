@@ -71,7 +71,7 @@ export async function overpassCandidates(args: { lat: number; lng: number; radiu
         lastErr = `${endpoint}: ${(err as Error).message}`;
       }
     }
-    if (!body) throw upstream(`Overpass no respondió (${lastErr})`);
+    if (!body) throw upstream('OpenStreetMap (Overpass) no respondió.', 'osm', String(lastErr));
     const seen = new Set<string>();
     const out: OverpassCandidate[] = [];
     for (const el of body.elements ?? []) {

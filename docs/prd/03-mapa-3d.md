@@ -17,7 +17,9 @@ notion_url: https://app.notion.com/p/3fc81924a5c681d28607d7e28a54447f
 > - **Tocar cualquier elemento** (pin o fila) → tarjeta con **"Hablar con Scout de esto"** → `useScout().startScoutCall({ focus, tripId, context })` (stub de `src/voice/useScout.ts`, lo implementa el PRD 05). `focus` = Contratos v1.1 (`block_id` / `google_place_id` / `lat`,`lng` / `label`). Mantener apretado el mapa → focus en esa coordenada.
 > - Mapbox (`@rnmapbox/maps`, ya en el dev build) **solo si hay `EXPO_PUBLIC_MAPBOX_TOKEN`**; sin token: aviso "Falta EXPO_PUBLIC_MAPBOX_TOKEN" + la lista de puntos (mismas acciones). Puck propio desde el `LocationProvider` (anda con el simulado).
 > - Lógica pura en `apps/mobile/src/features/map/model.ts` (`pnpm --filter mobile test:map`).
-> - Pendiente: probar el render de Mapbox con token real, 3D, capas, ficha de lugar, arrastrar, "Ver el día", vista dividida, `route_eta`.
+> - **Ordenado (sáb 17/10):** chips cortos ("Hoy", "Lun 19") con la ciudad como separador; hoja que arranca chica (27 %) con Ahora / Próximo (+ min a pie) o el lugar elegido en tarjeta compacta; paradas de tour sin número (los números son del día); pines hechos en gris, "ahora" con halo que late, nombre solo en elegido/ahora/próximo; línea punteada de mi posición al próximo; botón "mi ubicación"; un solo Scout a la vista (el flotante se esconde con un lugar elegido); POIs del mapa base más tenues; aviso de conexión arriba.
+> - **▶ "Ver el día" (2D):** el Scout camina de parada en parada (cámara `flyTo` con inclinación), globito con hora + título + un gancho (descripción del bloque o la tesis del tour), cierre "¿Arrancamos?" → hablar con el Scout. Se corta con un toque. Guion puro en `previewSteps` (model.ts). Deep link `?day=YYYY-MM-DD&play=1`.
+> - Pendiente: 3D (estilo Standard), capas, ficha de lugar, arrastrar, vista dividida, `route_eta`.
 
 > 📌 Fuentes: [Producto](../PRODUCT.md) · [Arquitectura](../ARCHITECTURE.md) · [Contratos](../CONTRACTS.md). Requiere PRD 00 (y comparte estado con 02).
 

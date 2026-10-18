@@ -12,7 +12,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import { describeError, type AppError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Skeleton } from '../../ui/States';
 import { Text } from '../../ui/Text';
@@ -37,7 +39,7 @@ export function TourSetupSheet({
   const [answers, setAnswers] = useState<TourAnswers>({});
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
 
   // Las coordenadas se redondean para no repetir la consulta por cada metro que te movés.
   const key = here ? [here.lat.toFixed(3), here.lng.toFixed(3)] : null;
@@ -81,7 +83,7 @@ export function TourSetupSheet({
     const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min: duration, ...tourAnswersToInput(answers) });
     setSubmitting(false);
     if (res.ok) onClose();
-    else setError(res.message);
+    else setError(res.error);
   };
 
   const questions = brief.data?.questions ?? [];
@@ -115,7 +117,10 @@ export function TourSetupSheet({
               <Skeleton height={44} />
             </View>
           ) : brief.isError ? (
-            <Text style={styles.muted}>No pude leer tu contexto ahora. Te lo armo igual con tu perfil.</Text>
+            // No bloquea (se arma igual), pero se dice por qué: si es "sin créditos", el armado también va a fallar.
+            <Text style={styles.muted}>
+              No pude leer tu contexto ahora ({describeError(brief.error).title}). Te lo armo igual con tu perfil.
+            </Text>
           ) : (
             <>
               <Text style={styles.summary}>{brief.data.summary}</Text>
@@ -160,7 +165,7 @@ export function TourSetupSheet({
               ))}
             </>
           )}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <ErrorNotice error={error} doing="armar el tour" onRetry={() => void submit()} retrying={submitting} /> : null}
         </ScrollView>
 
         <View style={styles.footer}>
@@ -200,7 +205,6 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   muted: { fontSize: font.small, color: colors.textMuted, marginTop: space.sm },
-  error: { fontSize: font.small, color: colors.danger },
   footer: { padding: space.lg, gap: space.xs, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
   fine: { fontSize: font.tiny, color: colors.textMuted, textAlign: 'center' },
 });

@@ -114,7 +114,7 @@ diary_entries(id, trip_id, day_id, user_id null,   -- null = versión del grupo
 
 -- INFRA
 agent_jobs(id, kind text, trip_id null, user_id, status text, progress jsonb, -- [{at, text}]
-  result jsonb, error text, created_at, updated_at)
+  result jsonb, error text, error_code text null, error_provider text null, created_at, updated_at)
 device_tokens(user_id, token, platform, updated_at)
 ```
 
@@ -306,3 +306,40 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - **`GenerateTourResult`** suma `title`, `thesis` y en `stats`: `facts_cited`, `sentences_dropped`, `critic_rewrites`, `duration_ms`.
 - Voz: el Scout llama `tour_brief`, hace como mucho 2 preguntas en una frase y después `generate_tour` con las respuestas (`apps/api/src/voice/instructions.ts`).
 - Env opcionales de la API: `TOUR_DIRECTOR_EFFORT` (default `high`), `TOUR_WRITER_EFFORT` (`medium`), `TOUR_RESEARCH_EFFORT` (`medium`), `TOUR_CRITIC` (`true`).
+
+## Cambios PRD 31 (planificador colaborativo) — en código
+
+- **Migración `20261017000010_planner_colaborativo.sql`** (aditiva):
+  - `destination_catalog` (global por ciudad, escribe solo la API): `city_key` único (`"buenos aires|argentina"`), `city`, `country`, `lat`, `lng`, `items jsonb` (`CatalogItem[]`), `lodging_zones jsonb`, `model`, timestamps. Lectura para cualquier autenticado. TTL lógico 30 días.
+  - `leg_options` (menú del tramo): `trip_id`, `leg_id`, `item jsonb` (`CatalogItem`), `section` ∈ `must|for_you|gems|food|day_trips|events`, `score`, `for_user_ids uuid[]`, `reason`, `preselected`, `sort_order`. Cae en cascada con el tramo.
+  - `leg_option_reactions`: PK `(option_id, user_id)`, `trip_id`, `reaction` ∈ `love|no|must`. Escribe solo la API (`react_option`).
+  - `blocks.choice_group uuid` (nullable): bloques con el mismo valor son opciones de un mismo lugar del día ("elegí 1 de N", status `proposed`; alojamiento `idea`). `blocks_visible` suma la columna al final.
+  - Realtime: se publican `leg_options` y `leg_option_reactions` (`REALTIME_TABLES`).
+- **Tipos** en `packages/shared/src/planner.ts`: `CatalogItem`, `LegOptionRow`, `LegOptionReactionRow`, `optionIncluded()` (regla de grupo: entra si alguien dijo "sí o sí", o si está preseleccionada / tiene "me copa" y no hay más "paso" que "me copa"), `TripBriefResult`, `TripQuestion`, `TripUnderstanding`, `TripShape`, `PlanCoverage`, `ComposeDaysResult`.
+- **`plan_trip`** acepta `skeleton` (`TripShapeSkeleton`, la forma elegida en `trip_shapes`: salta el LLM del esqueleto) y `mode` (`auto` default | `menu`). Con `menu` arma tramos + días + traslados + `leg_options` y termina con `result.stage='menu'`; con `auto` además arma los días desde el catálogo (`stage='planned'`). `PlanTripResult` suma `stage`, `options`, `choices`, `coverage`.
+- **Herramientas nuevas**: `trip_brief` (síncrona: lo que entendí + 0-4 preguntas; precalienta el catálogo), `trip_shapes` (síncrona: 2-3 formas del viaje), `react_option` (`{option_id, reaction|null}`), `compose_days` (job `kind='compose_days'`, `{trip_id, leg_ids?, instruction?}` → `{job_id, trip_id}`), `choose_option` (`{block_id}`: confirma esa opción y manda las otras al banco de ideas, con `undo_token`).
+- **`activity_feed.kind`** nuevos: `days_composed` (deshace todo lo armado por `compose_days`), `option_chosen`.
+
+## Cambios PRD 11 (decidir propuestas) — en código
+
+Sin migración: usa `agent_proposals` tal cual. Lo que falta del PRD 11 es el modo `reconcile` (`propose_changes`); hoy las propuestas salen de `add_block` / `update_block` / `move_block` / `remove_block` / `choose_option` cuando el agente toca lo compartido, y de los tours (abajo).
+
+- **Herramienta nueva `decide_proposal`** `{proposal_id?, trip_id?, decision:'accept'|'reject', note?}` → `DecideProposalResult {proposal_id, status:'accepted'|'rejected'|'expired', applied_block_ids, summary}` + `undo_token` al aceptar. Sin `proposal_id` decide la pendiente más reciente de `trip_id` (para "dale, aceptá" por voz).
+  - Permisos: organizer, o viajero en `leg_members` del `leg_id` de la propuesta. Seguidor / no miembro → 403. Ya decidida → 409 `proposal_decided`.
+  - Expiración perezosa: más de 24 h (`PROPOSAL_TTL_MS` en `packages/shared`) o un bloque afectado que ya no está o tiene `updated_at` posterior a `created_at` → `status='expired'` (respuesta `ok` con `status:'expired'`, feed `proposal_expired`).
+  - Aceptar: valida todo antes de escribir (privados ajenos → 403; mover o sacar un `booked` → 409 `booked`), reclama la fila (`pending → accepted` con filtro `status='pending'`) y aplica en orden guardando las inversas. Si una op falla, aplica las inversas de lo ya hecho, vuelve la propuesta a `pending` y responde 409 `apply_failed`. Los `add` entran con `status` `proposed → confirmed` y `created_by_agent = by_agent`. Un `move` corre `end_time` con la duración y, sin `sort_order`, va al final del día destino.
+  - Lo decide una persona aunque llame el Scout: `decided_by` = la persona y el resumen del feed va con su nombre.
+- **`activity_feed.kind`** nuevos: `proposal_accepted` (deshacible: `payload.inverse` revierte todo; `payload.block_ids`), `proposal_rejected`, `proposal_expired`. La app invalida `blocks` y `agent_proposals` con cualquier `proposal_*`; si decidió otra persona y hay llamada abierta sobre el viaje, manda `[EVENTO:proposal_decided] {decision, summary}`.
+- **Voz**: las instrucciones listan las propuestas pendientes con su `proposal_id` en "Datos para herramientas" y el Scout solo llama `decide_proposal` con un sí o un no explícito.
+- **Tours en el plan**: cuando `generate_tour` termina con `trip_id`, el tour queda en el plan. Con `block_id` se enlaza ese bloque (`blocks.tour_id`); si no, se agrega un bloque `type='tour'` con `tour_id` hoy (zona del viaje) a la hora de inicio redondeada a 5 min, con la regla de `add_block` (personal → aplica; compartido y lo pidió el Scout → propuesta). `GenerateTourResult.plan` y `TourReadyEvent.plan` = `TourPlanLink` (`linked|applied` con `block_id`, `proposed` con `proposal_id`, o `none` con `reason`). `addBlockImpl` acepta columnas extra (solo `tour_id` hoy).
+
+---
+
+## Cambios: errores clasificados — en código
+
+- `ToolError` suma `provider?` y `detail?`: `{ code, message, issues?, provider?, detail? }`. `message` es texto para la persona (español); `detail` es el crudo técnico (la app lo muestra solo en desarrollo). Los 500 `internal` ya no devuelven el mensaje crudo como `message`.
+- Códigos de proveedor en `packages/shared/src/errors.ts` (`PROVIDERS`, `PROVIDER_ERROR_CODES`): `provider_no_credits` (402), `provider_auth` (502), `provider_denied` (502), `provider_rate_limited` (429), `provider_overloaded` (503), `provider_timeout` (504), `provider_unavailable` (502), `provider_refused` (422), con `provider` ∈ `anthropic | openai | google | supabase | weather | osm | wikipedia`. Reemplazan a `upstream_error` cuando se puede clasificar y a `vision_unavailable` (look_at_photo). `not_configured` lleva `provider` cuando aplica.
+- Auth: si Supabase Auth no responde → 503 `provider_unavailable` (`provider: 'supabase'`), no 401 (no desloguea).
+- `agent_jobs.error_code` / `error_provider` (migración `20261018000001_job_error_code.sql`): código del error que hizo fallar el job (provider_* o de dominio: `skeleton_failed`, `leg_failed`, `catalog_small`, `generate_failed`, `not_enough_candidates`, `internal`…). `error` sigue siendo el texto.
+- Los `.catch` que degradaban (seguir sin ese dato) dejan pasar los errores fatales de proveedor (sin créditos, key inválida): ya no se disfrazan de "no encontré lugares".
+- La app arma el texto lindo en `apps/mobile/src/lib/errors.ts` (`describeError`) y lo muestra con `ui/ErrorNotice`, `ErrorState` (prop `error`), `errorToast` / `showErrorToast` y `ScreenErrorBoundary` (error boundary de Expo Router).

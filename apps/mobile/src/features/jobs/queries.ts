@@ -79,7 +79,7 @@ export function useAgentJob(jobId: string | undefined) {
   return query;
 }
 
-/** Último job plan_trip del viaje (lo invalida useTripRealtime con cada evento de agent_jobs). */
+/** Último job de armado del viaje: plan_trip o compose_days (PRD 31). Lo invalida useTripRealtime con cada evento de agent_jobs. */
 export function useLatestPlanJob(tripId: string, enabled = true) {
   return useQuery({
     queryKey: tripKeys.table(tripId, 'agent_jobs'),
@@ -89,7 +89,7 @@ export function useLatestPlanJob(tripId: string, enabled = true) {
         .from('agent_jobs')
         .select('*')
         .eq('trip_id', tripId)
-        .eq('kind', 'plan_trip')
+        .in('kind', ['plan_trip', 'compose_days'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

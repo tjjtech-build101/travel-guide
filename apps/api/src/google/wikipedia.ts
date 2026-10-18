@@ -1,6 +1,6 @@
 // Wikipedia geosearch (candidatos) + Wikidata (wbgetentities, para contar sitelinks como señal de notoriedad).
 // Sin key. PRD 06 "Candidatos en paralelo".
-import { upstream } from '../errors';
+import { fetchFailure, httpFailure } from '../errors';
 import { cached } from './cache';
 
 // Política de Wikimedia: User-Agent con nombre, versión y URL de contacto (si no, limita mucho antes).
@@ -12,7 +12,7 @@ async function getJson<T>(url: string, retries = 1): Promise<T> {
     res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
   } catch (err) {
     if (retries > 0) return getJson<T>(url, retries - 1);
-    throw upstream(`Wikipedia/Wikidata no respondió: ${(err as Error).message}`);
+    throw fetchFailure('wikipedia', err);
   }
   // 429/5xx: un reintento corto (Wikimedia limita ráfagas).
   if ((res.status === 429 || res.status >= 500) && retries > 0) {
@@ -20,7 +20,7 @@ async function getJson<T>(url: string, retries = 1): Promise<T> {
     await new Promise((r) => setTimeout(r, Number.isFinite(after) && after > 0 ? Math.min(after, 3) * 1000 : 1200));
     return getJson<T>(url, retries - 1);
   }
-  if (!res.ok) throw upstream(`Wikipedia/Wikidata respondió ${res.status}`);
+  if (!res.ok) throw httpFailure('wikipedia', res.status, '');
   return (await res.json()) as T;
 }
 

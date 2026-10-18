@@ -49,6 +49,8 @@ export async function captureViaTool<T>(args: {
   serverTools: ('web_search' | 'web_fetch')[];
   config: TourLlmConfig;
   signal?: AbortSignal;
+  /** Tope de usos por server tool (default 3 cada una). El catálogo del planificador (PRD 31) pide más. */
+  maxUses?: { web_search?: number; web_fetch?: number };
 }): Promise<RunnerResult<T>> {
   const client = anthropicClient();
   let captured: T | null = null;
@@ -62,8 +64,8 @@ export async function captureViaTool<T>(args: {
     },
   });
   const serverToolDefs: Record<string, unknown> = {
-    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
-    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 },
+    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: args.maxUses?.web_search ?? 3 },
+    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: args.maxUses?.web_fetch ?? 3 },
   };
   const tools: unknown[] = [captureTool, ...args.serverTools.map((t) => serverToolDefs[t])];
   const params = {

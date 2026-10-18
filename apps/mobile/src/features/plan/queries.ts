@@ -3,7 +3,7 @@
 //   blocks    → ['trip', id, 'blocks', 'plan']           (blocks, block_participants, feed block_* / busy_changed / undo)
 //               (sub-key: ['trip', id, 'blocks'] lo usa useTripBlocks con otra forma de datos, sin participantes)
 //   proposals → ['trip', id, 'agent_proposals', 'pending']
-import type { AgentProposalRow, BlockVisibleRow, DayRow, LegRow, TripMemberRow, TripRole } from '@build101/shared';
+import { PROPOSAL_TTL_MS, type AgentProposalRow, type BlockVisibleRow, type DayRow, type LegRow, type TripMemberRow, type TripRole } from '@build101/shared';
 import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 
@@ -95,7 +95,9 @@ export function usePendingProposals(tripId: string) {
         .eq('status', 'pending')
         .order('created_at', { ascending: true });
       if (error) throw error;
-      return (data ?? []) as AgentProposalRow[];
+      // Las de más de 24 h ya vencieron (la API las marca expired al decidirlas): no cuentan ni dejan fantasmas.
+      const now = Date.now();
+      return ((data ?? []) as AgentProposalRow[]).filter((p) => now - Date.parse(p.created_at) <= PROPOSAL_TTL_MS);
     },
   });
 }

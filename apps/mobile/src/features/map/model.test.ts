@@ -2,7 +2,25 @@
 import type { DayRow } from '@build101/shared';
 
 import type { PlanBlock, PlanLeg } from '../plan/selectors';
-import { boundsOf, buildMapModel, dayOptions, defaultDayId, focusForCoordinate, focusForPoint, timelineStatus, type MapPoint, type MapTour } from './model';
+import {
+  boundsOf,
+  buildMapModel,
+  chipDay,
+  citySeparators,
+  dayOptions,
+  defaultDayId,
+  DONE_COLOR,
+  focusForCoordinate,
+  focusForPoint,
+  hookOf,
+  pointsGeoJSON,
+  previewSteps,
+  sameish,
+  timelineStatus,
+  walkMinutes,
+  type MapPoint,
+  type MapTour,
+} from './model';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -137,6 +155,65 @@ test('estado del sendero: terminado, ahora y próximo', () => {
   eq([...timelineStatus(pts, 11 * 60)], [['a', 'done'], ['b', 'now'], ['c', 'next']]);
   eq([...timelineStatus(pts, 8 * 60)], [['a', 'next']]);
   eq([...timelineStatus(pts, 13 * 60)], [['a', 'done'], ['b', 'done'], ['c', 'now'], ['d', 'next']]);
+});
+
+test('nivel día: un lugar "elegí 1 de N" es un solo pin (la recomendada)', () => {
+  const blocks = [
+    block({ id: 'op-2', start_time: '15:00', sort_order: 2, lat: -34.907, lng: -56.2, choice_group: 'g' }),
+    block({ id: 'op-1', start_time: '15:00', sort_order: 1, lat: -34.906, lng: -56.199, choice_group: 'g' }),
+    block({ id: 'cena', start_time: '21:00', sort_order: 3, lat: -34.905, lng: -56.198 }),
+  ];
+  const m = buildMapModel({ legs, blocks, tours, scope: { kind: 'day', dayId: 'd2' } });
+  eq(m.points.map((p) => p.id), ['block:op-1', 'block:cena']);
+});
+
+test('pines: paradas sin número, hechos en gris, etiqueta solo en elegido/ahora/próximo', () => {
+  const blocks = [
+    block({ id: 'b1', type: 'tour', tour_id: 'tour1', title: 'Tour', start_time: '09:00', end_time: '10:00', lat: -34.9067, lng: -56.2012 }),
+    block({ id: 'b2', title: 'Almuerzo', start_time: '12:00', lat: -34.907, lng: -56.2 }),
+  ];
+  const m = buildMapModel({ legs, blocks, tours, scope: { kind: 'day', dayId: 'd2' } });
+  const status = timelineStatus(m.points, 11 * 60);
+  const props = pointsGeoJSON(m.points, status, null).features.map((f) => f.properties);
+  eq(props.filter((p) => p.kind === 'stop').map((p) => p.order), ['', '']);
+  const b1 = props.find((p) => p.id === 'block:b1')!;
+  eq([b1.order, b1.status, b1.color, b1.label], ['1', 'done', DONE_COLOR, '']);
+  eq(props.find((p) => p.id === 'block:b2')!.label, 'Almuerzo');
+});
+
+test('chips cortos y la ciudad solo cuando cambia', () => {
+  eq(chipDay('2026-10-18'), 'Dom 18');
+  const opts = dayOptions(legs);
+  const city = new Map(legs.map((l) => [l.id, l.city]));
+  const seps = citySeparators(opts, (id) => city.get(id) ?? '');
+  eq(seps[0], 'Montevideo');
+  eq(seps.filter(Boolean).length <= opts.length, true);
+  if (opts.length > 1 && city.get(opts[0].legId) === city.get(opts[1].legId)) eq(seps[1], null);
+});
+
+test('a pie, ganchos y lugar repetido en el título', () => {
+  eq(walkMinutes({ lat: -34.9067, lng: -56.2012 }, { lat: -34.9069, lng: -56.2052 }), 6);
+  eq(walkMinutes({ lat: -34.9, lng: -56.2 }, { lat: -34.6, lng: -58.4 }), null);
+  eq(hookOf('Primera idea. Segunda idea.'), 'Primera idea.');
+  eq(hookOf('   '), null);
+  eq(sameish('Teatro Solís', 'Visita guiada al teatro solis'), true);
+  eq(sameish('Mercado del Puerto', 'Almuerzo'), false);
+});
+
+test('▶ guion del día: intro con la tesis, una escena por bloque y cierre', () => {
+  const blocks = [
+    block({ id: 'b1', type: 'tour', tour_id: 'tour1', title: 'Tour Ciudad Vieja', start_time: '09:00', lat: -34.9067, lng: -56.2012 }),
+    block({ id: 'b2', title: 'Almuerzo', start_time: '12:00', lat: -34.907, lng: -56.2, description: 'Asado en el Mercado. Pedí la entraña.' }),
+  ];
+  const withThesis: MapTour[] = tours.map((t) => (t.id === 'tour1' ? { ...t, thesis: 'Cómo la ciudad vivió del puerto.' } : t));
+  const m = buildMapModel({ legs, blocks, tours: withThesis, scope: { kind: 'day', dayId: 'd2' } });
+  const steps = previewSteps(m.points, withThesis, 'Hoy');
+  eq(steps.map((s) => s.kind), ['intro', 'stop', 'stop', 'outro']);
+  if (!steps[0].body.startsWith('Cómo la ciudad vivió del puerto. 2 lugares')) throw new Error(steps[0].body);
+  eq(steps[1].title, '09:00 · Tour Ciudad Vieja');
+  if (!steps[1].body.startsWith('2 paradas')) throw new Error(steps[1].body);
+  eq(steps[2].body, 'Asado en el Mercado.');
+  eq(previewSteps([], [], 'Hoy'), []);
 });
 
 if (failures) throw new Error(`${failures} test(s) fallaron`);

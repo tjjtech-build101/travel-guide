@@ -1,9 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
-import { Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { errorDetail, useTrip } from '../../../../features/trips/queries';
+import { useVirtualTarget } from '../../../../features/guide/useGuide';
+import { useTrip } from '../../../../features/trips/queries';
 import { TripIdProvider } from '../../../../features/trips/TripContext';
 import { FEATURES } from '../../../../lib/features';
 import { useTripRealtime } from '../../../../realtime/useTripRealtime';
@@ -29,7 +30,7 @@ export default function TripLayout() {
   if (trip.isError) {
     return (
       <SafeAreaView style={styles.flex}>
-        <ErrorState message="No pudimos cargar el viaje" detail={errorDetail(trip.error)} onRetry={() => trip.refetch()} />
+        <ErrorState message="No pudimos cargar el viaje" error={trip.error} doing="cargar el viaje" onRetry={() => trip.refetch()} />
         <Button label="Volver" variant="ghost" onPress={goBack} style={styles.back} />
       </SafeAreaView>
     );
@@ -47,8 +48,26 @@ export default function TripLayout() {
   return <TripShell tripId={tripId} title={trip.data.title} />;
 }
 
+/** Altura de la barra de tabs (bottom-tabs, sin el inset de abajo). */
+const TAB_BAR = 49;
+const VISIBLE_TABS = ['index', 'map', 'now', ...(FEATURES.expenses ? ['expenses'] : []), ...(FEATURES.diary ? ['diary'] : [])];
+
+/** La guía señala tabs: la barra no es nuestra, así que su lugar se calcula (mismo ancho para cada tab). */
+function useTabTargets() {
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const rect = (name: string) => () => {
+    const i = VISIBLE_TABS.indexOf(name);
+    const w = width / VISIBLE_TABS.length;
+    return { x: i * w, y: height - insets.bottom - TAB_BAR, w, h: TAB_BAR };
+  };
+  useVirtualTarget('tab.map', rect('map'));
+  useVirtualTarget('tab.now', rect('now'));
+}
+
 function TripShell({ tripId, title }: { tripId: string; title: string }) {
   useTripRealtime(tripId);
+  useTabTargets();
 
   return (
     <TripIdProvider tripId={tripId}>
@@ -70,7 +89,7 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
               <Pressable
                 onPress={goBack}
                 accessibilityRole="button"
-                accessibilityLabel="Volver a Mis viajes"
+                accessibilityLabel="Volver al inicio"
                 style={styles.headerBtn}
               >
                 <BackIcon color={colors.text} />
@@ -86,6 +105,25 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* Menú colaborativo del tramo (PRD 31): pantalla del viaje fuera de la barra de tabs. */}
+          <Tabs.Screen
+            name="menu"
+            options={{
+              title: 'Menú',
+              href: null,
+              tabBarStyle: { display: 'none' },
+              headerLeft: () => (
+                <Pressable
+                  onPress={() => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver al plan"
+                  style={styles.headerBtn}
+                >
+                  <BackIcon color={colors.text} />
+                </Pressable>
+              ),
+            }}
+          />
           {/* Grupo salió de las tabs (multiplayer fuera del MVP): ahora es /group/[tripId], desde el "⋯" de Planificación. */}
           <Tabs.Screen
             name="expenses"

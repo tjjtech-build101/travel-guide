@@ -7,8 +7,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { env } from '../../lib/env';
-import { Text } from '../../ui/Text';
-import { colors, font, radius, space } from '../../ui/theme';
+import { ErrorNotice } from '../../ui/ErrorNotice';
+import { colors, radius, space } from '../../ui/theme';
+import { MAP_LOAD_ERROR } from '../map/TripMapView';
 import vintageStyle from '../map/vintageStyle.json';
 
 const VINTAGE_STYLE = JSON.stringify(vintageStyle);
@@ -28,6 +29,8 @@ export function TourMiniMap({ tour, engine, fix, nextId, height = 220 }: Props) 
 function MapInner({ tour, engine, fix, nextId, height }: Required<Omit<Props, 'fix' | 'nextId'>> & Pick<Props, 'fix' | 'nextId'>) {
   const camera = useRef<Camera>(null);
   const [failed, setFailed] = useState(false);
+  // Reintentar = volver a montar el MapView.
+  const [mapKey, setMapKey] = useState(0);
   const ordered = useMemo(() => [...tour.stops].sort((a, b) => a.sort_order - b.sort_order), [tour.stops]);
 
   const line = useMemo(
@@ -85,8 +88,16 @@ function MapInner({ tour, engine, fix, nextId, height }: Required<Omit<Props, 'f
 
   if (failed) {
     return (
-      <View style={[styles.box, { height }, styles.center]}>
-        <Text style={styles.muted}>No pudimos cargar el mapa</Text>
+      <View style={[styles.box, { minHeight: height }, styles.center]}>
+        <ErrorNotice
+          error={MAP_LOAD_ERROR}
+          doing="cargar el mapa del tour"
+          onRetry={() => {
+            setFailed(false);
+            setMapKey((k) => k + 1);
+          }}
+          style={styles.notice}
+        />
       </View>
     );
   }
@@ -94,6 +105,7 @@ function MapInner({ tour, engine, fix, nextId, height }: Required<Omit<Props, 'f
   return (
     <View style={[styles.box, { height }]} accessibilityLabel="Mapa del tour">
       <MapView
+        key={mapKey}
         style={styles.flex}
         styleJSON={VINTAGE_STYLE}
         pitchEnabled={false}
@@ -145,5 +157,5 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   box: { borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted },
   center: { alignItems: 'center', justifyContent: 'center', padding: space.lg },
-  muted: { fontSize: font.small, color: colors.textMuted },
+  notice: { alignSelf: 'stretch' },
 });

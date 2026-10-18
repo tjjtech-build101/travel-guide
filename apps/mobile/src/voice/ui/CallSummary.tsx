@@ -7,6 +7,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View
 import { useAgentJob } from '../../features/jobs/queries';
 import { undoAction } from '../../features/plan/mutations';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { Skeleton } from '../../ui/States';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore } from '../store';
@@ -37,7 +38,12 @@ export function CallSummary() {
               <Skeleton height={18} width="60%" />
             </View>
           ) : failed ? (
-            <Text style={styles.muted}>No pudimos armar el resumen.</Text>
+            // La causa: el cierre en la API (summary.error), el job (fila con error_code) o la lectura del job.
+            <ErrorNotice
+              error={summary?.error ?? (job.data?.status === 'failed' ? job.data : job.error) ?? null}
+              doing="armar el resumen de la llamada"
+              compact
+            />
           ) : (
             <Text style={styles.summary}>{result?.summary}</Text>
           )}

@@ -2,7 +2,7 @@
 // Solo se usa si falta GOOGLE_MAPS_API_KEY (dev / hackathon). Datos reales, nunca inventados; el id va como
 // "osm:<N|W|R><id>" en google_place_id (⚠ no es un id de Google: con la key de Google vuelve el camino normal).
 // Desactivable con PLACES_OSM_FALLBACK=false.
-import { upstream } from '../errors';
+import { fetchFailure, httpFailure, notFound } from '../errors';
 import { cached } from './cache';
 import type { PlaceDetails, PlaceSummary, SearchArgs } from './places';
 
@@ -21,9 +21,9 @@ async function getJson<T>(url: string): Promise<T> {
   try {
     res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
   } catch (err) {
-    throw upstream(`OpenStreetMap no respondió: ${(err as Error).message}`);
+    throw fetchFailure('osm', err);
   }
-  if (!res.ok) throw upstream(`OpenStreetMap respondió ${res.status}`);
+  if (!res.ok) throw httpFailure('osm', res.status, '');
   return (await res.json()) as T;
 }
 
@@ -110,7 +110,7 @@ export async function osmDetails(id: string): Promise<PlaceDetails> {
     const osmId = id.slice(4);
     const rows = await throttled(() => getJson<NominatimPlace[]>(`${NOMINATIM}?osm_ids=${encodeURIComponent(osmId)}&format=jsonv2&extratags=1&accept-language=es`));
     const p = rows[0];
-    if (!p) throw upstream(`OpenStreetMap no tiene ${id}`);
+    if (!p) throw notFound('OpenStreetMap no tiene ese lugar.');
     const tags = p.extratags ?? {};
     return {
       name: p.name ?? '',

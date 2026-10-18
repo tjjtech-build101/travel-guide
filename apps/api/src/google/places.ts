@@ -1,6 +1,6 @@
 // Google Places API (New): searchText / searchNearby / place details, con X-Goog-FieldMask mínimo.
 import { env } from '../env';
-import { notConfigured, upstream } from '../errors';
+import { fetchFailure, httpFailure, notConfigured, upstream } from '../errors';
 import { cached } from './cache';
 import { isOsmId, osmDetails, osmFallbackEnabled, osmSearch } from './osm';
 
@@ -67,7 +67,7 @@ const PRICE_LEVELS: Record<string, number> = {
 
 export function googleKey(): string {
   const key = env().GOOGLE_MAPS_API_KEY;
-  if (!key) throw notConfigured('Google Maps (GOOGLE_MAPS_API_KEY)');
+  if (!key) throw notConfigured('Google Maps (GOOGLE_MAPS_API_KEY)', 'google');
   return key;
 }
 
@@ -86,13 +86,17 @@ export async function googleFetch<T>(url: string, init: { method: 'GET' | 'POST'
       signal: AbortSignal.timeout(8000),
     });
   } catch (err) {
-    throw upstream(`Google no respondió: ${(err as Error).message}`);
+    throw fetchFailure('google', err);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw upstream(`Google respondió ${res.status}: ${text.slice(0, 300)}`);
+    throw httpFailure('google', res.status, text);
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    throw upstream('Google devolvió una respuesta ilegible.', 'google', (err as Error).message);
+  }
 }
 
 function toSummary(p: GPlace): PlaceSummary {
@@ -250,4 +254,27 @@ export async function searchPlacesRich(args: { near: { lat: number; lng: number 
       weekday_hours: p.regularOpeningHours?.weekdayDescriptions ?? [],
     }));
   });
+}
+
+// ───────────────────────── Planificador colaborativo (PRD 31): horarios + popularidad de un lugar del catálogo
+
+/**
+ * regularOpeningHours.periods + userRatingCount de un lugar (para saber qué días cierra y qué tan notorio es).
+ * null si es de OSM, si no hay key de Google o si Google no tiene datos.
+ */
+export async function placeHoursAndPopularity(googlePlaceId: string): Promise<{ periods: OpeningPeriod[] | null; rating_count: number | null } | null> {
+  if (isOsmId(googlePlaceId) || !env().GOOGLE_MAPS_API_KEY) return null;
+  return cached(
+    `hours:${googlePlaceId}`,
+    async () => {
+      const p = await googleFetch<GPlace>(`${BASE}/places/${encodeURIComponent(googlePlaceId)}?languageCode=${LANG}`, {
+        method: 'GET',
+        fieldMask: 'regularOpeningHours.periods,userRatingCount',
+      });
+      const periods = p.regularOpeningHours?.periods ?? null;
+      const rating_count = p.userRatingCount ?? null;
+      return periods || rating_count != null ? { periods, rating_count } : null;
+    },
+    24 * 60 * 60 * 1000,
+  );
 }

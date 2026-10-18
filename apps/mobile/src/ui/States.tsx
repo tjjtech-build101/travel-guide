@@ -1,10 +1,12 @@
 // Estados obligatorios de toda pantalla: vacío, cargando y error. Nunca pantalla vacía.
 // Vacío y error muestran al Scout en una pose (mapa / pensando); `pose={null}` lo oculta.
 import { useEffect, useRef } from 'react';
-import { Animated, Image, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
+import { Animated, StyleSheet, View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
 
+import { describeError } from '../lib/errors';
 import { Button } from './Button';
-import { SCOUT_POSES, type ScoutPose } from './ScoutImage';
+import { ErrorNotice } from './ErrorNotice';
+import { ScoutRig, type ScoutPose } from '../scout/ScoutRig';
 import { Text } from './Text';
 import { colors, font, radius, space } from './theme';
 
@@ -40,23 +42,43 @@ export function SkeletonCard() {
 
 function ScoutPoseImage({ pose }: { pose: ScoutPose | null }) {
   if (!pose) return null;
-  return <Image source={SCOUT_POSES[pose]} style={styles.scout} resizeMode="contain" accessibilityIgnoresInvertColors />;
+  // Error: el Scout "piensa" (cejas y boca de hmm); vacío: la pose tranquila que pidan.
+  return <ScoutRig width={120} pose={pose} mode={pose === 'think' ? 'thinking' : 'idle'} style={styles.scout} />;
 }
 
+/**
+ * Pantalla de error. `message` = qué no se pudo ("No pudimos cargar tus viajes"); `error` = la causa (se explica
+ * abajo con lib/errors: sin conexión, sin créditos, sesión vencida…). Sin `error` queda como antes.
+ */
 export function ErrorState({
   message,
   detail,
+  error,
+  doing,
   onRetry,
-  pose = 'think',
+  pose,
 }: {
   message: string;
   detail?: string;
+  error?: unknown;
+  /** Qué estaba haciendo ("cargar el plan"), para el texto de la causa. */
+  doing?: string;
   onRetry?: () => void;
   pose?: ScoutPose | null;
 }) {
+  if (error !== undefined && error !== null) {
+    const v = describeError(error, { doing });
+    return (
+      <View style={styles.center}>
+        <ScoutPoseImage pose={pose === undefined ? v.pose : pose} />
+        <Text style={styles.title}>{message}</Text>
+        <ErrorNotice error={error} view={v} onRetry={onRetry} style={styles.notice} />
+      </View>
+    );
+  }
   return (
     <View style={styles.center}>
-      <ScoutPoseImage pose={pose} />
+      <ScoutPoseImage pose={pose === undefined ? 'think' : pose} />
       <Text style={styles.title}>{message}</Text>
       {__DEV__ && detail ? <Text style={styles.detail}>{detail}</Text> : null}
       {onRetry ? <Button label="Reintentar" onPress={onRetry} style={{ marginTop: space.lg, alignSelf: 'stretch' }} /> : null}
@@ -104,7 +126,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
-  scout: { width: 120, height: 148, marginBottom: space.md },
+  scout: { marginBottom: space.md },
+  notice: { alignSelf: 'stretch', marginTop: space.lg },
   title: { fontSize: font.h3, fontWeight: '600', color: colors.text, textAlign: 'center' },
   subtitle: { fontSize: font.body, color: colors.textMuted, textAlign: 'center', marginTop: space.sm },
   detail: { fontSize: font.tiny, color: colors.danger, textAlign: 'center', marginTop: space.sm, fontFamily: 'Menlo' },

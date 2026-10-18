@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { signInAsDemo, signInWithGoogle, type DemoUserKey } from '../../features/auth/signIn';
+import { statusCodes } from '@react-native-google-signin/google-signin';
+
+import { signInAsDemo, signInWithGoogle, type DemoUserKey, type SignInResult } from '../../features/auth/signIn';
+import { toAppError, type AppError } from '../../lib/errors';
 import { missingEnv } from '../../lib/env';
 import { Button } from '../../ui/Button';
 import { Text } from '../../ui/Text';
-import { Toast, useToast } from '../../ui/Toast';
+import { errorToast, Toast, useToast } from '../../ui/Toast';
 import { colors, font, radius, space } from '../../ui/theme';
 
 const DEMO_USERS: { key: DemoUserKey; label: string }[] = [
@@ -18,6 +21,28 @@ const DEMO_USERS: { key: DemoUserKey; label: string }[] = [
 
 type Pending = 'google' | DemoUserKey | null;
 
+/**
+ * Falla de login → error para lib/errors. Los textos técnicos (Google / Supabase, en inglés) quedan solo en
+ * `detail` (se ven en desarrollo); a la persona le llega la causa: sin conexión, falta configurar, etc.
+ */
+function loginError(res: Extract<SignInResult, { ok: false }>): AppError {
+  const detail = `${res.code}: ${res.message}`;
+  if (res.code === 'config_missing') {
+    return { code: 'not_configured', provider: 'google', message: 'A la app le falta el ID de cliente de Google.', detail };
+  }
+  if (res.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+    return { code: 'play_services', message: 'Este celu no tiene Google Play Services (o está desactualizado).', detail };
+  }
+  if (res.code === 'invalid_credentials') {
+    return { code: 'demo_missing', message: 'Ese usuario de demo no está en esta base. Corré pnpm db:reset.', detail };
+  }
+  // Por el texto: "Network request failed" → sin conexión, timeouts, etc.
+  const guess = toAppError(res.message);
+  if (guess.code !== 'unknown') return { ...guess, detail };
+  // Sin mensaje legible: genérico con el detalle técnico aparte.
+  return { code: res.code, message: '', detail };
+}
+
 export default function LoginScreen() {
   const [pending, setPending] = useState<Pending>(null);
   const { toast, show } = useToast();
@@ -27,8 +52,9 @@ export default function LoginScreen() {
     setPending('google');
     const res = await signInWithGoogle();
     setPending(null);
-    if (!res.ok && !res.cancelled) {
-      show({ text: 'No pudimos entrar con Google. Probá de nuevo.', detail: `${res.code}: ${res.message}` });
+    // Cancelar (o tocar dos veces mientras ya estaba abierto) no es un error: no se muestra nada.
+    if (!res.ok && !res.cancelled && res.code !== statusCodes.IN_PROGRESS) {
+      show(errorToast(loginError(res), 'entrar con Google'));
     }
     // Si salió bien, el guard del layout raíz nos lleva a Mis viajes.
   };
@@ -37,7 +63,7 @@ export default function LoginScreen() {
     setPending(who);
     const res = await signInAsDemo(who);
     setPending(null);
-    if (!res.ok) show({ text: 'No pudimos entrar con el usuario de demo.', detail: `${res.code}: ${res.message}` });
+    if (!res.ok) show(errorToast(loginError(res), 'entrar con el usuario de demo'));
   };
 
   const busy = pending !== null;

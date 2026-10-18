@@ -11,7 +11,7 @@ import { SCOUT, scheduleAlertText } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Linking, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { useClockStore, useNow } from '../../../../features/now/clock';
@@ -48,15 +48,19 @@ import { startNearbyTour, useNearbyTourAvailable, useNearbyTourJob } from '../..
 import { TourSetupSheet } from '../../../../features/tours/TourSetupSheet';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
+import { errorAlert, describeError, type AppError } from '../../../../lib/errors';
 import { formatDay } from '../../../../lib/format';
 import { useLocationFix, useLocationProvider } from '../../../../location/LocationContext';
+import { LocationPermissionError } from '../../../../location/real';
 import type { AvatarPerson } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
+import { ErrorNotice } from '../../../../ui/ErrorNotice';
 import { ErrorState, SkeletonCard } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { useTourStore } from '../../../../tour/store';
 import { resetNotificationAsk } from '../../../../schedule/notifications';
+import { useGuide } from '../../../../features/guide/useGuide';
 import { useScheduleStore } from '../../../../schedule/store';
 import { showToScout } from '../../../../voice/camera/showToScout';
 import { previewScoutState, useScout, type ScoutState } from '../../../../voice/useScout';
@@ -73,6 +77,7 @@ export default function NowTab() {
   const blocks = usePlanBlocks(tripId);
   const proposals = usePendingProposals(tripId);
   const { now, simulated } = useNow();
+  useGuide('now');
   const scout = useScout();
   const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
   const tourAvailable = useNearbyTourAvailable().data === true;
@@ -104,6 +109,11 @@ export default function NowTab() {
     void location.start();
   }, [location]);
   const here = fix ? { lat: fix.lat, lng: fix.lng } : null;
+  // "Activar ubicación" (lo toca la persona): si falla, se dice por qué y, sin permiso, se ofrece Ajustes.
+  const enableLocation = async () => {
+    const err = await location.start();
+    if (err) showLocationError(err);
+  };
   // Deep link de pruebas: ?loc=simulated|real elige el LocationProvider.
   const { setKind } = location;
   useEffect(() => {
@@ -236,7 +246,7 @@ export default function NowTab() {
     if (!here) {
       Alert.alert('Necesito tu ubicación', 'Activá la ubicación para armarte un tour desde donde estás.', [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Activar', onPress: () => void location.start() },
+        { text: 'Activar', onPress: () => void enableLocation() },
       ]);
       return;
     }
@@ -253,7 +263,7 @@ export default function NowTab() {
   const onStartTour = async (b: PlanBlock) => {
     const names = b.participant_ids.map((id) => members.get(id)?.display_name).filter((n): n is string => !!n);
     const ok = await useTourStore.getState().start({ tourId: b.tour_id!, tripId, participants: names });
-    if (!ok) Alert.alert('No pude empezar el tour', useTourStore.getState().error ?? 'Probá de nuevo.');
+    if (!ok) Alert.alert(...errorAlert(useTourStore.getState().error, { doing: 'empezar el tour' }));
   };
 
   useEffect(() => {
@@ -273,7 +283,10 @@ export default function NowTab() {
     else if (cmd.startsWith('clock:')) t.devShiftClock(Number(cmd.slice(6)) || 0);
     else if (cmd.startsWith('nearby:')) {
       // "Tour acá, ahora" sin el diálogo de duración (gasta una corrida real de generate_tour).
-      if (here) void startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min: Number(cmd.slice(7)) || 30 });
+      if (here)
+        void startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min: Number(cmd.slice(7)) || 30 }).then(
+          (r) => !r.ok && Alert.alert(...errorAlert(r.error, { doing: 'armar el tour' })),
+        );
     } else if (cmd === 'nearby-start') {
       const j = useNearbyTourJob.getState().job;
       if (j) void t.start({ tourId: j.tourId, tripId: j.tripId }).then((ok) => ok && useNearbyTourJob.getState().clear());
@@ -331,7 +344,14 @@ export default function NowTab() {
   if (hardError || !today) {
     return (
       <View style={styles.flex}>
-        <ErrorState message="No pude cargar tu día" detail={errorDetail(overview.error ?? blocks.error)} onRetry={retry} />
+        <ErrorState
+          message="No pude cargar tu día"
+          detail={errorDetail(overview.error ?? blocks.error)}
+          // Sin error (p. ej. no se pudo resolver el día) queda el genérico.
+          error={overview.error ?? blocks.error ?? undefined}
+          doing="cargar tu día"
+          onRetry={retry}
+        />
         {dock}
       </View>
     );
@@ -399,7 +419,7 @@ export default function NowTab() {
               onPress={() => void onStartTour(tourBlock)}
               accessibilityHint={`${SCOUT.name} te avisa al llegar a cada parada`}
             />
-            {tourError && tourPhase === 'idle' ? <Text style={styles.hint}>No pude empezar: {tourError}</Text> : null}
+            {tourError && tourPhase === 'idle' ? <ErrorNotice error={tourError} doing="empezar el tour" compact /> : null}
           </View>
         ) : null}
         {plan?.current ? (
@@ -412,7 +432,7 @@ export default function NowTab() {
             eta={far ? null : (eta.data ?? null)}
             locationOff={!here}
             farAway={far}
-            onEnableLocation={() => void location.start()}
+            onEnableLocation={() => void enableLocation()}
             members={members}
             alertNote={alertNote}
             onPress={onPressBlock}
@@ -427,6 +447,26 @@ export default function NowTab() {
       </ScrollView>
       {dock}
     </View>
+  );
+}
+
+/** Falla de location.start() → Alert con la causa; sin permiso, botón "Abrir Ajustes". */
+function showLocationError(err: Error) {
+  const e: AppError =
+    err instanceof LocationPermissionError
+      ? { code: 'location_denied', message: '', detail: err.message }
+      : { code: 'location_unavailable', message: 'No pude prender el GPS. Revisá que la ubicación del celu esté activada.', detail: err.message };
+  const v = describeError(e, { doing: 'activar tu ubicación' });
+  const [title, message] = errorAlert(e, { doing: 'activar tu ubicación' });
+  Alert.alert(
+    title,
+    message,
+    v.action === 'settings'
+      ? [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Abrir Ajustes', onPress: () => void Linking.openSettings() },
+        ]
+      : undefined,
   );
 }
 
