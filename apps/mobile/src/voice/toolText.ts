@@ -28,6 +28,7 @@ export function promisedWithoutCalling(text: string): boolean {
 const FRIENDLY: Record<string, string> = {
   search_places: 'Buscando lugares',
   place_details: 'Mirando el lugar',
+  where_am_i: 'Mirando dónde estamos',
   route_eta: 'Calculando tiempos',
   get_trip_overview: 'Mirando el viaje',
   get_day_plan: 'Mirando el plan',

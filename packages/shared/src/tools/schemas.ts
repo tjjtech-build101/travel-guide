@@ -138,6 +138,12 @@ export const SearchPlacesInput = z.object({
 
 export const PlaceDetailsInput = z.object({ google_place_id: z.string().min(1) });
 
+export const WhereAmIInput = z.object({
+  lat: z.number().min(-90).max(90).optional().describe('Si no viene, el celu completa la posición actual'),
+  lng: z.number().min(-180).max(180).optional(),
+  accuracy_m: z.number().nonnegative().optional().describe('Precisión del GPS en metros'),
+});
+
 export const RouteStop = z.object({
   lat: z.number().optional(),
   lng: z.number().optional(),

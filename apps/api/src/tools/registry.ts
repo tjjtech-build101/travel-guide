@@ -30,6 +30,7 @@ import type { Handler, ToolCtx } from './types';
 import { undo } from './undo';
 import { update_block } from './update_block';
 import { weather } from './weather';
+import { where_am_i } from './where_am_i';
 
 export const handlers: { [N in ToolName]: Handler<N> } = {
   get_trip_overview,
@@ -41,6 +42,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   add_idea,
   search_places,
   place_details,
+  where_am_i,
   route_eta,
   undo,
   decide_proposal,

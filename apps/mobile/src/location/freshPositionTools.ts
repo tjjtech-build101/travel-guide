@@ -4,7 +4,8 @@
 // Problema: las instrucciones de la llamada traen la ubicación del momento en que se abrió; caminando 20 min, el
 // modelo sigue buscando "cerca" de donde empezó. Acá, cuando el modelo llama:
 //  - search_places SIN `near` → se agrega `near` con la última muestra del LocationProvider (real | simulado);
-//  - route_eta con alguna parada vacía (sin lat/lng ni google_place_id) → esa parada pasa a ser "acá".
+//  - route_eta con alguna parada vacía (sin lat/lng ni google_place_id) → esa parada pasa a ser "acá";
+//  - where_am_i sin lat/lng → la última muestra (con su precisión).
 // Si el modelo manda coordenadas, se respetan. Todo lo demás va igual al backend (POST /tools/:name, actor agent).
 // Para sacarlo: no llamar registerFreshPositionTools() (TourRunner) y queda el comportamiento anterior.
 import type { LocationFix } from '@build101/shared';
@@ -26,16 +27,16 @@ export function setFreshPositionSource(fn: () => LocationFix | null) {
   source = fn;
 }
 
-export function freshPosition(now = Date.now()): { lat: number; lng: number } | null {
+export function freshPosition(now = Date.now()): { lat: number; lng: number; accuracy: number | null } | null {
   const f = source();
   if (!f || now - f.t > MAX_AGE_MS) return null;
-  return { lat: f.lat, lng: f.lng };
+  return { lat: f.lat, lng: f.lng, accuracy: f.accuracy ?? null };
 }
 
 export function registerFreshPositionTools() {
   if (registered) return;
   registered = true;
-  for (const name of ['search_places', 'route_eta'] as const) {
+  for (const name of ['search_places', 'route_eta', 'where_am_i'] as const) {
     registerLocalTool(name, async (input) => {
       const body = withFreshPosition(name, input, freshPosition());
       return callTool(name, body as never, { actor: 'agent' });

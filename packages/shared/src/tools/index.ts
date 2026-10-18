@@ -29,6 +29,7 @@ import {
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
+  WhereAmIInput,
 } from './schemas';
 import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, TourStatusInput } from './tour';
 
@@ -74,6 +75,11 @@ export const toolDefs = {
   place_details: {
     description: 'Detalle de un lugar: horarios, si está abierto, precio, web, teléfono.',
     input: PlaceDetailsInput,
+  },
+  where_am_i: {
+    description:
+      'Dónde está la persona: el lugar en el que probablemente está adentro (universidad, parque, museo, shopping…), los lugares más cercanos por distancia (Google Places) y barrio/ciudad. Llamala SIN lat/lng: el celu completa la posición actual.',
+    input: WhereAmIInput,
   },
   route_eta: {
     description: 'Tiempos y distancias entre 2 a 10 puntos, a pie, en transporte o en auto.',
