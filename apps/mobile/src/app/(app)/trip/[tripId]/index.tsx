@@ -178,11 +178,30 @@ function ItineraryView() {
     [select, tripId],
   );
 
+  // Dos formas: rápido (se arma ya con el bloque) o detallado (pantalla de preguntas + recorridos para elegir).
   const onGenerateTour = useCallback(
-    async (b: PlanBlock) => {
-      const res = await generateTourForBlock({ id: b.id, trip_id: tripId, lat: b.lat, lng: b.lng, duration_min: b.duration_min });
-      if (!res.ok) Alert.alert('No pude generar el tour', res.message);
-      else Alert.alert('Generando el tour', 'El Scout está armando el recorrido con paradas verificadas. Lo vas a ver en la pestaña Tours cuando esté listo.');
+    (b: PlanBlock) => {
+      const quick = async () => {
+        const res = await generateTourForBlock({ id: b.id, trip_id: tripId, lat: b.lat, lng: b.lng, duration_min: b.duration_min });
+        if (!res.ok) Alert.alert('No pude generar el tour', res.message);
+        else Alert.alert('Generando el tour', 'El Scout está armando el recorrido con paradas verificadas. Lo vas a ver en la pestaña Tours cuando esté listo.');
+      };
+      const detailed = () =>
+        router.push({
+          pathname: '/tours/new',
+          params: {
+            tripId,
+            blockId: b.id,
+            ...(b.lat != null && b.lng != null ? { lat: String(b.lat), lng: String(b.lng) } : {}),
+            ...(b.duration_min ? { duration: String(b.duration_min) } : {}),
+            story: [b.title, b.place_name && b.place_name !== b.title ? `en ${b.place_name}` : null, b.description].filter(Boolean).join(' · '),
+          },
+        });
+      Alert.alert('Generar tour', '¿Cómo lo armamos?', [
+        { text: 'Rápido', onPress: () => void quick() },
+        { text: 'Detallado (te pregunto y elegís)', onPress: detailed },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
     },
     [tripId],
   );

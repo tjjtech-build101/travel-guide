@@ -14,6 +14,8 @@ type State = {
   durationMin: number | null;
   here: { lat: number; lng: number } | null;
   tripId: string | null;
+  /** Bloque "tour" del itinerario desde el que se abrió (el tour queda ligado a ese bloque). */
+  blockId: string | null;
   rounds: TourInterviewResult[];
   roundIndex: number;
   answers: Answers;
@@ -22,7 +24,7 @@ type State = {
   chosenId: string | null;
   loading: LoadingKey;
   error: Record<ErrorKey, string | null>;
-  init: (opts: { here: { lat: number; lng: number } | null; tripId: string | null }) => void;
+  init: (opts: { here: { lat: number; lng: number } | null; tripId: string | null; blockId?: string | null; story?: string; durationMin?: number | null }) => void;
   setStory: (s: string) => void;
   setDuration: (m: number | null) => void;
   setPhase: (p: TourPhase) => void;
@@ -45,6 +47,7 @@ export const useNewTourStore = create<State>()((set, get) => ({
   durationMin: 60,
   here: null,
   tripId: null,
+  blockId: null,
   rounds: [],
   roundIndex: 0,
   answers: {},
@@ -53,8 +56,8 @@ export const useNewTourStore = create<State>()((set, get) => ({
   chosenId: null,
   loading: null,
   error: noErrors,
-  init: ({ here, tripId }) =>
-    set({ phase: 'tell', story: '', durationMin: 60, here, tripId, rounds: [], roundIndex: 0, answers: {}, free: {}, variants: null, chosenId: null, loading: null, error: noErrors }),
+  init: ({ here, tripId, blockId, story, durationMin }) =>
+    set({ phase: 'tell', story: story ?? '', durationMin: durationMin === undefined ? 60 : durationMin, here, tripId, blockId: blockId ?? null, rounds: [], roundIndex: 0, answers: {}, free: {}, variants: null, chosenId: null, loading: null, error: noErrors }),
   setStory: (story) => set({ story }),
   setDuration: (durationMin) => set({ durationMin }),
   setPhase: (phase) => set({ phase }),

@@ -228,7 +228,9 @@ export const toolDefs = {
 
 export type ToolName = keyof typeof toolDefs;
 /** Herramientas que solo usa la app (la voz y los agentes no las ven). */
-export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestions'];
+// tour_interview / tour_variants: el tour detallado es una pantalla (preguntas con opciones y texto libre); la voz la abre
+// con open_tour_planner (herramienta del celu) en vez de entrevistar hablando.
+export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestions', 'tour_interview', 'tour_variants'];
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 
