@@ -146,7 +146,7 @@ export function defaultBriefDeps(): BriefDeps {
 export function defaultShapesDeps(): ShapesDeps {
   // Peor caso ~80 s (re-extraer 12 + investigar 25 + formas 45); lo normal es ~45: lo entendido sale de la cache de
   // trip_brief y la investigación ya arrancó en segundo plano cuando terminó la entrevista.
-  return { ...defaultBriefDeps(), timeoutMs: 90_000, understandTimeoutMs: 25_000, anchorsTimeoutMs: 30_000 };
+  return { ...defaultBriefDeps(), timeoutMs: 90_000, understandTimeoutMs: 25_000, anchorsTimeoutMs: 75_000 }; // fixture con web search: > 30 s en prod
 }
 
 // ───────────────────────── Precalentado del catálogo
@@ -855,7 +855,7 @@ export async function tripShapes(input: ToolInput<'trip_shapes'>, ctx: ToolCtx, 
   if (understanding && hasAnchors(understanding)) {
     if (deps.research) {
       try {
-        research = await deps.research(understanding, { today, timeoutMs: deps.anchorsTimeoutMs ?? 30_000 });
+        research = await deps.research(understanding, { today, timeoutMs: deps.anchorsTimeoutMs ?? 75_000 });
       } catch (err) {
         console.warn('[trip_shapes] investigación de anclas:', (err as Error).message);
       }
