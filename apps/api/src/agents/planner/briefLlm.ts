@@ -308,6 +308,57 @@ export function normalizeBriefAnchors(anchors: BriefOutputT['understood']['ancho
   return out;
 }
 
+/**
+ * `understanding` que manda mobile (TripUnderstanding de la última ronda, validado con TripUnderstandingInput) → lo
+ * normalizado. Ojo: no es la salida cruda del LLM (interests viene como {tag: peso}, no como lista).
+ */
+export function understandingFromInput(
+  u: NonNullable<ToolInput<'trip_shapes'>['understanding']>,
+  input: Pick<ToolInput<'trip_brief'>, 'start_date' | 'end_date'>,
+): TripUnderstanding {
+  const base = normalizeUnderstanding(
+    {
+      destinations: (u.destinations ?? []).map((d) => ({ city: d.city, country: d.country ?? '' })),
+      start_date: u.start_date ?? '',
+      end_date: u.end_date ?? '',
+      days: u.days ?? 0,
+      travelers: u.travelers ?? 0,
+      party: u.party ?? '',
+      names: u.names ?? [],
+      interests: Object.entries(u.interests ?? {}).map(([tag, weight]) => ({ tag, weight: Number(weight) })),
+      must: u.must ?? [],
+      avoid: u.avoid ?? [],
+      budget: u.budget ?? '',
+      pace: u.pace ?? '',
+      first_time: u.first_time == null ? 'unknown' : u.first_time ? 'yes' : 'no',
+      kids_ages: u.kids_ages ?? [],
+      arrival: u.arrival ?? '',
+      departure: u.departure ?? '',
+      lodging_booked: u.lodging_booked ?? '',
+      notes: u.notes ?? [],
+      trip_kind: u.trip_kind ?? '',
+      anchors: [],
+      origin: u.origin ?? '',
+    },
+    input,
+  );
+  const anchors: TripAnchor[] = (u.anchors ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    kind: a.kind,
+    city: a.city ?? null,
+    country: a.country ?? null,
+    date: a.date ?? null,
+    time: a.time ?? null,
+    venue: a.venue ?? null,
+    tickets: a.tickets,
+    researched: a.researched && a.sources.length > 0,
+    sources: a.sources.map((x) => ({ url: x.url, title: x.title ?? null })),
+    note: a.note ?? null,
+  }));
+  return { ...base, anchors, trip_kind: base.trip_kind ?? (anchors.length ? 'event' : null) };
+}
+
 export function normalizeUnderstanding(u: BriefOutputT['understood'], input: Pick<ToolInput<'trip_brief'>, 'start_date' | 'end_date'>): TripUnderstanding {
   const interests: Partial<Record<InterestTag, number>> = {};
   for (const { tag: rawTag, weight } of u.interests ?? []) {
@@ -769,7 +820,7 @@ export async function tripBrief(input: ToolInput<'trip_brief'>, ctx: ToolCtx, de
 async function understandingForShapes(input: ToolInput<'trip_shapes'>, ctx: ToolCtx, deps: ShapesDeps, base: Parameters<typeof renderBriefUser>[0]): Promise<TripUnderstanding | null> {
   // v2: mobile manda lo entendido de la última ronda; es la fuente más confiable (la cache en memoria no sobrevive
   // entre instancias de Vercel).
-  if (input.understanding) return normalizeUnderstanding(input.understanding as unknown as Parameters<typeof normalizeUnderstanding>[0], input);
+  if (input.understanding) return understandingFromInput(input.understanding, input);
   const hit = cachedUnderstanding(understandingKey(ctx.userId, input));
   if (hit) return hit;
   try {
