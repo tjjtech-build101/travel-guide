@@ -3,7 +3,7 @@
 //      (sin job, sin web_search)
 //   1) investigar: Claude + web_search/web_fetch → datos atómicos con su URL (captureViaTool, PRD 06)
 //   2) verificar EN PARALELO cada dato contra su URL (verifyFact + VERIFY_SYSTEM del generador de tours)
-//   3) responder en ≤60 palabras SOLO con lo verificado (sin herramientas)
+//   3) responder (hasta ~130 palabras, con detalle) SOLO con lo verificado (sin herramientas)
 //   4) guardar en place_library (crea el lugar si no existía): quote, verified_at, origin, question
 // La voz escucha el job por Realtime y recibe [EVENTO:research_ready].
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
@@ -19,8 +19,8 @@ import { renderVerifyUser, VERIFY_SYSTEM } from './tourPrompts';
 import { ResearchOutput, type ResearchOutputT } from './tourSchemas';
 
 /** Tope total (Vercel corta a los 300 s; la voz espera "un ratito", no minutos). */
-const BUDGET_MS = 75_000;
-const MAX_FACTS = 5;
+const BUDGET_MS = 90_000;
+const MAX_FACTS = 8;
 
 export const RESEARCH_Q_SYSTEM = `Sos el investigador de una app de viajes rioplatense. Te hacen UNA pregunta concreta (un año, un origen, quién, por qué, una curiosidad) sobre un lugar o tema. Buscala con web_search y web_fetch en fuentes confiables (Wikipedia, sitios oficiales, prensa seria) y reportá con report_facts entre 1 y ${MAX_FACTS} datos atómicos que respondan la pregunta, cada uno con la URL exacta donde aparece. Un dato por fact, escrito tal cual lo respalda la fuente. No inventes ni completes: si no encontrás nada confiable, reportá facts vacío.`;
 
@@ -32,11 +32,11 @@ export function renderResearchQUser(i: Pick<ToolInput<'research'>, 'question' | 
 const AnswerOut = z.object({ answer: z.string() });
 const CacheOut = z.object({
   answerable: z.boolean().describe('true solo si los datos responden la pregunta (lo central, no algo parecido)'),
-  answer: z.string().describe('Respuesta hablada ≤60 palabras con esos datos; vacío si answerable=false'),
+  answer: z.string().describe('Respuesta hablada (hasta 130 palabras) con esos datos; vacío si answerable=false'),
 });
 
-export const ANSWER_SYSTEM = `Sos un guía de viaje que habla en voz alta. Respondé la pregunta en máximo 60 palabras, en tono hablado, usando SOLO los datos verificados que te paso (podés reordenarlos y conectarlos, no agregar años, nombres ni cifras que no estén). Si los datos no alcanzan para responder del todo, decí qué sí se sabe. No menciones fuentes ni "los datos".`;
-export const CACHE_SYSTEM = `Te paso una pregunta y los datos verificados que ya tenemos de un lugar. Decidí si esos datos responden la pregunta (lo que se pregunta concretamente, no algo parecido). Si sí, respondé en máximo 60 palabras en tono hablado usando SOLO esos datos. Si no alcanzan, answerable=false.`;
+export const ANSWER_SYSTEM = `Sos un guía de viaje que habla en voz alta. Respondé la pregunta en tono hablado, completo y con detalle (hasta 130 palabras: todo lo que los datos permitan contar, sin relleno), usando SOLO los datos verificados que te paso (podés reordenarlos y conectarlos, no agregar años, nombres ni cifras que no estén). Si los datos no alcanzan para responder del todo, decí qué sí se sabe. No menciones fuentes ni "los datos".`;
+export const CACHE_SYSTEM = `Te paso una pregunta y los datos verificados que ya tenemos de un lugar. Decidí si esos datos responden la pregunta (lo que se pregunta concretamente, no algo parecido). Si sí, respondé en tono hablado, completo y con detalle (hasta 130 palabras) usando SOLO esos datos. Si no alcanzan, answerable=false.`;
 
 export type VerifiedFact = { text: string; source_url: string; quote: string };
 
@@ -57,7 +57,7 @@ async function structured<T extends z.ZodType>(schema: T, system: string, user: 
   const format = betaZodOutputFormat(schema);
   const params = {
     model,
-    max_tokens: 800,
+    max_tokens: 1500,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: format.schema } },
     system: [{ type: 'text', text: system }],
     messages: [{ role: 'user', content: user }],

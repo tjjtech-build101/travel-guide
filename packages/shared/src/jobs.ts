@@ -45,7 +45,7 @@ export type PlanTripResult = {
 /** agent_jobs.result de un job kind='research' (voz: "lo averiguo y te cuento"). */
 export type ResearchResult = {
   question: string;
-  /** ≤60 palabras, armada SOLO con facts verificados. Vacía si no se encontró nada respaldado. */
+  /** Hasta ~130 palabras, armada SOLO con facts verificados. Vacía si no se encontró nada respaldado. */
   answer: string;
   /** quote = frase textual de la fuente que respalda el dato (la muestra la hoja de Fuentes). */
   facts: { text: string; source_url: string; quote?: string }[];

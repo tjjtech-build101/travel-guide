@@ -40,6 +40,9 @@ type RunnerResult<T> = { value: T | null; usage: Usage; web_search_calls: number
  * caller decide qué hacer, normalmente tratar el lugar/fact como "sin datos" y seguir).
  * Exportado: lo reusa también eventsSearch.ts (PRD 16) para no duplicar el Tool Runner.
  */
+const usesFor = (m: number | { web_search?: number; web_fetch?: number } | undefined, tool: 'web_search' | 'web_fetch') =>
+  (typeof m === 'number' ? m : m?.[tool]) ?? 3;
+
 export async function captureViaTool<T>(args: {
   system: string;
   user: string;
@@ -49,8 +52,9 @@ export async function captureViaTool<T>(args: {
   serverTools: ('web_search' | 'web_fetch')[];
   config: TourLlmConfig;
   signal?: AbortSignal;
-  /** Tope de usos por server tool (default 3 cada una). El catálogo del planificador (PRD 31) pide más. */
-  maxUses?: { web_search?: number; web_fetch?: number };
+  /** Usos máximos por server tool (default 3). Un número vale para las dos (investigación profunda de tours);
+   * un objeto, por herramienta (catálogo del planificador, PRD 31). */
+  maxUses?: number | { web_search?: number; web_fetch?: number };
 }): Promise<RunnerResult<T>> {
   const client = anthropicClient();
   let captured: T | null = null;
@@ -64,8 +68,8 @@ export async function captureViaTool<T>(args: {
     },
   });
   const serverToolDefs: Record<string, unknown> = {
-    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: args.maxUses?.web_search ?? 3 },
-    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: args.maxUses?.web_fetch ?? 3 },
+    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: usesFor(args.maxUses, 'web_search') },
+    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: usesFor(args.maxUses, 'web_fetch') },
   };
   const tools: unknown[] = [captureTool, ...args.serverTools.map((t) => serverToolDefs[t])];
   const params = {
@@ -105,7 +109,7 @@ export async function captureViaTool<T>(args: {
   return { value: captured, usage, web_search_calls: webSearchCalls, stop_reason: lastStopReason };
 }
 
-export type LlmCall = { system: string; user: string; config: TourLlmConfig };
+export type LlmCall = { system: string; user: string; config: TourLlmConfig; maxUses?: number };
 
 export interface TourLLM {
   /** Datos atómicos + cita textual desde un artículo que ya bajamos (Wikipedia). Sin herramientas. */
@@ -161,10 +165,11 @@ export function anthropicTourLlm(): TourLLM {
       return { facts: r.value.facts, usage: r.usage };
     },
 
-    async research({ system, user, config }) {
+    async research({ system, user, config, maxUses }) {
       const r = await captureViaTool<ResearchOutputT>({
         system,
         user,
+        maxUses,
         captureName: 'report_facts',
         captureDescription: 'Reportá los datos atómicos que encontraste, cada uno con su URL exacta, título de la fuente y cita textual.',
         captureSchema: ResearchOutput,

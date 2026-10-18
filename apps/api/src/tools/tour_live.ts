@@ -31,6 +31,8 @@ import {
   type StopRow,
   type TourRow,
 } from '../tourLive';
+import { kickDeepResearch, stopsNeedingDeepResearch } from '../agents/tourDeepResearch';
+import { runInBackground } from '../jobs';
 import type { ToolCtx, ToolOk } from './types';
 
 function assertPlayable(tour: TourRow) {
@@ -54,6 +56,8 @@ export async function start_tour(input: ToolInput<'start_tour'>, ctx: ToolCtx): 
   const alreadyActive = tour.status === 'active' && !!tour.progress;
   const progress = alreadyActive ? tour.progress! : initialProgress(stops, tourDurationMin(tour));
   if (!alreadyActive) await saveProgress(ctx, tour.id, progress, 'active');
+  // Tours que no pasaron por la investigación profunda (viejos, seed): se lanza una vez, en segundo plano.
+  runInBackground(`deep-research/${tour.id}`, ensureDeepResearch(ctx, tour.id));
   const told = await loadTold(ctx, ctx.userId, stops.map((s) => s.place_id).filter((x): x is string => !!x));
   return {
     ok: true,
@@ -142,6 +146,19 @@ async function sessionParticipants(ctx: ToolCtx, tourId: string): Promise<string
   return [...new Set([ctx.userId, ...ids])];
 }
 
+/** Lanza la investigación profunda de las paradas con poco dossier, una sola vez por tour (marca en tours.brief). */
+async function ensureDeepResearch(ctx: ToolCtx, tourId: string): Promise<void> {
+  const { data } = await ctx.admin.from('tours').select('brief').eq('id', tourId).maybeSingle();
+  const brief = ((data?.brief as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  if (brief.deep_research_at) return;
+  const ids = await stopsNeedingDeepResearch(ctx.admin, tourId);
+  await ctx.admin.from('tours').update({ brief: { ...brief, deep_research_at: new Date().toISOString() } }).eq('id', tourId);
+  await kickDeepResearch(ctx.admin, ids);
+}
+
+/** Capas con contenido que esta persona todavía no escuchó (para que el Scout siga contando). */
+const LAYER_ORDER = ['short', 'more', 'secret', 'myth', 'kid', 'photo'] as const;
+
 export async function get_stop_content(input: ToolInput<'get_stop_content'>, ctx: ToolCtx): Promise<ToolOk<StopContentResult>> {
   const { stop, tour } = await loadStop(ctx, input.stop_id);
   const layer = input.layer;
@@ -169,6 +186,18 @@ export async function get_stop_content(input: ToolInput<'get_stop_content'>, ctx
       if (e2) throw dbError(e2, 'content_told');
     }
   }
+  // Dossier del lugar (todos los datos verificados): para seguir contando y responder preguntas sin inventar.
+  let facts: string[] = [];
+  let toldLayers: string[] = [];
+  if (stop.place_id) {
+    const [{ data: place }, { data: told }] = await Promise.all([
+      ctx.admin.from('place_library').select('facts').eq('id', stop.place_id).maybeSingle(),
+      ctx.admin.from('content_told').select('layer').eq('user_id', ctx.userId).eq('place_id', stop.place_id),
+    ]);
+    facts = (((place?.facts as { text: string; verified?: boolean }[] | null) ?? []).filter((f) => f.verified).map((f) => f.text)).slice(0, 80);
+    toldLayers = (told ?? []).map((t) => t.layer as string);
+  }
+  const layersLeft = LAYER_ORDER.filter((l) => l !== layer && !toldLayers.includes(l) && !!layerText(stop, l));
   return {
     ok: true,
     data: {
@@ -179,6 +208,8 @@ export async function get_stop_content(input: ToolInput<'get_stop_content'>, ctx
       text,
       sources: stopSources(stop),
       already_told: alreadyTold,
+      layers_left: layersLeft,
+      facts,
     },
   };
 }
