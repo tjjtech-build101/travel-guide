@@ -12,7 +12,7 @@ import { VariantsStep } from '../../../features/newTour/VariantsStep';
 
 export default function NewTourScreen() {
   // story / duration: lo que la persona ya le contó al Scout por voz (open_tour_planner), precargado.
-  const params = useLocalSearchParams<{ tripId?: string; lat?: string; lng?: string; story?: string; duration?: string }>();
+  const params = useLocalSearchParams<{ tripId?: string; blockId?: string; lat?: string; lng?: string; story?: string; duration?: string }>();
   const phase = useNewTourStore((s) => s.phase);
 
   useEffect(() => {
@@ -22,10 +22,11 @@ export default function NewTourScreen() {
     useNewTourStore.getState().init({
       here: Number.isFinite(lat) && Number.isFinite(lng) && params.lat ? { lat, lng } : null,
       tripId: params.tripId ?? null,
+      blockId: params.blockId ?? null,
       story: params.story ?? '',
       ...(Number.isFinite(duration) && duration >= 15 ? { durationMin: Math.min(240, Math.round(duration)) } : {}),
     });
-  }, [params.lat, params.lng, params.tripId, params.story, params.duration]);
+  }, [params.lat, params.lng, params.tripId, params.blockId, params.story, params.duration]);
 
   // Android: atrás vuelve de paso antes de salir.
   useEffect(() => {

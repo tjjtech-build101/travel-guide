@@ -22,6 +22,7 @@ function base() {
     start_lng: s.here!.lng,
     ...(s.durationMin ? { duration_min: s.durationMin } : {}),
     ...(s.tripId ? { trip_id: s.tripId } : {}),
+    ...(s.blockId ? { block_id: s.blockId } : {}),
   };
 }
 
@@ -96,6 +97,7 @@ export async function startTour(variant: TourVariant | null): Promise<boolean> {
     lat: s.here.lat,
     lng: s.here.lng,
     ...(s.tripId ? { trip_id: s.tripId } : {}),
+    ...(s.blockId ? { block_id: s.blockId } : {}),
     ...fields,
     duration_min: (cur?.understood.duration_min ?? s.durationMin ?? 60) as number,
     ...(variant ? { variant_stops: variant.stops.map((st) => ({ name: st.name, lat: st.lat, lng: st.lng, google_place_id: st.google_place_id ?? null, wikidata_id: st.wikidata_id ?? null })) } : {}),
