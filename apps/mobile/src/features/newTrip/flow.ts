@@ -8,6 +8,7 @@ import { tripKeys } from '../trips/keys';
 import {
   baseConversation,
   conversationWithAnswers,
+  effectiveEndDate,
   effectiveStartDate,
   inputKey,
   mergeRoundAnswers,
@@ -36,27 +37,41 @@ export function friendlyError(e: Pick<ToolError, 'code' | 'message'>): string {
  * Lo que va a trip_brief para la ronda `round` (1-based): lo contado + las preguntas y respuestas de las rondas
  * anteriores (cada pregunta como assistant, su respuesta como user; el agente las usa para no repetir).
  */
-export function briefRequest(round = 1): { conversation: Turn[]; startDate: string | null; round: number } {
+type Req = { conversation: Turn[]; startDate: string | null; endDate: string | null };
+
+function tellBase(s: ReturnType<typeof get>): Turn[] {
+  return baseConversation(s.story, s.startDate, { endDate: s.endDate, days: s.days });
+}
+
+export function briefRequest(round = 1): Req & { round: number } {
   const s = get();
-  const base = baseConversation(s.story, s.startDate);
-  if (round <= 1) return { conversation: base, startDate: s.startDate, round: 1 };
+  const base = tellBase(s);
+  if (round <= 1) return { conversation: base, startDate: s.startDate, endDate: s.startDate ? s.endDate : null, round: 1 };
   const questions = roundQuestions(s.rounds, round - 2);
   return {
     conversation: conversationWithAnswers(base, questions, s.answers),
     startDate: effectiveStartDate(s.startDate, questions, s.answers),
+    endDate: effectiveEndDate(s.startDate, s.endDate, questions, s.answers),
     round,
   };
 }
 
 /** Lo que va a trip_shapes y a plan_trip: lo contado + preguntas y respuestas hasta la ronda que se ve. */
-export function shapesRequest(): { conversation: Turn[]; startDate: string | null } {
+export function shapesRequest(): Req {
   const s = get();
-  const base = baseConversation(s.story, s.startDate);
+  const base = tellBase(s);
   const questions = roundQuestions(s.rounds, s.roundIndex);
   return {
     conversation: conversationWithAnswers(base, questions, s.answers),
     startDate: effectiveStartDate(s.startDate, questions, s.answers),
+    endDate: effectiveEndDate(s.startDate, s.endDate, questions, s.answers),
   };
+}
+
+/** end_date solo si hay inicio y es posterior (el contrato pide fechas válidas). */
+function datesFor(r: Pick<Req, 'startDate' | 'endDate'>) {
+  if (!r.startDate) return {};
+  return { start_date: r.startDate, ...(r.endDate && r.endDate >= r.startDate ? { end_date: r.endDate } : {}) };
 }
 
 const keyOf = (r: { conversation: Turn[]; startDate: string | null; round?: number }) => inputKey(r.conversation, r.startDate) + `#${r.round ?? 0}`;
@@ -66,7 +81,7 @@ async function fetchRound(round: number): Promise<{ ok: true; data: TripBriefRes
   const key = keyOf(req);
   const res = await callTool<'trip_brief', TripBriefResult>('trip_brief', {
     conversation: req.conversation,
-    ...(req.startDate ? { start_date: req.startDate } : {}),
+    ...datesFor(req),
     round,
   });
   // Mientras tanto la persona volvió y cambió algo: esta respuesta ya no sirve.
@@ -100,8 +115,8 @@ export async function requestBrief(force = false): Promise<boolean> {
 }
 
 /**
- * "Seguir" desde Lo que entendí: si la ronda que se ve dice done (o ya van 3), pasa a las formas; si no, pide la
- * ronda siguiente con todo lo contestado. Si la siguiente ya estaba pedida con las mismas respuestas, la reusa.
+ * "Seguir" desde Lo que entendí: pide la ronda siguiente con todo lo contestado (hasta 4; ver wantsAnotherRound);
+ * si ya no hay más para preguntar, pasa a las formas. Si la siguiente ya estaba pedida con las mismas respuestas, la reusa.
  */
 export async function requestNextRound(force = false): Promise<boolean> {
   const s = get();
@@ -129,14 +144,15 @@ export async function requestNextRound(force = false): Promise<boolean> {
   return skipRound(res.data) ? requestShapes() : true;
 }
 
-/** "Ya está, armalo": a las formas con lo que haya (hasta la ronda que se ve). */
+/** "Pasemos a las opciones con lo que ya sabés": a las formas con lo que haya (hasta la ronda que se ve). */
 export function finishInterview(): Promise<boolean> {
   return requestShapes();
 }
 
 /** Formas del viaje con la entrevista hasta la ronda que se ve. */
 export async function requestShapes(force = false): Promise<boolean> {
-  const { conversation, startDate } = shapesRequest();
+  const req = shapesRequest();
+  const { conversation, startDate } = req;
   const key = inputKey(conversation, startDate);
   const s = get();
   s.setPhase('shapes');
@@ -147,7 +163,7 @@ export async function requestShapes(force = false): Promise<boolean> {
   const understood = currentBrief(get())?.understood;
   const res = await callTool<'trip_shapes', TripShapesResult>('trip_shapes', {
     conversation,
-    ...(startDate ? { start_date: startDate } : {}),
+    ...datesFor(req),
     ...(understood ? { understanding: understandingForPlan(understood) } : {}),
   });
   if (get().loading === 'shapes') get().setLoading(null);
@@ -174,13 +190,13 @@ export async function startPlan(mode: PlanMode, withShape = true): Promise<boole
   if (s.loading === 'plan') return false;
   if (!s.story.trim()) return false;
   const brief = currentBrief(s);
-  const { conversation, startDate } = brief ? shapesRequest() : briefRequest(1);
+  const { conversation, startDate, endDate } = brief ? shapesRequest() : briefRequest(1);
   const shape = withShape ? chosenShape(s) : null;
   s.setLoading('plan');
   s.setError('plan', null);
   const res = await callTool<'plan_trip', PlanTripStart>(
     'plan_trip',
-    planTripInput({ conversation, startDate, shape, mode: shape ? mode : 'auto', understanding: brief?.understood ?? null }),
+    planTripInput({ conversation, startDate, endDate, shape, mode: shape ? mode : 'auto', understanding: brief?.understood ?? null }),
   );
   get().setLoading(null);
   if (!res.ok) {

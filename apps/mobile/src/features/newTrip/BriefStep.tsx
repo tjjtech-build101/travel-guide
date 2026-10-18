@@ -1,6 +1,7 @@
 // Paso 2 · Lo que entendí: resumen + tipo de viaje + anclas + "qué tan bien te conozco" + preguntas de
-// trip_brief en rondas (1-3) con el default preseleccionado. "Seguir" → ronda siguiente (o formas si ya está);
-// "Ya está, armalo" → formas con lo que haya. Atrás vuelve de ronda sin perder respuestas.
+// trip_brief en rondas (1-4) con el default preseleccionado. Cada pregunta suma "Otra cosa…" (texto libre), las de
+// fecha abren el calendario y las de duración, "Otra cantidad". "Seguir" → ronda siguiente (repreguntas);
+// "Pasemos a las opciones con lo que ya sabés" (siempre visible) → formas. Atrás vuelve de ronda sin perder respuestas.
 import type { TripBriefResult, TripQuestion } from '@build101/shared';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -12,8 +13,27 @@ import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { Chip } from '../plan/components/Controls';
 import { finishInterview, requestBrief, requestNextRound, startPlan } from './flow';
-import { answerText, coverageSummary, isAnswered, roundLabel, toggleAnswer, TRIP_KIND_LABEL, wantsAnotherRound, type AnswerValue } from './model';
-import { AnchorCard, DateRow, ErrorBox, InlineError, StepShell } from './parts';
+import { daysInclusive, daysLabel, decodeRange, encodeRange, shortDay, todayIso } from './calendarModel';
+import { CalendarSheet } from './Calendar';
+import {
+  answerText,
+  coverageSummary,
+  daysOf,
+  freeTextOf,
+  isAnswered,
+  isDurationQuestion,
+  isSelected,
+  roundLabel,
+  roundQuestions,
+  setDays,
+  setFreeText,
+  toggleAnswer,
+  TRIP_KIND_LABEL,
+  wantsAnotherRound,
+  withDateAnswer,
+  type AnswerValue,
+} from './model';
+import { AnchorCard, DaysStepper, ErrorBox, InlineError, StepShell, TextButton } from './parts';
 import { currentBrief, useNewTripStore } from './store';
 
 const PARTY: Record<string, string> = { solo: 'Solo', couple: 'En pareja', friends: 'Con amigos', family: 'En familia' };
@@ -23,6 +43,7 @@ export function BriefStep() {
   const roundIndex = useNewTripStore((s) => s.roundIndex);
   const answers = useNewTripStore((s) => s.answers);
   const setAnswer = useNewTripStore((s) => s.setAnswer);
+  const setAnswers = useNewTripStore((s) => s.setAnswers);
   const back = useNewTripStore((s) => s.back);
   const loading = useNewTripStore((s) => s.loading);
   const error = useNewTripStore((s) => s.error);
@@ -38,6 +59,14 @@ export function BriefStep() {
   const round = roundIndex + 1;
   const more = brief ? wantsAnotherRound(brief, round) : false;
   const busy = loading === 'round' || loading === 'shapes';
+  const SKIP = 'Pasemos a las opciones con lo que ya sabés';
+  // Un rango del calendario completa solo las preguntas de duración (de esta ronda y las anteriores).
+  const answerDate = (qid: string, v: string) => {
+    const s = useNewTripStore.getState();
+    const qs = roundQuestions(s.rounds, s.roundIndex);
+    const q = qs.find((x) => x.id === qid);
+    if (q) setAnswers(withDateAnswer(qs, s.answers, q, v));
+  };
 
   return (
     <StepShell
@@ -47,23 +76,23 @@ export function BriefStep() {
       footer={
         brief && ready ? (
           <>
-            <Button
-              label={more ? 'Seguir' : 'Ver formas del viaje'}
-              onPress={() => void requestNextRound()}
-              loading={more ? loading === 'round' : loading === 'shapes'}
-              disabled={busy}
-              accessibilityHint={more ? 'Te hago unas preguntas más para afinar' : 'Te muestro formas de armar el viaje'}
-            />
             {more ? (
               <Button
-                label="Ya está, armalo"
-                variant="ghost"
-                onPress={() => void finishInterview()}
-                loading={loading === 'shapes'}
+                label="Seguir"
+                onPress={() => void requestNextRound()}
+                loading={loading === 'round'}
                 disabled={busy}
-                accessibilityHint="Sigue a las formas del viaje con lo que ya me contaste"
+                accessibilityHint="Te hago unas repreguntas sobre lo que me contestaste para ir más a fondo"
               />
             ) : null}
+            <TextButton
+              label={SKIP}
+              primary={!more}
+              onPress={() => void finishInterview()}
+              loading={loading === 'shapes'}
+              disabled={loading === 'shapes'}
+              accessibilityHint="Te muestro las formas de armar el viaje con lo que ya me contaste, sin más preguntas"
+            />
           </>
         ) : brief ? (
           <Button label="Contame más" onPress={() => useNewTripStore.getState().setPhase('tell')} />
@@ -89,11 +118,17 @@ export function BriefStep() {
           ) : null}
           {brief.questions.length ? (
             <Text style={styles.roundLabel} accessibilityRole="text">
-              {roundLabel(round, brief)}
+              {roundLabel(round)}
             </Text>
           ) : null}
           {brief.questions.map((q) => (
-            <QuestionCard key={`${round}-${q.id}`} q={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+            <QuestionCard
+              key={`${round}-${q.id}`}
+              q={q}
+              value={answers[q.id]}
+              onChange={(v) => setAnswer(q.id, v)}
+              onDate={(v) => answerDate(q.id, v)}
+            />
           ))}
           {loading === 'round' ? (
             <View style={styles.loading} accessibilityLabel="Pensando unas preguntas más">
@@ -106,7 +141,7 @@ export function BriefStep() {
             <ErrorBox
               message={`${error.round} Podés seguir igual con lo que ya sé.`}
               onRetry={() => void requestNextRound(true)}
-              fallback={{ label: 'Ya está, armalo', onPress: () => void finishInterview(), loading: loading === 'shapes' }}
+              fallback={{ label: 'Ver opciones', onPress: () => void finishInterview(), loading: loading === 'shapes' }}
             />
           ) : null}
           {error.shapes ? <InlineError message={error.shapes} /> : null}
@@ -198,9 +233,25 @@ function Coverage({ coverage }: { coverage: TripBriefResult['coverage'] }) {
   );
 }
 
-function QuestionCard({ q, value, onChange }: { q: TripQuestion; value: AnswerValue | undefined; onChange: (v: AnswerValue) => void }) {
+function QuestionCard({
+  q,
+  value,
+  onChange,
+  onDate,
+}: {
+  q: TripQuestion;
+  value: AnswerValue | undefined;
+  onChange: (v: AnswerValue) => void;
+  /** Respuesta del calendario (completa sola la duración si es un rango). */
+  onDate: (v: string) => void;
+}) {
   const [done, setDone] = useState(false);
+  const free = freeTextOf(value);
+  const [freeOpen, setFreeOpen] = useState(free != null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const summary = answerText(q, value);
+  const duration = isDurationQuestion(q);
+  const canFree = q.kind !== 'text';
 
   if (done && summary) {
     return (
@@ -220,10 +271,17 @@ function QuestionCard({ q, value, onChange }: { q: TripQuestion; value: AnswerVa
   }
 
   const pick = (v: string) => {
-    const next = toggleAnswer(q, value, v);
-    onChange(next);
-    if (q.kind === 'single') setDone(true);
+    onChange(toggleAnswer(q, value, v));
+    if (q.kind !== 'multi') {
+      setFreeOpen(false);
+      setDone(true);
+    }
   };
+  const range = q.kind === 'date' ? currentRange(value) : null;
+  const today = todayIso();
+  // "Otra cantidad": la elegida a mano, si no la del calendario, si no un número de la opción elegida, si no 7.
+  const manualDays = daysOf(value);
+  const stepperDays = manualDays ?? guessDays(q, value) ?? 7;
 
   return (
     <View style={styles.card}>
@@ -244,37 +302,86 @@ function QuestionCard({ q, value, onChange }: { q: TripQuestion; value: AnswerVa
           maxLength={400}
           accessibilityLabel={q.text}
         />
-      ) : q.kind === 'date' ? (
-        <>
-          {q.options.length ? <Options q={q} value={value} onPick={pick} /> : null}
-          <DateRow
-            value={typeof value === 'string' && /^\d{4}-/.test(value) ? value : null}
-            onChange={(d) => {
-              onChange(d ?? '');
-              if (d) setDone(true);
-            }}
-          />
-        </>
       ) : (
-        <Options q={q} value={value} onPick={pick} />
+        <View style={styles.chips}>
+          {q.options.map((o) => (
+            <Chip key={o.value} label={o.label} selected={isSelected(value, o.value)} onPress={() => pick(o.value)} />
+          ))}
+          {q.kind === 'date' ? (
+            <Chip
+              label={range?.start ? rangeChip(range, today) : 'Elegir en el calendario'}
+              selected={!!range?.start}
+              onPress={() => setCalendarOpen(true)}
+              accessibilityLabel={range?.start ? `Fechas: ${rangeChip(range, today)}. Cambiar en el calendario` : 'Elegir en el calendario'}
+            />
+          ) : null}
+          {canFree ? (
+            <Chip
+              label={free?.trim() ? `Otra cosa: ${free.trim()}` : 'Otra cosa…'}
+              selected={!!free?.trim()}
+              onPress={() => setFreeOpen((o) => !o)}
+              accessibilityLabel={free?.trim() ? `Otra cosa: ${free.trim()}. Editar` : 'Otra cosa: escribir lo que quieras'}
+            />
+          ) : null}
+        </View>
       )}
 
-      {(q.kind === 'multi' || q.kind === 'text') && isAnswered(value) ? (
+      {duration ? (
+        <DaysStepper label="Otra cantidad" value={stepperDays} selected={manualDays != null} onChange={(n) => onChange(setDays(q, value, n))} />
+      ) : null}
+
+      {canFree && freeOpen ? (
+        <TextInput
+          style={styles.input}
+          placeholder={q.kind === 'multi' ? 'Sumá lo que quieras…' : 'Contalo con tus palabras…'}
+          placeholderTextColor={colors.masked}
+          value={free ?? ''}
+          onChangeText={(t) => onChange(setFreeText(q, value, t))}
+          autoFocus={free == null}
+          multiline
+          maxLength={400}
+          accessibilityLabel={`${q.text} Otra cosa`}
+        />
+      ) : null}
+
+      {isAnswered(value) && (q.kind !== 'single' || freeOpen || duration) ? (
         <Button label="Listo" variant="secondary" onPress={() => setDone(true)} style={styles.listo} />
+      ) : null}
+
+      {q.kind === 'date' ? (
+        <CalendarSheet
+          visible={calendarOpen}
+          title={q.text}
+          value={range ?? { start: null, end: null }}
+          onClose={() => setCalendarOpen(false)}
+          onDone={(r) => {
+            setCalendarOpen(false);
+            onDate(encodeRange(r));
+            if (r.start) {
+              setFreeOpen(false);
+              setDone(true);
+            }
+          }}
+        />
       ) : null}
     </View>
   );
 }
 
-function Options({ q, value, onPick }: { q: TripQuestion; value: AnswerValue | undefined; onPick: (v: string) => void }) {
-  return (
-    <View style={styles.chips}>
-      {q.options.map((o) => {
-        const selected = Array.isArray(value) ? value.includes(o.value) : value === o.value;
-        return <Chip key={o.value} label={o.label} selected={selected} onPress={() => onPick(o.value)} />;
-      })}
-    </View>
-  );
+function currentRange(v: AnswerValue | undefined) {
+  return decodeRange(Array.isArray(v) ? v[0] : v);
+}
+
+function rangeChip(r: { start: string | null; end: string | null }, today: string): string {
+  if (!r.start) return '';
+  return r.end ? `${shortDay(r.start, today)} → ${shortDay(r.end, today)} · ${daysLabel(daysInclusive(r.start, r.end))}` : shortDay(r.start, today);
+}
+
+/** Un número en el label de la opción elegida ("Una semana" no, "10 días" sí) para arrancar el contador ahí. */
+function guessDays(q: TripQuestion, v: AnswerValue | undefined): number | null {
+  const picked = q.options.find((o) => isSelected(v, o.value));
+  const n = picked ? Number(/\d+/.exec(picked.label)?.[0]) : NaN;
+  return Number.isFinite(n) && n >= 1 && n <= 60 ? n : null;
 }
 
 const styles = StyleSheet.create({

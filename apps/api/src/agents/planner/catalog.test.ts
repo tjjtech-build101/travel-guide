@@ -5,6 +5,8 @@ import { emptyUsage } from '../schemas';
 import {
   avoidHit,
   buildLegOptions,
+  CATALOG_MODEL,
+  CATALOG_MODEL_FIRST_PASS,
   cityKey,
   closedDaysFromPeriods,
   getCatalog,
@@ -92,6 +94,14 @@ function fakeDeps(opts: {
   return { deps, research, searchPlaces, placeHours };
 }
 
+/** Segundo plano capturado: settle() espera las revisiones que se lanzaron. */
+function bg() {
+  const ps: Promise<unknown>[] = [];
+  return { background: (_label: string, p: Promise<unknown>) => void ps.push(p), settle: () => Promise.all(ps), count: () => ps.length };
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const many = (n: number, prefix = 'Lugar') => Array.from({ length: n }, (_, i) => raw(`${prefix} ${i + 1}`));
 
 // ───────────────────────── Puros
@@ -144,7 +154,7 @@ describe('getCatalog', () => {
     const items = Array.from({ length: 20 }, (_, i) => ({ id: `x${i}`, name: `X${i}` })) as unknown as CatalogItem[];
     const { admin, upserts } = fakeAdmin({ items, lodging_zones: [], updated_at: '2026-10-10T00:00:00Z' });
     const { deps, research } = fakeDeps({ generate: [] });
-    const r = await getCatalog(admin, BA, deps);
+    const r = await getCatalog(admin, BA, deps, { background: null });
     expect(r.cached).toBe(true);
     expect(r.items).toHaveLength(20);
     expect(research).not.toHaveBeenCalled();
@@ -160,34 +170,134 @@ describe('getCatalog', () => {
       const { admin, upserts } = fakeAdmin(row);
       const { deps, research } = fakeDeps({ generate: many(18) });
       const progress: string[] = [];
-      const r = await getCatalog(admin, BA, deps, { onProgress: (t) => progress.push(t) });
+      const b = bg();
+      const r = await getCatalog(admin, BA, deps, { onProgress: (t) => progress.push(t), background: b.background });
       expect(r.cached).toBe(false);
-      expect(research).toHaveBeenCalledTimes(2);
-      expect(upserts).toHaveLength(1);
-      expect(upserts[0]).toMatchObject({ city_key: 'buenos aires|argentina', city: 'Buenos Aires' });
+      // La primera pasada se guarda sin esperar al crítico.
+      expect(research.mock.calls[0][0].mode).toBe('generate');
+      expect(upserts[0]).toMatchObject({ city_key: 'buenos aires|argentina', city: 'Buenos Aires', model: CATALOG_MODEL_FIRST_PASS });
       expect(r.lodging_zones).toEqual([{ zone: 'Palermo', why: 'Cerca de todo.', lat: -34.58, lng: -58.42 }]);
       expect(progress[0]).toBe('Investigando qué no te podés perder en Buenos Aires…');
       expect(progress.at(-1)).toBe('Encontré 18 lugares, 0 imperdibles');
-      expect(r.usage.output_tokens).toBe(200);
+      expect(r.usage.output_tokens).toBe(100);
+      // La revisión corre en segundo plano y marca la fila como completa.
+      await b.settle();
+      expect(research).toHaveBeenCalledTimes(2);
+      expect(upserts).toHaveLength(2);
+      expect(upserts[1]).toMatchObject({ model: CATALOG_MODEL });
     }
   });
 
   it('review agrega lo que faltaba y recibe los nombres de la primera pasada', async () => {
-    const { admin } = fakeAdmin();
+    const { admin, upserts } = fakeAdmin();
     const { deps, research } = fakeDeps({
       generate: [raw('Teatro Colón'), raw('Caminito')],
       review: [raw('Café Tortoni', { category: 'food' }), raw('Teatro Colon')],
     });
-    const r = await getCatalog(admin, BA, deps);
+    const b = bg();
+    const r = await getCatalog(admin, BA, deps, { background: b.background });
+    expect(r.items.map((i) => i.name).sort()).toEqual(['Caminito', 'Teatro Colón']);
+    await b.settle();
     expect(research.mock.calls[1][0]).toMatchObject({ mode: 'review', known: ['Teatro Colón', 'Caminito'] });
-    expect(r.items.map((i) => i.name).sort()).toEqual(['Café Tortoni', 'Caminito', 'Teatro Colón']);
+    const saved = upserts.at(-1)!.items as CatalogItem[];
+    expect(saved.map((i) => i.name).sort()).toEqual(['Café Tortoni', 'Caminito', 'Teatro Colón']);
+    expect(new Set(saved.map((i) => i.id)).size).toBe(3);
   });
 
   it('si la revisión falla sigue con la primera pasada', async () => {
-    const { admin } = fakeAdmin();
+    const { admin, upserts } = fakeAdmin();
     const { deps } = fakeDeps({ generate: [raw('Caminito')], review: new Error('529') });
-    const r = await getCatalog(admin, BA, deps);
+    const b = bg();
+    const r = await getCatalog(admin, BA, deps, { background: b.background });
     expect(r.items.map((i) => i.name)).toEqual(['Caminito']);
+    await b.settle();
+    // Queda la primera pasada (se vuelve a revisar la próxima vez).
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]).toMatchObject({ model: CATALOG_MODEL_FIRST_PASS });
+  });
+
+  it('se guarda apenas termina generate + Places aunque el crítico tarde (y si se pasa de su tope, no pisa nada)', async () => {
+    const { admin, upserts } = fakeAdmin();
+    const { deps, research } = fakeDeps({ generate: many(16) });
+    research.mockImplementation(async ({ mode, signal }) => {
+      if (mode === 'review') {
+        await new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('abortado'))));
+      }
+      return { items: many(16), lodging_zones: [], usage: emptyUsage() };
+    });
+    const b = bg();
+    const r = await getCatalog(admin, BA, deps, { background: b.background, timeouts: { reviewMs: 30 } });
+    expect(r.items).toHaveLength(16);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]).toMatchObject({ model: CATALOG_MODEL_FIRST_PASS });
+    expect((upserts[0].items as CatalogItem[]).length).toBe(16);
+    expect(b.count()).toBe(1);
+    await b.settle();
+    expect(research.mock.calls.map((c) => c[0].mode)).toEqual(['generate', 'review']);
+    expect(upserts).toHaveLength(1);
+  });
+
+  it('si Places se corta por tiempo guarda lo resuelto y el resto lo completa el segundo plano', async () => {
+    const { admin, upserts } = fakeAdmin();
+    const slow = ['Lento 1', 'Lento 2', 'Lento 3'];
+    const { deps, searchPlaces } = fakeDeps({ generate: [...many(16), ...slow.map((n) => raw(n))] });
+    const base = searchPlaces.getMockImplementation()!;
+    const seen = new Map<string, number>();
+    searchPlaces.mockImplementation(async (args) => {
+      const name = args.query.replace(/, Buenos Aires$/, '');
+      const n = (seen.get(name) ?? 0) + 1;
+      seen.set(name, n);
+      if (slow.includes(name) && n === 1) await sleep(300); // la primera vez no llega
+      return base(args);
+    });
+    const progress: string[] = [];
+    const b = bg();
+    const r = await getCatalog(admin, BA, deps, { background: b.background, timeouts: { placesMs: 60 }, onProgress: (t) => progress.push(t) });
+    expect(r.items.map((i) => i.name)).not.toContain('Lento 1');
+    expect(r.items).toHaveLength(16);
+    expect(upserts).toHaveLength(1);
+    expect((upserts[0].items as CatalogItem[]).length).toBe(16);
+    expect(progress).toContain('Ubiqué 16 lugares de 19; el resto lo completo después');
+    await b.settle();
+    const done = upserts.at(-1)!;
+    expect(done).toMatchObject({ model: CATALOG_MODEL });
+    expect((done.items as CatalogItem[]).map((i) => i.name)).toEqual(expect.arrayContaining(slow));
+    expect((done.items as CatalogItem[]).length).toBe(19);
+  });
+
+  it('si se corta el tramo (signal) mientras ubica en Places, igual guarda lo resuelto', async () => {
+    const { admin, upserts } = fakeAdmin();
+    const { deps, searchPlaces } = fakeDeps({ generate: [...many(16), raw('Eterno')] });
+    const base = searchPlaces.getMockImplementation()!;
+    searchPlaces.mockImplementation(async (args) => (args.query.startsWith('Eterno') ? new Promise<PlaceSummary[]>(() => {}) : base(args)));
+    const leg = new AbortController();
+    setTimeout(() => leg.abort(), 30);
+    const r = await getCatalog(admin, BA, deps, { signal: leg.signal, background: null });
+    expect(r.items).toHaveLength(16);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]).toMatchObject({ model: CATALOG_MODEL_FIRST_PASS });
+  });
+
+  it('si generate se pasa de su tope, tira sin guardar nada', async () => {
+    const { admin, upserts } = fakeAdmin();
+    const { deps, research } = fakeDeps({ generate: [] });
+    research.mockImplementation(({ signal }) => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(new Error('abortado')))));
+    await expect(getCatalog(admin, BA, deps, { background: null, timeouts: { generateMs: 20 } })).rejects.toThrow(/por tiempo/);
+    expect(upserts).toHaveLength(0);
+  });
+
+  it('fila en caché sin revisar: la devuelve ya y la revisa en segundo plano', async () => {
+    const items = Array.from({ length: 20 }, (_, i) => ({ id: `x${i}`, name: `X${i}`, google_place_id: `px${i}`, sources: [], tier: 'recommended', notability: 0.2, rating_count: null })) as unknown as CatalogItem[];
+    const { admin, upserts } = fakeAdmin({ items, lodging_zones: [], updated_at: '2026-10-16T00:00:00Z', model: CATALOG_MODEL_FIRST_PASS, lat: BA.lat, lng: BA.lng });
+    const { deps, research } = fakeDeps({ generate: [], review: [raw('Café Tortoni', { category: 'food' })] });
+    const b = bg();
+    const r = await getCatalog(admin, BA, deps, { background: b.background });
+    expect(r).toMatchObject({ cached: true });
+    expect(r.items).toHaveLength(20);
+    await b.settle();
+    expect(research.mock.calls.map((c) => c[0].mode)).toEqual(['review']);
+    expect(upserts[0]).toMatchObject({ model: CATALOG_MODEL });
+    expect((upserts[0].items as CatalogItem[]).map((i) => i.name)).toContain('Café Tortoni');
   });
 
   it('descarta lo que no existe en Places o cae lejos (salvo escapadas) y deduplica por place id', async () => {
@@ -210,7 +320,7 @@ describe('getCatalog', () => {
         'Pueblo sin mapa': null as never,
       },
     });
-    const r = await getCatalog(admin, BA, deps);
+    const r = await getCatalog(admin, BA, deps, { background: null });
     const names = r.items.map((i) => i.name);
     expect(names).toContain('Cementerio de la Recoleta');
     expect(names).not.toContain('Recoleta Cemetery');
@@ -238,7 +348,7 @@ describe('getCatalog', () => {
         'p-obelisco': { periods: null, rating_count: 90_000 },
       },
     });
-    const r = await getCatalog(admin, BA, deps);
+    const r = await getCatalog(admin, BA, deps, { background: null });
     const museo = r.items.find((i) => i.name === 'Museo Chico')!;
     expect(museo.tier).toBe('recommended');
     expect(museo.closed_days).toEqual([1]);
@@ -253,9 +363,15 @@ describe('getCatalog', () => {
   it('una sola corrida por ciudad a la vez', async () => {
     const { admin } = fakeAdmin();
     const { deps, research } = fakeDeps({ generate: many(16) });
-    const [a, b] = await Promise.all([getCatalog(admin, BA, deps), getCatalog(admin, { ...BA, city: 'buenos aires' }, deps)]);
+    const g = bg();
+    const progress: string[] = [];
+    const opts = { background: g.background, onProgress: (t: string) => progress.push(t) };
+    const [a, b] = await Promise.all([getCatalog(admin, BA, deps, opts), getCatalog(admin, { ...BA, city: 'buenos aires' }, deps, opts)]);
     expect(a).toBe(b);
     expect(research.mock.calls.filter((c) => c[0].mode === 'generate')).toHaveLength(1);
+    expect(progress.filter((t) => t.startsWith('Investigando'))).toHaveLength(1);
+    await g.settle();
+    expect(research.mock.calls.filter((c) => c[0].mode === 'review')).toHaveLength(1);
   });
 
   it('si la investigación falla y hay un catálogo viejo, usa ese', async () => {
@@ -263,11 +379,11 @@ describe('getCatalog', () => {
     const { admin } = fakeAdmin({ items, lodging_zones: [], updated_at: '2026-01-01T00:00:00Z' });
     const { deps, research } = fakeDeps({ generate: [] });
     research.mockRejectedValueOnce(new Error('boom'));
-    const r = await getCatalog(admin, BA, deps);
+    const r = await getCatalog(admin, BA, deps, { background: null });
     expect(r).toMatchObject({ cached: true, items });
     const { admin: empty } = fakeAdmin();
     research.mockRejectedValueOnce(new Error('boom'));
-    await expect(getCatalog(empty, BA, deps)).rejects.toThrow('boom');
+    await expect(getCatalog(empty, BA, deps, { background: null })).rejects.toThrow('boom');
   });
 });
 

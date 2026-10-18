@@ -1,7 +1,8 @@
 // Entrevista (trip_brief) y formas del viaje (trip_shapes) del planificador colaborativo (PRD 31 v2).
-// - tripBrief: entrevista adaptativa en rondas (1-3). Una llamada con salida estructurada (effort low en la ronda 1,
-//   medium en 2-3) → lo entendido + coverage + 0-4 preguntas generadas para ESTE viaje + done. El servidor deduplica
-//   contra lo ya preguntado (ver parseAskedQuestions: formato `[q:id/dimension] texto` en los mensajes assistant).
+// - tripBrief: entrevista adaptativa en rondas (1-4; desde la 2, repreguntas que profundizan en lo contestado). Una
+//   llamada con salida estructurada (effort low en la ronda 1, medium en 2-4) → lo entendido + coverage + 0-4
+//   preguntas generadas para ESTE viaje + done (briefDone: nunca antes de la 3 si queda algo útil; en la 4 siempre).
+//   El servidor deduplica contra lo ya preguntado (ver parseAskedQuestions: `[q:id/dimension] texto` en assistant).
 //   El contexto ("Lo que tengo en cuenta") es determinístico. Precalienta el catálogo y, si hay anclas y done, la
 //   investigación del calendario (anchors.ts), en segundo plano.
 // - tripShapes: (lo entendido, cacheado o re-extraído) → anclas investigadas con web search → 2-3 formas armadas
@@ -101,7 +102,7 @@ export function anthropicBriefLlm(): BriefLLM {
 }
 
 export const BRIEF_CONFIG: BriefLlmConfig = { effort: 'low', maxTokens: 8000, fallbacks: true };
-/** Rondas 2-3: preguntas más finas (medium). */
+/** Rondas 2-4: repreguntas que profundizan en lo contestado (medium). */
 export const BRIEF_FOLLOWUP_CONFIG: BriefLlmConfig = { effort: 'medium', maxTokens: 10000, fallbacks: true };
 export const SHAPES_CONFIG: BriefLlmConfig = { effort: 'medium', maxTokens: 16000, fallbacks: true };
 
@@ -436,10 +437,35 @@ export function alreadyKnown(dimension: string, u: TripUnderstanding): boolean {
 
 /**
  * Dimensiones de "una sola respuesta": con una pregunta alcanza, así que si ya se preguntó (o es known) no se vuelve
- * a preguntar aunque el id sea otro. Las demás (anchor, interests, extras, food, must, avoid, other) admiten varias
- * preguntas distintas en rondas distintas (ej. anchor: equipo, fase, entradas).
+ * a preguntar aunque el id sea otro. Las demás (anchor, interests, extras, food, lodging, must, avoid, other) admiten
+ * varias preguntas distintas en rondas distintas: en las rondas ≥ 2 se PROFUNDIZA en lo que contestó (ej. anchor:
+ * equipo → fase → categoría de entradas; extras: "Bosque Sumergido" → "¿buceo con equipo o kayak?"; lodging:
+ * "cabaña" → "¿con hidromasaje / vista al lago / cerca del pueblo?"), siempre con un id nuevo.
  */
-const SINGLE_SLOT = new Set<string>(['dates', 'duration', 'travelers', 'origin', 'arrival', 'departure', 'lodging', 'budget', 'pace', 'first_time', 'kids', 'transport', 'mobility']);
+const SINGLE_SLOT = new Set<string>(['dates', 'duration', 'travelers', 'origin', 'arrival', 'departure', 'budget', 'pace', 'first_time', 'kids', 'transport', 'mobility']);
+/**
+ * Dimensiones "lista" (gustos, sí o sí, ni loco): que ya haya algo dicho no impide profundizar cuando hay respuestas
+ * previas en las que apoyarse. En la ronda 1 (nada contestado todavía) se sigue sin preguntar lo que ya está.
+ */
+const LIST_DIMS = new Set<string>(['interests', 'must', 'avoid']);
+
+/** Rondas de la entrevista (1-4). En la 4 siempre termina. */
+export const MAX_BRIEF_ROUNDS = 4;
+/** Antes de esta ronda no se termina mientras quede algo útil para preguntar (aunque el modelo diga done). */
+export const MIN_DONE_ROUND = 3;
+
+/**
+ * ¿Terminó la entrevista? Sin destino, nunca. Ronda 4: siempre. Sin preguntas útiles (todo filtrado o el modelo no
+ * devolvió ninguna): sí. Rondas 1-2 con preguntas: no (se profundiza aunque el modelo diga done). Ronda 3: lo que diga
+ * el modelo.
+ */
+export function briefDone(args: { round: number; ready: boolean; questions: number; modelDone: boolean }): boolean {
+  if (!args.ready) return false;
+  if (args.round >= MAX_BRIEF_ROUNDS) return true;
+  if (args.questions === 0) return true;
+  if (args.round < MIN_DONE_ROUND) return false;
+  return args.modelDone;
+}
 
 export type Coverage = Partial<Record<TripDimension, 'known' | 'assumed' | 'unknown'>>;
 
@@ -494,6 +520,8 @@ export function normalizeQuestions(
   const askedIds = new Set(asked.map((a) => a.id).filter(Boolean) as string[]);
   const askedDims = new Set(asked.map((a) => a.dimension).filter((d): d is string => !!d && SINGLE_SLOT.has(d)));
   const askedTexts = new Set(asked.map((a) => questionKey(a.text)));
+  // Hay respuestas previas en las que profundizar (rondas ≥ 2).
+  const deepening = asked.some((a) => !!a.answer);
   const out: TripQuestion[] = [];
   for (const q of qs ?? []) {
     if (out.length >= 4) break;
@@ -503,7 +531,7 @@ export function normalizeQuestions(
     const id = slugId(q.id || dimension) || dimension;
     if (askedIds.has(id) || askedTexts.has(questionKey(text))) continue;
     if (out.some((x) => x.id === id || questionKey(x.text) === questionKey(text))) continue;
-    if (alreadyKnown(dimension, u)) continue;
+    if (alreadyKnown(dimension, u) && !(deepening && LIST_DIMS.has(dimension))) continue;
     if (SINGLE_SLOT.has(dimension) && (askedDims.has(dimension) || coverage[dimension] === 'known' || out.some((x) => x.dimension === dimension))) continue;
     const values = new Set<string>();
     const options = (q.options ?? [])
@@ -759,7 +787,7 @@ async function withTimeout<T>(ms: number, what: string, fn: (signal: AbortSignal
   }
 }
 
-const clampRound = (r: number | undefined) => Math.min(3, Math.max(1, Math.round(r ?? 1)));
+const clampRound = (r: number | undefined) => Math.min(MAX_BRIEF_ROUNDS, Math.max(1, Math.round(r ?? 1)));
 
 export async function tripBrief(input: ToolInput<'trip_brief'>, ctx: ToolCtx, deps: BriefDeps = defaultBriefDeps()): Promise<TripBriefResult> {
   const round = clampRound(input.round);
@@ -785,12 +813,14 @@ export async function tripBrief(input: ToolInput<'trip_brief'>, ctx: ToolCtx, de
   const questions = normalizeQuestions(value.questions, understood, { coverage, asked });
   rememberQuestions(questions);
   const ready = understood.destinations.length > 0;
-  // done: ronda 3, o nada más para preguntar, o el modelo dice que alcanza. Sin destino nunca está terminado.
-  const done = ready && (round >= 3 || questions.length === 0 || !!value.done);
+  // done: ronda 4, o nada más para preguntar, o (desde la 3) el modelo dice que alcanza. Sin destino nunca termina.
+  const done = briefDone({ round, ready, questions: questions.length, modelDone: !!value.done });
   rememberUnderstanding(understandingKey(ctx.userId, input), understood);
 
   const warming = !!deps.warm && ready;
-  if (warming) {
+  // Precalentar solo en la primera ronda: con 4 rondas (y procesos distintos en Vercel) el mapa en memoria no evita
+  // investigaciones repetidas; si en la ronda 1 no había destino, plan_trip lo investiga igual.
+  if (warming && round <= 1) {
     try {
       deps.warm!(ctx.admin, understood.destinations);
     } catch (err) {

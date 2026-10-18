@@ -106,7 +106,8 @@ describe('plan_trip · planificador colaborativo', () => {
     expect(fake.rows('blocks').map((b) => b.type)).toEqual(['transfer']);
     const texts = (job.progress as { text: string }[]).map((p) => p.text);
     expect(texts).toContain('Uso la forma del viaje que eligieron…');
-    expect(texts).toContain('Investigando qué no te podés perder en Montevideo…');
+    // Una sola línea "Investigando…" por tramo (antes la decía planTrip y también el catálogo).
+    expect(texts.filter((t) => t === 'Investigando qué no te podés perder en Montevideo…')).toHaveLength(1);
     expect(texts).toContain('Armé el menú de Montevideo: 3 imperdibles, 9 para ustedes');
     expect(texts.at(-1)).toBe('¡Listo el menú! 2 tramos, 4 días, 24 opciones para elegir');
     // Deshacer: borra tramos (opciones en cascada)
@@ -160,6 +161,28 @@ describe('plan_trip · planificador colaborativo', () => {
     const small = await plan({ skeleton: shape, mode: 'menu' }, { smallCity: 'Montevideo' });
     expect(small.calls.fill).toEqual(['Montevideo']);
     expect(small.result.options).toBe(12); // solo Buenos Aires tiene menú
+  });
+
+  it('mode menu: stage menu solo si algún tramo quedó con menú; los que no, se arman y se avisa en assumptions', async () => {
+    const none = await plan({ skeleton: shape, mode: 'menu' }, { failCities: ['Montevideo', 'Buenos Aires'] });
+    expect(none.job.status).toBe('done');
+    expect(none.result).toMatchObject({ stage: 'planned', options: 0 });
+    expect(none.calls.fill.sort()).toEqual(['Buenos Aires', 'Montevideo']);
+    expect(none.result.assumptions).toEqual(
+      expect.arrayContaining([
+        'No pude armar el menú de Montevideo; te armé los días directo',
+        'No pude armar el menú de Buenos Aires; te armé los días directo',
+      ]),
+    );
+    const texts = (none.job.progress as { text: string }[]).map((p) => p.text);
+    expect(texts).toContain('No pude armar el menú de Montevideo; te armé los días directo');
+    expect(texts.at(-1)).toMatch(/^¡Listo! 2 tramos, 4 días, \d+ bloques$/);
+
+    const mixed = await plan({ skeleton: shape, mode: 'menu' }, { failCity: 'Buenos Aires' });
+    expect(mixed.result).toMatchObject({ stage: 'menu', options: 12 });
+    expect(mixed.calls.fill).toEqual(['Buenos Aires']);
+    expect(mixed.result.assumptions).toContain('No pude armar el menú de Buenos Aires; te armé los días directo');
+    expect(mixed.result.assumptions).not.toContain('No pude armar el menú de Montevideo; te armé los días directo');
   });
 
   it('anclas: se guardan en request.understanding, cada tramo recibe las suyas y la llegada larga aliviana el primer día', async () => {

@@ -1,4 +1,4 @@
-// "Nuevo viaje" (PRD 01 + PRD 31 · planificador colaborativo): Contame → Lo que entendí (trip_brief, 1-3 rondas) →
+// "Nuevo viaje" (PRD 01 + PRD 31 · planificador colaborativo): Contame → Lo que entendí (trip_brief, 1-4 rondas) →
 // Elegí la forma (trip_shapes) → ¿Cómo lo armamos? → plan_trip (menu | auto) → progreso en vivo.
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef } from 'react';
@@ -8,7 +8,7 @@ import { Building } from '../../../features/newTrip/Building';
 import { BriefStep } from '../../../features/newTrip/BriefStep';
 import { BuildStep } from '../../../features/newTrip/BuildStep';
 import { requestBrief, requestNextRound, requestShapes, startPlan } from '../../../features/newTrip/flow';
-import { DEMO_STORY, recommendedShape } from '../../../features/newTrip/model';
+import { DEMO_STORY, MAX_ROUNDS, recommendedShape } from '../../../features/newTrip/model';
 import { isoIn } from '../../../features/newTrip/parts';
 import { ShapesStep } from '../../../features/newTrip/ShapesStep';
 import { useNewTripStore } from '../../../features/newTrip/store';
@@ -86,8 +86,8 @@ function useDemo(demo: string | undefined, go: string | undefined) {
       await wait(600);
       if (!(await requestBrief())) return;
       await wait(1200);
-      // Defaults preseleccionados en cada ronda; "Seguir" hasta que la entrevista diga done (máx. 3 rondas).
-      for (let i = 0; i < 3 && useNewTripStore.getState().phase === 'brief'; i++) {
+      // Defaults preseleccionados en cada ronda; "Seguir" hasta que la entrevista diga done (máx. MAX_ROUNDS).
+      for (let i = 0; i < MAX_ROUNDS && useNewTripStore.getState().phase === 'brief'; i++) {
         if (!(await requestNextRound())) return;
         await wait(1200);
       }

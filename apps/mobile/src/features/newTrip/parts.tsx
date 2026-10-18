@@ -1,19 +1,18 @@
 // Piezas comunes de las fases de "Nuevo viaje": marco con atrás + pie fijo, burbuja del compañero,
-// fila de fechas, aviso de error con reintento, el ícono de modo de traslado y la tarjetita de un ancla del viaje.
+// contador de días, botón de texto largo, aviso de error con reintento, el ícono de modo de traslado y la tarjetita de un ancla del viaje.
 import type { TransferMode, TripAnchor } from '@build101/shared';
 import * as WebBrowser from 'expo-web-browser';
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ColorValue } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ColorValue } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
-import { formatDay } from '../../lib/format';
 import { Button } from '../../ui/Button';
 import { BackIcon } from '../../ui/icons';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
-import { Chip } from '../plan/components/Controls';
+import { daysLabel, MAX_DAYS, MIN_DAYS } from './calendarModel';
 import { anchorWhen, TICKETS_LABEL } from './model';
 
 export function isoIn(days: number): string {
@@ -21,8 +20,6 @@ export function isoIn(days: number): string {
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-const DATES = Array.from({ length: 120 }, (_, i) => isoIn(i));
 
 /** Marco de cada fase: paso N de 4, atrás, contenido con scroll y pie fijo con las acciones. */
 export function StepShell({
@@ -73,14 +70,99 @@ export function Bubble({ text }: { text: string }) {
   );
 }
 
-/** Fila horizontal de fechas (hoy + 120 días). Tocar la elegida la saca. */
-export function DateRow({ value, onChange }: { value: string | null; onChange: (iso: string | null) => void }) {
+/**
+ * "[−] 9 días [+]" (1-60). `selected` = la cantidad elegida es esta (si no, se ve apagado y tocar el número la elige).
+ */
+export function DaysStepper({
+  value,
+  selected = true,
+  onChange,
+  label,
+}: {
+  value: number;
+  selected?: boolean;
+  onChange: (n: number) => void;
+  label?: string;
+}) {
+  const set = (n: number) => onChange(Math.max(MIN_DAYS, Math.min(MAX_DAYS, n)));
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateRow}>
-      {DATES.map((d) => (
-        <Chip key={d} label={formatDay(d)} selected={value === d} onPress={() => onChange(value === d ? null : d)} />
-      ))}
-    </ScrollView>
+    <View style={styles.stepperRow}>
+      {label ? <Text style={styles.stepperLabel}>{label}</Text> : null}
+      <View
+        style={styles.stepper}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label ?? 'Cantidad de días'}
+        accessibilityValue={{ text: daysLabel(value) }}
+        accessibilityState={{ selected }}
+        accessibilityHint="Deslizá para arriba o abajo para cambiar; tocá dos veces para elegir esta cantidad"
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }, { name: 'activate' }]}
+        onAccessibilityAction={(e) => {
+          const name = e.nativeEvent.actionName;
+          set(name === 'increment' ? value + 1 : name === 'decrement' ? value - 1 : value);
+        }}
+      >
+        <StepBtn sign="−" disabled={value <= MIN_DAYS} onPress={() => set(value - 1)} />
+        <Pressable
+          onPress={() => set(value)}
+          style={({ pressed }) => [styles.stepperValue, selected && styles.stepperValueOn, pressed && { opacity: 0.75 }]}
+        >
+          <Text style={[styles.stepperText, selected && styles.stepperTextOn]}>{daysLabel(value)}</Text>
+        </Pressable>
+        <StepBtn sign="+" disabled={value >= MAX_DAYS} onPress={() => set(value + 1)} />
+      </View>
+    </View>
+  );
+}
+
+function StepBtn({ sign, disabled, onPress }: { sign: '−' | '+'; disabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      style={({ pressed }) => [styles.stepBtn, disabled && { opacity: 0.35 }, pressed && { opacity: 0.6 }]}
+    >
+      <Text style={styles.stepBtnText}>{sign}</Text>
+    </Pressable>
+  );
+}
+
+/** Botón que puede ocupar dos renglones (los de ui/Button cortan en uno): textos largos como "Pasemos a las opciones…". */
+export function TextButton({
+  label,
+  onPress,
+  disabled,
+  loading,
+  primary,
+  accessibilityHint,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  primary?: boolean;
+  accessibilityHint?: string;
+}) {
+  const off = disabled || loading;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={off}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: !!off, busy: !!loading }}
+      style={({ pressed }) => [styles.textBtn, primary && styles.textBtnPrimary, off && !loading && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}
+    >
+      {loading ? (
+        <ActivityIndicator color={primary ? colors.primaryText : colors.primary} />
+      ) : (
+        <Text style={[styles.textBtnText, primary && styles.textBtnTextPrimary]} numberOfLines={2}>
+          {label}
+        </Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -271,7 +353,37 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   bubbleText: { fontSize: font.body, color: colors.text, lineHeight: 23 },
-  dateRow: { gap: space.sm, paddingVertical: space.xs },
+  stepperRow: { gap: space.xs },
+  stepperLabel: { fontSize: font.small, fontWeight: '700', color: colors.textMuted },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'flex-start' },
+  stepBtn: {
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    borderRadius: MIN_TOUCH / 2,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  stepBtnText: { fontSize: 24, lineHeight: 28, fontWeight: '700', color: colors.primary },
+  stepperValue: {
+    minWidth: 96,
+    minHeight: MIN_TOUCH - 8,
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValueOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  stepperText: { fontSize: font.body, fontWeight: '700', color: colors.text },
+  stepperTextOn: { color: colors.primaryText },
+  textBtn: { minHeight: MIN_TOUCH, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.lg, paddingVertical: space.xs },
+  textBtnPrimary: { backgroundColor: colors.primary, borderRadius: radius.md },
+  textBtnText: { fontSize: font.body, fontWeight: '600', color: colors.primary, textAlign: 'center' },
+  textBtnTextPrimary: { color: colors.primaryText },
   error: { backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: radius.md, padding: space.md, gap: space.sm },
   errorText: { fontSize: font.small, color: colors.danger, fontWeight: '600' },
   errorActions: { flexDirection: 'row', gap: space.sm },

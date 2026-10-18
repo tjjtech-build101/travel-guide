@@ -7,6 +7,18 @@ import {
   baseConversation,
   coverageSummary,
   MAX_ROUNDS,
+  daysOf,
+  DAYS_PREFIX,
+  effectiveEndDate,
+  FREE_PREFIX,
+  freeTextOf,
+  isAnswered,
+  isDurationQuestion,
+  isSelected,
+  roundLabel,
+  setDays,
+  setFreeText,
+  withDateAnswer,
   mergeRoundAnswers,
   roundQuestions,
   skipRound,
@@ -288,9 +300,14 @@ test('conversación acumulada entre rondas: formato pregunta/respuesta y sin dup
 });
 
 test('wantsAnotherRound / skipRound: done, tope de rondas y ronda vacía', () => {
+  eq(MAX_ROUNDS, 4);
   eq(wantsAnotherRound({ done: false, questions: [team] }, 1), true);
   eq(wantsAnotherRound({ questions: [team] }, 2), true);
-  eq(wantsAnotherRound({ done: true, questions: [team] }, 1), false);
+  // done con preguntas antes de la ronda 3: igual se repregunta.
+  eq(wantsAnotherRound({ done: true, questions: [team] }, 1), true);
+  eq(wantsAnotherRound({ done: true, questions: [team] }, 2), true);
+  eq(wantsAnotherRound({ done: true, questions: [team] }, 3), false);
+  eq(wantsAnotherRound({ done: false, questions: [team] }, 3), true);
   eq(wantsAnotherRound({ done: false, questions: [team] }, MAX_ROUNDS), false);
   eq(wantsAnotherRound({ done: false, questions: [] }, 1), false);
   eq(skipRound({ done: true, questions: [] }), true);
@@ -349,6 +366,140 @@ test('skeletonFromShape lleva las anclas de la forma y valida con PlanTripInput'
   eq(parsed.data.understanding?.trip_kind, 'event');
   eq(parsed.data.understanding?.anchors?.length, 1);
   eq(parsed.data.understanding?.origin, 'Buenos Aires');
+});
+
+// ───────────────────────── Texto libre, días a mano, calendario, rondas (feedback del celu)
+
+const duration = q({
+  id: 'days',
+  dimension: 'duration',
+  text: '¿Cuántos días se quedan?',
+  options: [
+    { value: 'week', label: 'Una semana' },
+    { value: '10', label: '10 días' },
+  ],
+  default: 'week',
+});
+const when = q({
+  id: 'when',
+  dimension: 'dates',
+  text: '¿Cuándo pensás ir?',
+  kind: 'date',
+  options: [{ value: 'flex', label: 'Soy flexible' }],
+  default: null,
+});
+
+test('texto libre en single: reemplaza la opción; vacío la borra', () => {
+  const v = setFreeText(q({}), 'balanced', 'Según el día');
+  eq(v, FREE_PREFIX + 'Según el día');
+  eq(isSelected(v, 'balanced'), false);
+  eq(freeTextOf(v), 'Según el día');
+  eq(answerText(q({}), v), 'Según el día');
+  eq(setFreeText(q({}), v, '   '), '');
+  eq(isAnswered(setFreeText(q({}), v, '')), false);
+  // Elegir una opción después pisa el texto libre.
+  eq(toggleAnswer(q({}), v, 'relaxed'), 'relaxed');
+});
+
+test('texto libre en multi: se suma a lo elegido y alternar opciones no lo toca', () => {
+  let v = setFreeText(interests, ['food'], 'Vinos naturales');
+  eq(v, ['food', FREE_PREFIX + 'Vinos naturales']);
+  v = toggleAnswer(interests, v, 'walk');
+  eq(answerText(interests, v), 'Comida, Vinos naturales, Caminar');
+  v = setFreeText(interests, v, 'Vinos y quesos');
+  eq(freeTextOf(v), 'Vinos y quesos');
+  eq((v as string[]).filter((x) => x.startsWith(FREE_PREFIX)).length, 1);
+  eq(isAnswered([FREE_PREFIX + '  ']), false);
+});
+
+test('días a mano en duración: "9 días", 1-60 y reemplaza la opción', () => {
+  eq(isDurationQuestion(duration), true);
+  eq(isDurationQuestion(q({})), false);
+  const v = setDays(duration, 'week', 9);
+  eq(v, DAYS_PREFIX + '9');
+  eq(daysOf(v), 9);
+  eq(answerText(duration, v), '9 días');
+  eq(answerText(duration, setDays(duration, v, 1)), '1 día');
+  eq(daysOf(setDays(duration, v, 200)), 60);
+  eq(daysOf(setDays(duration, v, 0)), 1);
+  eq(daysOf('week'), null);
+});
+
+test('pregunta de fecha: calendario (día o rango), opción o texto libre', () => {
+  eq(answerText(when, '2027-10-24'), 'dom 24 oct (2027-10-24)');
+  eq(answerText(when, '2027-10-24/2027-10-29'), 'dom 24 oct (2027-10-24) al vie 29 oct (2027-10-29), 6 días');
+  eq(answerText(when, 'flex'), 'Soy flexible');
+  eq(answerText(when, setFreeText(when, 'flex', 'Para las fiestas')), 'Para las fiestas');
+});
+
+test('withDateAnswer: un rango completa solo la duración', () => {
+  const qs = [when, duration, q({})];
+  const out = withDateAnswer(qs, { days: 'week', pace: 'relaxed' }, when, '2027-10-24/2027-10-29');
+  eq(out, { days: DAYS_PREFIX + '6', pace: 'relaxed', when: '2027-10-24/2027-10-29' });
+  // Un día solo (sin salida) no toca la duración.
+  eq(withDateAnswer(qs, { days: 'week' }, when, '2027-10-24'), { days: 'week', when: '2027-10-24' });
+});
+
+test('effectiveStartDate / effectiveEndDate con rango de la pregunta y de Contame', () => {
+  const a = { when: '2027-10-24/2027-10-29' };
+  eq(effectiveStartDate(null, [when], a), '2027-10-24');
+  eq(effectiveEndDate(null, null, [when], a), '2027-10-29');
+  eq(effectiveEndDate('2027-11-01', '2027-11-05', [when], a), '2027-11-05');
+  eq(effectiveEndDate('2027-11-01', '2027-10-05', [when], a), null);
+  eq(effectiveEndDate(null, null, [when], { when: 'flex' }), null);
+});
+
+test('conversationWithAnswers: labels + texto libre separados por coma, con la marca [q:id/dimensión]', () => {
+  const base = baseConversation('Lisboa', null);
+  const answers = {
+    interests: ['food', FREE_PREFIX + 'fado en vivo'],
+    days: DAYS_PREFIX + '9',
+    when: '2027-10-24/2027-10-29',
+  };
+  const conv = conversationWithAnswers(base, [interests, duration, when], answers);
+  eq(conv.slice(2), [
+    { role: 'assistant', text: '[q:interests/interests] ¿Qué les copa?' },
+    { role: 'user', text: 'Comida, fado en vivo' },
+    { role: 'assistant', text: '[q:days/duration] ¿Cuántos días se quedan?' },
+    { role: 'user', text: '9 días' },
+    { role: 'assistant', text: '[q:when/dates] ¿Cuándo pensás ir?' },
+    { role: 'user', text: 'dom 24 oct (2027-10-24) al vie 29 oct (2027-10-29), 6 días' },
+  ]);
+  const parsed = TripBriefInput.safeParse({ conversation: conv, start_date: '2027-10-24', end_date: '2027-10-29', round: 4 });
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
+});
+
+test('baseConversation con vuelta y días de Contame', () => {
+  eq(baseConversation('Lisboa', '2027-10-24', { endDate: '2027-10-29', days: 6 }).slice(2), [
+    { role: 'user', text: 'Fecha de inicio elegida: 2027-10-24' },
+    { role: 'user', text: 'Fecha de vuelta elegida: 2027-10-29' },
+    { role: 'user', text: 'Duración elegida: 6 días' },
+  ]);
+  // Sin fecha de inicio no va la vuelta; los días van igual.
+  eq(baseConversation('Lisboa', null, { endDate: '2027-10-29', days: 9 }).slice(2), [{ role: 'user', text: 'Duración elegida: 9 días' }]);
+});
+
+test('planTripInput lleva end_date solo si es posterior al inicio', () => {
+  const conv = baseConversation('Lisboa', '2027-10-24');
+  const ok = planTripInput({ conversation: conv, startDate: '2027-10-24', endDate: '2027-10-29', shape: null, mode: 'auto' });
+  eq(ok.end_date, '2027-10-29');
+  eq(PlanTripInput.safeParse(ok).success, true);
+  eq('end_date' in planTripInput({ conversation: conv, startDate: '2027-10-24', endDate: '2027-10-20', shape: null, mode: 'auto' }), false);
+  eq('end_date' in planTripInput({ conversation: conv, startDate: null, endDate: '2027-10-29', shape: null, mode: 'auto' }), false);
+});
+
+test('roundLabel: "Ronda N · …" sin total fijo', () => {
+  eq(roundLabel(1), 'Ronda 1 · lo básico');
+  eq(roundLabel(2), 'Ronda 2 · repreguntas sobre lo que me contaste');
+  eq(roundLabel(4), 'Ronda 4 · últimos detalles');
+  eq(roundLabel(9).startsWith('Ronda 4'), true);
+  eq(/ de \d/.test(roundLabel(2)), false);
+});
+
+test('respuestas viejas (persistidas antes del texto libre) siguen funcionando', () => {
+  eq(answerText(q({}), 'relaxed'), 'Tranqui');
+  eq(answerText(dates, '2026-10-24'), 'sáb 24 oct (2026-10-24)');
+  eq(mergeRoundAnswers({ pace: FREE_PREFIX + 'x' }, [q({})], []), { pace: FREE_PREFIX + 'x' });
 });
 
 if (failures) {
