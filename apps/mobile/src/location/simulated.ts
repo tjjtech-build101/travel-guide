@@ -59,6 +59,10 @@ export class SimulatedLocationProvider implements LocationProvider, SimulatedCon
     return this.current;
   }
 
+  requestFix(): Promise<LocationFix | null> {
+    return Promise.resolve(this.current ? { ...this.current, t: Date.now() } : null);
+  }
+
   subscribe(cb: (fix: LocationFix) => void): () => void {
     return this.emitter.subscribe(cb);
   }

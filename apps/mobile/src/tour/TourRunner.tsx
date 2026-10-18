@@ -23,7 +23,15 @@ export function TourRunner() {
   }, []);
 
   // Posición fresca para search_places / route_eta de la voz (location/freshPositionTools.ts).
-  useEffect(() => setFreshPositionSource(() => provider.getCurrent()), [provider]);
+  useEffect(
+    () =>
+      setFreshPositionSource({
+        get: () => provider.getCurrent(),
+        simulated: provider.kind === 'simulated',
+        request: (timeoutMs) => provider.requestFix(timeoutMs),
+      }),
+    [provider],
+  );
 
   // Motor: cada muestra del provider actual + reloj.
   useEffect(() => {

@@ -15,6 +15,8 @@ export interface LocationProvider {
   start(): Promise<void>;
   stop(): void;
   getCurrent(): LocationFix | null;
+  /** Lectura nueva en este momento (el real le pide al GPS; el simulado devuelve su punto actual). null si no llega a tiempo. */
+  requestFix(timeoutMs: number): Promise<LocationFix | null>;
   subscribe(cb: (fix: LocationFix) => void): () => void;
 }
 
