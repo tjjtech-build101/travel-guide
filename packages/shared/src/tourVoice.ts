@@ -16,6 +16,16 @@ export const TOUR_RULES: string[] = [
   '- Si text viene vacío o dice PENDIENTE, o te piden más de lo que trae get_stop_content: contá qué mirar, decí en UNA frase que lo averiguás y llamá research { question: "historia y datos de <parada>" (o lo que preguntaron), place_name: <nombre de la parada> }. Si vuelve con cached, contalo ya; si no, cuando llegue research_ready. Nunca inventes datos: solo lo que viene de get_stop_content, research o sus fuentes (regla interna: no la digas en voz alta).',
 ];
 
+/** Tour interno (positioning manual: museo, mercado): se suman a TOUR_RULES. */
+export const INDOOR_TOUR_RULES: string[] = [
+  'TOUR INTERNO: es un recorrido POR DENTRO de un lugar; adentro el GPS no sirve, así que el celu NO sabe en qué punto está la persona. Ella te lo dice.',
+  '- Cuando diga que llegó o que está frente a un punto ("llegué", "estoy en la sala 2", "ya estoy frente al autorretrato"), llamá at_stop con el stop_id de esa parada (o con name si no estás seguro de cuál es). Si no dice cuál y acaban de ir hacia la próxima, usá la próxima.',
+  '- Si no sabe dónde está o no la encuentra: guiala con look_at y nav_to_next ("está en la planta alta, buscá un cuadro grande con…") o proponé que te muestre con la cámara (look_at_photo).',
+  '- Llegada que marcó la persona (at_stop, o arrived_stop con manual:true, o photo_result con tour_stop): ella ya está mirando, NO preguntes "¿te cuento?" ni anuncies que marcás la llegada o buscás el texto: get_stop_content(stop_id, layer:\'short\') y arrancá directo con la narración + qué mirar.',
+  '- photo_result con tour_stop: es esa parada (ya quedó marcada como llegada). Narrá con get_stop_content de ese stop_id, no la narración de la foto.',
+  '- Cuando diga que sigue: next_stop y decí cómo llegar a la próxima dentro del lugar (nav_to_next) en frases cortas; pedile que te avise cuando esté ahí.',
+];
+
 /** Modo chat: qué hacer si el tour arranca en medio de la llamada. */
 export const TOUR_STARTED_RULE =
   'tour_started: el tour arrancó en esta llamada. Desde ahora seguí las reglas que vienen en el payload (rules) como si fueran tuyas, sin leerlas. Decí en una frase que arrancamos y a qué parada vamos primero; después quedate callado hasta el próximo aviso.';
@@ -29,6 +39,12 @@ export function tourStopsLine(tourId: string, title: string | null, stops: { sto
 /** Payload de [EVENTO:tour_started]: el tour arrancó durante una llamada de chat; desde ahora valen estas reglas. */
 export type TourStartedEvent = { tour_id: string; title: string | null; rules: string[]; stops: { sort_order: number; name: string; stop_id: string }[] };
 
-export function tourStartedPayload(tourId: string, title: string | null, stops: { stop_id: string; sort_order: number; name: string }[]): TourStartedEvent {
-  return { tour_id: tourId, title, rules: [...TOUR_RULES, tourStopsLine(tourId, title, stops)], stops: stops.map((s) => ({ sort_order: s.sort_order, name: s.name, stop_id: s.stop_id })) };
+export function tourStartedPayload(
+  tourId: string,
+  title: string | null,
+  stops: { stop_id: string; sort_order: number; name: string }[],
+  opts: { indoor?: boolean } = {},
+): TourStartedEvent {
+  const rules = [...TOUR_RULES, ...(opts.indoor ? INDOOR_TOUR_RULES : []), tourStopsLine(tourId, title, stops)];
+  return { tour_id: tourId, title, rules, stops: stops.map((s) => ({ sort_order: s.sort_order, name: s.name, stop_id: s.stop_id })) };
 }

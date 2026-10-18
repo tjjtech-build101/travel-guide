@@ -1,7 +1,7 @@
 // Botón flotante para llamar al scout (PRD 05): abajo a la derecha encima de las tabs, arrastrable a los bordes.
 import { SCOUT } from '@build101/shared';
 import { useNetworkState } from 'expo-network';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
@@ -11,7 +11,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocationProvider } from '../../location/LocationContext';
 import { useToast, Toast } from '../../ui/Toast';
 import { useVoiceStore } from '../store';
-import { startVoiceWarmup } from '../warmup';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 
 const SIZE = 64;
@@ -28,8 +27,6 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
   const insets = useSafeAreaInsets();
   const { toast, show } = useToast(2500);
   const [dragging, setDragging] = useState(false);
-  // Con el viaje abierto (el botón vive en su layout) la API queda despierta para el toque.
-  useEffect(() => startVoiceWarmup(), []);
 
   const x = useSharedValue(0); // 0 = derecha; negativo = hacia la izquierda
   const y = useSharedValue(0);

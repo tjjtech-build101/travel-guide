@@ -49,6 +49,35 @@ async function writeCache(admin: Db, key: string, userId: string, events: EventI
   if (error) console.warn('[events_search] no pude cachear:', error.message);
 }
 
+/**
+ * Eventos de una fecha que ya están en la caché de events_search para esa ciudad (cualquier rango que la incluya).
+ * No llama a Claude: lo usa gap_suggestions, que tiene que responder rápido. Sin caché → [].
+ */
+export async function cachedEventsOn(admin: Db, args: { city: string; country?: string | null; date: string }): Promise<EventItemT[]> {
+  const prefix = `${args.city.trim().toLowerCase()}|${(args.country ?? '').trim().toLowerCase()}|`;
+  const { data, error } = await admin
+    .from('agent_jobs')
+    .select('result,progress,created_at')
+    .eq('kind', 'events_search')
+    .gte('created_at', new Date(Date.now() - CACHE_FRESH_MS).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error || !data) return [];
+  const seen = new Set<string>();
+  const out: EventItemT[] = [];
+  for (const row of data) {
+    const key = (row.progress as { text?: string }[] | null)?.[0]?.text ?? '';
+    if (!key.startsWith(prefix)) continue;
+    for (const e of (row.result as { events?: EventItemT[] } | null)?.events ?? []) {
+      const id = `${e.title}|${e.date}|${e.start_time ?? ''}`;
+      if (e.date !== args.date || seen.has(id)) continue;
+      seen.add(id);
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 /** Completa lat/lng geocodificando el venue cuando el modelo no lo sabe (PRD 16, Notas técnicas). */
 async function geocodeMissing(events: EventItemT[], city: string): Promise<(EventItemT & { lat: number | null; lng: number | null })[]> {
   return Promise.all(

@@ -78,7 +78,7 @@ Todas las tablas de Contratos, tal cual. Detalles de implementación obligatorio
 | `blocks`, `block_participants` | miembro y (`not is_private` o participante o `created_by = auth.uid()`) | organizer, o viajero que es `leg_member` del tramo del bloque. Seguidor: nada. |
 | `agent_proposals` | miembro | insert: miembro no seguidor; update: organizer (lo refina PRD 11) |
 | `activity_feed` | miembro | insert: miembro con `actor_user_id = auth.uid()`; sin update/delete (append-only) |
-| `member_locations` | miembro (PRD 13 refina por `location_sharing` / `ghost_until`) | upsert solo la fila propia |
+| `member_locations` | miembro: la propia siempre; la de otro si es fresca (≤ 15 min), el viaje no terminó, `location_sharing <> 'never'`, sin fantasma y (seguidores) `share_location_with_followers` — `20261017000010` | upsert y delete solo la fila propia |
 | `profiles` | uno mismo + co-miembros de algún viaje | update: uno mismo |
 | `saved_places`, `device_tokens` | propio | propio |
 | `agent_jobs` | `user_id = auth.uid()` o miembro de `trip_id` | solo service role |

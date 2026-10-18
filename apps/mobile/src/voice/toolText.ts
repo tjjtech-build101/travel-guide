@@ -40,6 +40,8 @@ const FRIENDLY: Record<string, string> = {
   plan_trip: 'Armando el viaje',
   tour_brief: 'Pensando el tour',
   generate_tour: 'Armando el tour',
+  generate_indoor_tour: 'Armando el recorrido',
+  at_stop: 'Marcando la llegada',
   look_at_photo: 'Mirando la foto',
   research: 'Averiguando',
   // PRD 31 · planificador colaborativo

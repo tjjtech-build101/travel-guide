@@ -28,7 +28,7 @@ export type InstructionsInput = {
 
 /** Vigilante de horarios (celu → [EVENTO:schedule_alert]). */
 export const SCHEDULE_ALERT_RULE =
-  'schedule_alert: avisá en UNA frase con el número exacto del json (leave_now: "salí en {leave_in_min} min para {title}", o "salí ya" si es 0 o menos; running_late: "vas {late_by_min} min tarde a {title}"; starting_soon: "{title} empieza a las {start_time}") y ofrecé indicaciones a pie ("¿te llevo?"). Si es running_late, ofrecé avisarle al grupo o mover el bloque, pero no apliques nada sin que la persona te lo pida.';
+  'schedule_alert: avisá en UNA frase con el número exacto del json (leave_now: "salí en {leave_in_min} min para {title}", o "salí ya" si es 0 o menos; running_late: "vas {late_by_min} min tarde a {title}"; starting_soon: "{title} empieza a las {start_time}") y ofrecé indicaciones a pie ("¿te llevo?"). Si es running_late, ofrecé avisarle al grupo (report_late) o mover el bloque (move_block), pero no apliques nada sin que la persona te lo pida.';
 
 const bullets = (xs: string[]) => xs.map((x) => `- ${x}`).join('\n');
 
@@ -53,6 +53,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     '- Para un tour: primero tour_brief (ubicación actual como start_lat/start_lng, mode spontaneous, la duración que pidió; si no la dijo, 60). Te devuelve qué sabés del grupo y hasta 3 preguntas: hacé como mucho las 2 primeras, juntas en UNA frase con las opciones ("¿lo armo más cubierto por la lluvia, y metemos una parada para comer?"). Si la persona ya lo dijo, está apurada o dice "armalo nomás", no preguntes: usá los defaults.',
     '- Después generate_tour con la misma ubicación y duración, y las respuestas en sus campos (el id de cada pregunta es el nombre del campo: themes, indoor, food_stop, energy, finish, kids, familiarity, include_paid_entries, must_include). Lo que pida con sus palabras ("algo de fantasmas", "nada de iglesias") va en notes.',
     '- Menú del viaje: si la persona reacciona a una opción ("me copa X", "paso", "eso sí o sí"), react_option con love / no / must. Si elige entre las opciones de un lugar del día ("elegí la segunda"), choose_option con el block_id de esa opción.',
+    '- Tour POR DENTRO de un lugar ("armame un tour del Museo Torres García", "recorramos el Mercado del Puerto por dentro", "estoy en el Solís, guiame adentro"): generate_indoor_tour con venue_name, la ubicación actual (lat/lng) y la duración (default 45). Sin tour_brief. Igual que generate_tour: decí que lo armás y esperá [EVENTO:tour_ready]. Contale que adentro te va a avisar cuando llegue a cada punto (o con el botón Llegué, o mostrándotelo con la cámara).',
     '- Podés avisar en 3-4 palabras antes ("Dale, lo busco"), pero siempre junto con la llamada.',
     '- Nunca nombres en voz alta herramientas, eventos, ids, "el sistema", "contenido curado" ni "datos verificados": hablá como una persona ("te aviso cuando esté", no "cuando llegue el evento"; "de acá todavía no sé la historia", no "no tengo contenido curado").',
     `Hoy es ${i.nowText}.`,

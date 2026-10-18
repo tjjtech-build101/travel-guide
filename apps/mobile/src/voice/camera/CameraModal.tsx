@@ -11,7 +11,7 @@ import { callTool } from '../../lib/api';
 import { Button } from '../../ui/Button';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { currentLocation, useVoiceStore } from '../store';
-import { useCameraStore } from './cameraStore';
+import { cameraTourHooks, useCameraStore } from './cameraStore';
 
 type Phase =
   | { kind: 'viewfinder' }
@@ -76,7 +76,7 @@ function CameraScreen() {
         accuracy: fix.accuracy ?? null,
         question: question ?? undefined,
         trip_id: useVoiceStore.getState().args?.tripId ?? undefined,
-        tour_id: useVoiceStore.getState().args?.tourId ?? undefined,
+        tour_id: useVoiceStore.getState().args?.tourId ?? cameraTourHooks.tourId() ?? undefined,
         taken_at: new Date().toISOString(),
         language: useVoiceStore.getState().lang,
       },
@@ -104,8 +104,11 @@ function CameraScreen() {
         items: out.facts_used.map((f) => ({ text: f.text, url: f.source_url })),
       });
     }
+    // Tour interno: la foto reconoció una parada → llegada (sin aviso aparte al scout: va en photo_result).
+    if (out.tour_stop) cameraTourHooks.onTourStop(out.tour_stop.stop_id);
     // El scout lo narra (si hay llamada). Sin llamada, la tarjeta alcanza.
     useVoiceStore.getState().injectEvent('photo_result', {
+      ...(out.tour_stop ? { tour_stop: out.tour_stop } : {}),
       photo_id: out.photo_id,
       question,
       place: out.place,

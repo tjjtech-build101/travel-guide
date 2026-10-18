@@ -7,17 +7,22 @@ import { delete_trip } from './delete_trip';
 import { choose_option } from './choose_option';
 import { compose_days } from './compose_days';
 import { events_search } from './events_search';
+import { gap_suggestions } from './gap_suggestions';
+import { generate_indoor_tour } from './generate_indoor_tour';
 import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
 import { get_trip_overview } from './get_trip_overview';
 import { look_at_photo } from './look_at_photo';
 import { research } from './research';
 import { move_block } from './move_block';
+import { now_brief } from './now_brief';
 import { place_details } from './place_details';
+import { plan_day } from './plan_day';
 import { plan_transfers } from './plan_transfers';
 import { plan_trip } from './plan_trip';
 import { react_option } from './react_option';
 import { remove_block } from './remove_block';
+import { report_late } from './report_late';
 import { route_eta } from './route_eta';
 import { search_places } from './search_places';
 import { should_generate_tour } from './should_generate_tour';
@@ -54,6 +59,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   research,
   tour_brief,
   generate_tour,
+  generate_indoor_tour,
   weather,
   events_search,
   should_generate_tour,
@@ -63,6 +69,11 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   get_stop_content,
   next_stop,
   skip_stop,
+  // Ahora v2
+  now_brief,
+  gap_suggestions,
+  report_late,
+  plan_day,
 };
 
 export type ToolRun = { status: number; body: ToolResponse };

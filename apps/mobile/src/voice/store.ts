@@ -374,9 +374,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }
       });
     }
-    // generate_tour es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
+    // generate_tour (y el tour interno) es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
     for (const { call, res } of results) {
-      if (call.name !== 'generate_tour' || !res.ok) continue;
+      if ((call.name !== 'generate_tour' && call.name !== 'generate_indoor_tour') || !res.ok) continue;
       const { job_id, tour_id } = (res.data ?? {}) as { job_id?: string; tour_id?: string };
       if (!job_id || !tour_id) continue;
       log('🔧', `generate_tour: escuchando el job ${job_id.slice(0, 8)}…`);
@@ -642,7 +642,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       lastNudgeAt = 0;
       lastToolAt = 0;
       jobsWatching = 0;
-      set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
+      // Al llamar queda la vista de llamada abierta también cuando atiende; la llamada de fondo para narrar una foto
+      // (silentOpen) no la abre.
+      set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args, expanded: !args.silentOpen });
       try {
         startCallAudio(get().speaker);
         const s = await connect(args, false);

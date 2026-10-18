@@ -1,4 +1,5 @@
 // Íconos mínimos con react-native-svg (sin librerías de íconos extra).
+import type { ReactNode } from 'react';
 import type { ColorValue } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
@@ -139,5 +140,204 @@ export function HandIcon({ color, size = 24 }: IconProps) {
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V5.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5A6.5 6.5 0 0 1 4 16l-1-3a1.5 1.5 0 0 1 2.7-1.2L8 15" />
     </Svg>
+  );
+}
+
+// --- Clima y avisos (Ahora v2) ---
+
+export function SunIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Circle cx={12} cy={12} r={4} />
+      <Path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+    </Svg>
+  );
+}
+
+export function CloudIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M7 18h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.5A3.3 3.3 0 0 0 7 18z" />
+    </Svg>
+  );
+}
+
+export function RainIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M7 14h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.5A3.3 3.3 0 0 0 7 14z" />
+      <Path d="M8 17.5l-1 2.5M12 17.5l-1 2.5M16 17.5l-1 2.5" />
+    </Svg>
+  );
+}
+
+export function StormIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M7 14h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.5A3.3 3.3 0 0 0 7 14z" />
+      <Path d="M12.5 15.5l-2 3.5h3l-2 3.5" />
+    </Svg>
+  );
+}
+
+export function SnowIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5L12 6l2.5-1.5M9.5 19.5L12 18l2.5 1.5" />
+    </Svg>
+  );
+}
+
+export function FogIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M4 9h16M3 13h14M6 17h15" />
+    </Svg>
+  );
+}
+
+/** Sin conexión: nube tachada. */
+export function OfflineIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M7 18h10.5a4 4 0 0 0 .4-8 6 6 0 0 0-11.6 1.5A3.3 3.3 0 0 0 7 18z" />
+      <Path d="M3 3l18 18" />
+    </Svg>
+  );
+}
+
+/** Propuestas del Scout: chispa. */
+export function SparkIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 3l2 5.5 5.5 2-5.5 2L12 18l-2-5.5-5.5-2L10 8.5z" />
+    </Svg>
+  );
+}
+
+export function CloseIcon({ color, size = 24 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M6 6l12 12M18 6L6 18" />
+    </Svg>
+  );
+}
+
+// ───────── Cómo llego: maniobras, modos y recentrar
+
+function Stroke({ color, size = 24, children }: IconProps & { children: ReactNode }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </Svg>
+  );
+}
+
+export function TurnLeftIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M16 21v-8a4 4 0 0 0-4-4H5M9 5L5 9l4 4" />
+    </Stroke>
+  );
+}
+
+export function TurnRightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M8 21v-8a4 4 0 0 1 4-4h7M15 5l4 4-4 4" />
+    </Stroke>
+  );
+}
+
+export function SlightLeftIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M14 21v-6L7 8M7 13V8h5" />
+    </Stroke>
+  );
+}
+
+export function SlightRightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M10 21v-6l7-7M12 8h5v5" />
+    </Stroke>
+  );
+}
+
+export function StraightIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M12 21V4M6 10l6-6 6 6" />
+    </Stroke>
+  );
+}
+
+export function UTurnIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M15 21V9a4 4 0 0 0-8 0v6M4 12l3 3 3-3" />
+    </Stroke>
+  );
+}
+
+export function RoundaboutIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={12} cy={10} r={4} />
+      <Path d="M12 21v-7M16 10h4M17 7l3 3-3 3" />
+    </Stroke>
+  );
+}
+
+export function WalkIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={13} cy={4} r={1.8} />
+      <Path d="M9 21l2.5-6.5L14 17v4M11.5 14.5L12 9l-3 2v3M12 9l2.5 2.5L17 12" />
+    </Stroke>
+  );
+}
+
+export function BusIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Rect x={5} y={3} width={14} height={15} rx={2.5} />
+      <Path d="M5 11h14M8 18v2.5M16 18v2.5" />
+      <Circle cx={8.5} cy={14.5} r={0.6} />
+      <Circle cx={15.5} cy={14.5} r={0.6} />
+    </Stroke>
+  );
+}
+
+export function TrainIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Rect x={6} y={3} width={12} height={14} rx={3} />
+      <Path d="M6 10h12M9 17l-2.5 4M15 17l2.5 4" />
+      <Circle cx={9.5} cy={13.5} r={0.6} />
+      <Circle cx={14.5} cy={13.5} r={0.6} />
+    </Stroke>
+  );
+}
+
+export function CarIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Path d="M5 16v-4l2-5h10l2 5v4M5 16h14M4 12h16M6 16v2.5M18 16v2.5" />
+      <Circle cx={8} cy={14} r={0.6} />
+      <Circle cx={16} cy={14} r={0.6} />
+    </Stroke>
+  );
+}
+
+/** Recentrar el mapa en mí. */
+export function LocateIcon(p: IconProps) {
+  return (
+    <Stroke {...p}>
+      <Circle cx={12} cy={12} r={6} />
+      <Circle cx={12} cy={12} r={1.5} />
+      <Path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </Stroke>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeVoiceInstructions, SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
+import { APP_ONLY_TOOLS, composeVoiceInstructions, SCOUT, TOOL_NAMES, voiceLangLine, type BlockVisibleRow } from '@build101/shared';
 import { topInterests, upcomingLines } from './context';
 import { buildInstructions, nowHHMM, nowText, SCHEDULE_ALERT_RULE, type InstructionsInput } from './instructions';
 import { buildRealtimeSession, createCall, createClientSecret, turnDetection, vadConfig, voiceToolNames } from './openai';
@@ -117,12 +117,12 @@ describe('contexto', () => {
 
 describe('sesión de OpenAI Realtime', () => {
   it('herramientas = todas las de Contratos con handler; voz y transcripción', () => {
-    const visible = TOOL_NAMES.filter((n) => n !== 'look_at_photo');
+    const visible = TOOL_NAMES.filter((n) => n !== 'look_at_photo' && !APP_ONLY_TOOLS.includes(n));
     expect(voiceToolNames()).toEqual(visible);
     expect(voiceToolNames(['plan_trip'])).not.toContain('plan_trip');
     const s = buildRealtimeSession({ instructions: 'x', lang: 'en' });
     // look_at_photo: la voz ve la versión del celu ({ question? }), no la del backend.
-    expect(s.tools.map((t) => t.name)).toEqual([...visible, 'set_language', 'look_at_photo']);
+    expect(s.tools.map((t) => t.name)).toEqual([...visible, 'set_language', 'look_at_photo', 'at_stop']);
     expect(JSON.stringify(s.tools.find((t) => t.name === 'look_at_photo'))).not.toContain('image_base64');
     expect(s.audio.output.voice).toBe(SCOUT.voice);
     expect(s.audio.input.transcription.language).toBe('en');

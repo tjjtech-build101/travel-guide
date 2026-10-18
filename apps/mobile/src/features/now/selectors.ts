@@ -1,16 +1,19 @@
 // Selectores puros de la vista Ahora (PRD 19): qué día es "hoy" en el tramo, qué toca ahora, qué sigue,
 // cuándo salir y si hay que mostrar sugerencias. Sin React ni red.
 // Tests: selectors.test.ts (`pnpm --filter mobile test:now`).
-import type { DayRow, TimeFlex } from '@build101/shared';
+import { legTimeZone, zonedParts, type DayRow, type TimeFlex } from '@build101/shared';
 
 import { collapseChoices } from '../plan/choices';
 import { compareBlocks, toMin, type PlanBlock, type PlanLeg } from '../plan/selectors';
 
 // ───────────────────────── Zona horaria del tramo
 
+// La zona real (IANA, con DST) vive en packages/shared/timezone.ts: legTimeZone + zonedParts.
+export { deviceTimeZone, legTimeZone, zonedParts, zonedUtc } from '@build101/shared';
+
 /**
- * Desfase (minutos respecto de UTC) por país del tramo. MVP: Uruguay y Argentina son UTC−3 sin horario de
- * verano (PRD 19: "hardcodeadas por país"). null = usar la zona del celu.
+ * Compat (v1): desfase fijo por país. Solo Uruguay y Argentina (UTC−3 sin DST). null = la zona del celu.
+ * Para código nuevo usá legTimeZone + zonedParts.
  */
 const OFFSET_BY_COUNTRY: Record<string, number> = {
   uruguay: -180,
@@ -74,14 +77,14 @@ export type TodayContext =
   | { kind: 'today'; leg: PlanLeg; day: DayRow; date: string; minutes: number };
 
 /**
- * Busca el tramo y el día de "hoy" según la hora local de cada tramo. Con tramos paralelos prefiere aquel
- * donde el usuario es leg_member (si no, el primero).
+ * Busca el tramo y el día de "hoy" según la hora local (IANA) de cada tramo. Con tramos paralelos prefiere
+ * aquel donde el usuario es leg_member (si no, el primero).
  */
 export function resolveToday(legs: PlanLeg[], me: string, utcMs: number, trip?: TripDates | null): TodayContext {
   if (!legs.length) return { kind: 'noLegs' };
   const candidates: { leg: PlanLeg; day: DayRow; date: string; minutes: number }[] = [];
   for (const leg of legs) {
-    const { date, minutes } = localParts(utcMs, tzOffsetMin(leg.country));
+    const { date, minutes } = zonedParts(utcMs, legTimeZone(leg));
     const day = leg.days.find((d) => d.date === date);
     if (day) candidates.push({ leg, day, date, minutes });
   }
@@ -90,13 +93,27 @@ export function resolveToday(legs: PlanLeg[], me: string, utcMs: number, trip?: 
   if (pick) return { kind: 'today', ...pick };
 
   // Sin día para mí: ¿antes, después o en el medio del viaje?
-  const offset = tzOffsetMin(legs[0].country);
-  const { date, minutes } = localParts(utcMs, offset);
+  const { date, minutes } = zonedParts(utcMs, tripTimeZone(legs, me, utcMs));
   const start = trip?.start_date ?? minDate(legs.map((l) => l.start_date));
   const end = trip?.end_date ?? maxDate(legs.map((l) => l.end_date));
   if (start && date < start) return { kind: 'before', daysUntil: daysBetween(date, start), date };
   if (end && date > end) return { kind: 'after', date };
   return { kind: 'noDay', date, minutes };
+}
+
+/**
+ * Zona para mostrar la hora del viaje: el tramo mío que cae hoy; si no, mi primer tramo; si no, el primero.
+ * Sin tramos: la zona del celu.
+ */
+export function tripTimeZone(legs: Pick<PlanLeg, 'country' | 'lat' | 'lng' | 'start_date' | 'end_date' | 'member_ids'>[], me: string, utcMs: number): string {
+  const mine = legs.filter((l) => l.member_ids.includes(me));
+  const pool = mine.length ? mine : legs;
+  const now = pool.find((l) => {
+    const { date } = zonedParts(utcMs, legTimeZone(l));
+    return (!l.start_date || date >= l.start_date) && (!l.end_date || date <= l.end_date);
+  });
+  const leg = now ?? pool[0];
+  return leg ? legTimeZone(leg) : legTimeZone({});
 }
 
 function minDate(xs: (string | null)[]): string | null {
@@ -108,12 +125,15 @@ function maxDate(xs: (string | null)[]): string | null {
   return v[v.length - 1] ?? null;
 }
 
-/** El viaje "está en curso" (abrir en Ahora): status active, o hoy cae entre start_date y end_date. */
-export function isTripInProgress(trip: TripDates, utcMs: number, offsetMin: number | null = -180): boolean {
+/**
+ * El viaje "está en curso" (abrir en Ahora): status active, o hoy cae entre start_date y end_date.
+ * `zone`: zona IANA ("America/Montevideo") o desfase fijo en minutos (compat; null = el celu).
+ */
+export function isTripInProgress(trip: TripDates, utcMs: number, zone: string | number | null = -180): boolean {
   if (trip.status === 'finished') return false;
   if (trip.status === 'active') return true;
   if (!trip.start_date || !trip.end_date) return false;
-  const { date } = localParts(utcMs, offsetMin);
+  const { date } = typeof zone === 'string' ? zonedParts(utcMs, zone) : localParts(utcMs, zone);
   return date >= trip.start_date && date <= trip.end_date;
 }
 

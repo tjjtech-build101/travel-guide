@@ -7,7 +7,7 @@
 import { createContext, useContext } from 'react';
 import { Text as RNText, StyleSheet, type TextProps, type TextStyle } from 'react-native';
 
-import { font, fonts } from './theme';
+import { colors, font, fonts } from './theme';
 
 let fontsReady = false;
 /** Lo llama app/_layout.tsx cuando useFonts terminó bien. */
@@ -16,6 +16,12 @@ export function setFontsReady(ready: boolean) {
 }
 
 const InsideText = createContext(false);
+
+/**
+ * Modo exterior (Ahora v2): letra más grande y gris → tinta. Lo prende la pantalla con <TextBoost.Provider>.
+ * scale 1 = normal.
+ */
+export const TextBoost = createContext<{ scale: number; contrast: boolean }>({ scale: 1, contrast: false });
 
 function weightOf(w: TextStyle['fontWeight']): number {
   if (w === 'bold') return 700;
@@ -34,8 +40,18 @@ function familyFor(weight: TextStyle['fontWeight'], size: number | undefined): s
 
 export function Text({ style, ...props }: TextProps) {
   const inside = useContext(InsideText);
-  const flat = (StyleSheet.flatten(style) ?? {}) as TextStyle;
+  const boost = useContext(TextBoost);
+  let flat = (StyleSheet.flatten(style) ?? {}) as TextStyle;
   let next = style;
+  if (boost.scale !== 1 || boost.contrast) {
+    flat = {
+      ...flat,
+      ...(boost.scale !== 1 && flat.fontSize ? { fontSize: Math.round(flat.fontSize * boost.scale) } : {}),
+      ...(boost.scale !== 1 && flat.lineHeight ? { lineHeight: Math.round(flat.lineHeight * boost.scale) } : {}),
+      ...(boost.contrast && flat.color === colors.textMuted ? { color: colors.text } : {}),
+    };
+    next = flat;
+  }
   // Un Text anidado sin peso ni tamaño propio hereda la familia del de afuera.
   if (fontsReady && !flat.fontFamily && (!inside || flat.fontWeight != null || flat.fontSize != null)) {
     const { fontWeight, ...rest } = flat;
