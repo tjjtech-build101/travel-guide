@@ -1,5 +1,6 @@
-// Formulario de preferencias con chips (onboarding mínimo y pantalla Perfil): intereses con peso, ritmo,
-// horario, presupuesto, estilo, comida, cosas que no te gustan e idiomas.
+// Formulario de preferencias con chips (pantalla Perfil) y sus secciones sueltas (onboarding conversacional, una
+// pregunta del Scout por pantalla): intereses con peso, ritmo, horario, presupuesto, estilo, cosas que no te
+// gustan, comida e idiomas.
 import { INTEREST_TAGS } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
 import type { ReactNode } from 'react';
@@ -61,13 +62,43 @@ function Single<T extends string>({
   );
 }
 
-export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange: (d: ProfileDraft) => void }) {
-  const set = <K extends keyof ProfileDraft>(k: K, v: ProfileDraft[K]) => onChange({ ...draft, [k]: v });
+export type ProfileSectionId = 'interests' | 'pace' | 'chronotype' | 'budget' | 'style' | 'avoid' | 'dietary' | 'languages';
 
-  return (
-    <View style={styles.form}>
-      <Section title="¿Qué te gusta?" hint="Tocá varias veces: ★ más o menos · ★★ me gusta · ★★★ me encanta">
-        {INTEREST_TAGS.map((tag) => {
+/** Secciones en orden. `ask` es cómo lo pregunta el Scout en el onboarding conversacional. */
+export const PROFILE_SECTIONS: { id: ProfileSectionId; title: string; hint?: string; ask: string }[] = [
+  {
+    id: 'interests',
+    title: '¿Qué te gusta?',
+    hint: 'Tocá varias veces: ★ más o menos · ★★ me gusta · ★★★ me encanta',
+    ask: '¿Qué te gusta hacer cuando viajás? Tocá varias veces para darle más estrellas.',
+  },
+  { id: 'pace', title: 'Ritmo', ask: '¿A qué ritmo te gusta ir?' },
+  { id: 'chronotype', title: 'Horario', ask: '¿Sos de madrugar o de trasnochar?' },
+  { id: 'budget', title: 'Presupuesto', ask: '¿Qué presupuesto manejás, más o menos?' },
+  { id: 'style', title: '¿Cómo te gusta viajar?', ask: '¿Te gusta tener todo planeado o salir a ver qué pasa?' },
+  { id: 'avoid', title: 'Cosas que no te gustan', ask: '¿Hay algo que no te guste? Así lo esquivo.' },
+  { id: 'dietary', title: 'Comida', ask: '¿Algo con la comida que tenga que saber?' },
+  { id: 'languages', title: 'Idiomas que hablás', ask: '¿Qué idiomas hablás?' },
+];
+
+/** Una sección del formulario (con o sin su título). */
+export function ProfileSection({
+  id,
+  draft,
+  onChange,
+  showTitle = true,
+}: {
+  id: ProfileSectionId;
+  draft: ProfileDraft;
+  onChange: (d: ProfileDraft) => void;
+  showTitle?: boolean;
+}) {
+  const set = <K extends keyof ProfileDraft>(k: K, v: ProfileDraft[K]) => onChange({ ...draft, [k]: v });
+  const meta = PROFILE_SECTIONS.find((s) => s.id === id)!;
+  const chips = (() => {
+    switch (id) {
+      case 'interests':
+        return INTEREST_TAGS.map((tag) => {
           const stars = draft.interests[tag] ?? 0;
           return (
             <Chip
@@ -82,27 +113,17 @@ export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange
               style={styles.chip}
             />
           );
-        })}
-      </Section>
-
-      <Section title="Ritmo">
-        <Single options={PACE_OPTIONS} value={draft.pace} onChange={(v) => set('pace', v)} />
-      </Section>
-
-      <Section title="Horario">
-        <Single options={CHRONOTYPE_OPTIONS} value={draft.chronotype} onChange={(v) => set('chronotype', v)} />
-      </Section>
-
-      <Section title="Presupuesto">
-        <Single options={BUDGET_OPTIONS} value={draft.budget_level} onChange={(v) => set('budget_level', v)} />
-      </Section>
-
-      <Section title="¿Cómo te gusta viajar?">
-        <Single options={STYLE_OPTIONS} value={draft.travel_style} onChange={(v) => set('travel_style', v)} />
-      </Section>
-
-      <Section title="Cosas que no te gustan">
-        {AVOID_OPTIONS.map((a) => (
+        });
+      case 'pace':
+        return <Single options={PACE_OPTIONS} value={draft.pace} onChange={(v) => set('pace', v)} />;
+      case 'chronotype':
+        return <Single options={CHRONOTYPE_OPTIONS} value={draft.chronotype} onChange={(v) => set('chronotype', v)} />;
+      case 'budget':
+        return <Single options={BUDGET_OPTIONS} value={draft.budget_level} onChange={(v) => set('budget_level', v)} />;
+      case 'style':
+        return <Single options={STYLE_OPTIONS} value={draft.travel_style} onChange={(v) => set('travel_style', v)} />;
+      case 'avoid':
+        return AVOID_OPTIONS.map((a) => (
           <Chip
             key={a}
             label={a[0].toUpperCase() + a.slice(1)}
@@ -114,11 +135,9 @@ export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange
             }}
             style={styles.chip}
           />
-        ))}
-      </Section>
-
-      <Section title="Comida">
-        {DIETARY_OPTIONS.map((o) => (
+        ));
+      case 'dietary':
+        return DIETARY_OPTIONS.map((o) => (
           <Chip
             key={o.value}
             label={o.label}
@@ -129,11 +148,9 @@ export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange
             }}
             style={styles.chip}
           />
-        ))}
-      </Section>
-
-      <Section title="Idiomas que hablás">
-        {LANGUAGE_OPTIONS.map((o) => (
+        ));
+      case 'languages':
+        return LANGUAGE_OPTIONS.map((o) => (
           <Chip
             key={o.value}
             label={o.label}
@@ -144,8 +161,23 @@ export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange
             }}
             style={styles.chip}
           />
-        ))}
-      </Section>
+        ));
+    }
+  })();
+  if (!showTitle) return <View style={styles.chips}>{chips}</View>;
+  return (
+    <Section title={meta.title} hint={meta.hint}>
+      {chips}
+    </Section>
+  );
+}
+
+export function ProfileForm({ draft, onChange }: { draft: ProfileDraft; onChange: (d: ProfileDraft) => void }) {
+  return (
+    <View style={styles.form}>
+      {PROFILE_SECTIONS.map((s) => (
+        <ProfileSection key={s.id} id={s.id} draft={draft} onChange={onChange} />
+      ))}
     </View>
   );
 }

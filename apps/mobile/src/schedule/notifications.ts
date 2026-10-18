@@ -73,12 +73,57 @@ export function ensureNotificationPermission(): Promise<boolean> {
   return asking;
 }
 
-/** Notificación local inmediata. `url` = ruta de la app a abrir al tocarla. */
-export async function sendLocalNotification(n: { title: string; body: string; url: string; data?: Record<string, unknown> }): Promise<boolean> {
+// ───────────────────────── Botones en las notificaciones (categorías de iOS; sin rebuild nativo)
+
+/** Categorías del vigilante. Sin ':' ni '-' en los ids (lo pide expo-notifications). */
+export const NOTIF_CATEGORY = { leave: 'scheduleLeave', late: 'scheduleLate' } as const;
+export const NOTIF_ACTION = { callScout: 'callScout', snooze: 'snooze5', left: 'alreadyLeft' } as const;
+
+const SNOOZE_S = 5 * 60;
+
+let categoriesReady: Promise<void> | null = null;
+function registerCategories(): Promise<void> {
+  categoriesReady ??= Promise.all([
+    Notifications.setNotificationCategoryAsync(NOTIF_CATEGORY.leave, [
+      { identifier: NOTIF_ACTION.left, buttonTitle: 'Ya salí', options: { opensAppToForeground: false } },
+      { identifier: NOTIF_ACTION.snooze, buttonTitle: 'Avisame en 5 min', options: { opensAppToForeground: false } },
+      { identifier: NOTIF_ACTION.callScout, buttonTitle: 'Hablar con el Scout', options: { opensAppToForeground: true } },
+    ]),
+    Notifications.setNotificationCategoryAsync(NOTIF_CATEGORY.late, [
+      { identifier: NOTIF_ACTION.callScout, buttonTitle: 'Que el Scout lo reacomode', options: { opensAppToForeground: true } },
+      { identifier: NOTIF_ACTION.left, buttonTitle: 'Ya voy', options: { opensAppToForeground: false } },
+    ]),
+  ])
+    .then(() => undefined)
+    .catch((e) => {
+      categoriesReady = null;
+      console.warn('[schedule] categorías de notificación', e);
+    });
+  return categoriesReady;
+}
+
+/** Notificación local inmediata. `url` = ruta de la app a abrir al tocarla; `category` suma botones. */
+export async function sendLocalNotification(n: {
+  title: string;
+  body: string;
+  url: string;
+  data?: Record<string, unknown>;
+  category?: (typeof NOTIF_CATEGORY)[keyof typeof NOTIF_CATEGORY];
+  /** Atraviesa los modos de concentración (iOS, con el permiso de "Avisos urgentes"). */
+  timeSensitive?: boolean;
+}): Promise<boolean> {
   if (!(await ensureNotificationPermission())) return false;
   try {
+    if (n.category) await registerCategories();
     await Notifications.scheduleNotificationAsync({
-      content: { title: n.title, body: n.body, sound: true, data: { ...n.data, url: n.url } },
+      content: {
+        title: n.title,
+        body: n.body,
+        sound: true,
+        data: { ...n.data, url: n.url },
+        ...(n.category ? { categoryIdentifier: n.category } : {}),
+        ...(n.timeSensitive ? { interruptionLevel: 'timeSensitive' as const } : {}),
+      },
       trigger: null,
     });
     return true;
@@ -93,21 +138,57 @@ export async function resetNotificationAsk(): Promise<void> {
   await AsyncStorage.removeItem(ASKED_KEY).catch(() => {});
 }
 
-/** Tocar una notificación con data.url navega ahí (también si abrió la app desde cerrada). Montar una vez con sesión. */
+/** "Avisame en 5 min": la misma notificación (con sus botones) de nuevo en 5 minutos. */
+async function snooze(n: Notifications.Notification): Promise<void> {
+  const c = n.request.content;
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: c.title ?? '',
+        body: c.body ?? '',
+        sound: true,
+        data: c.data ?? {},
+        ...(c.categoryIdentifier ? { categoryIdentifier: c.categoryIdentifier } : {}),
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: SNOOZE_S },
+    });
+  } catch (e) {
+    console.warn('[schedule] no pude posponer el aviso', e);
+  }
+}
+
+/**
+ * Tocar una notificación con data.url navega ahí (también si abrió la app desde cerrada). Los botones: "Hablar con el
+ * Scout" abre la llamada (build101://scout), "Avisame en 5 min" la repite y "Ya salí" la descarta.
+ * Montar una vez con sesión.
+ */
 export function useNotificationTapRouter(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
-    const go = (n: Notifications.Notification) => {
-      const url = n.request.content.data?.url;
-      if (__DEV__) console.log('[schedule] tocaron la notificación →', url);
-      if (typeof url === 'string' && url.startsWith('/')) {
-        router.push(url as never);
-        Notifications.clearLastNotificationResponse();
+    void registerCategories();
+    const go = (r: Notifications.NotificationResponse) => {
+      const n = r.notification;
+      const data = n.request.content.data ?? {};
+      const url = data.url;
+      const tripId = typeof data.trip_id === 'string' ? data.trip_id : null;
+      if (__DEV__) console.log('[schedule] notificación →', r.actionIdentifier, url);
+      Notifications.clearLastNotificationResponse();
+      switch (r.actionIdentifier) {
+        case NOTIF_ACTION.callScout:
+          router.push({ pathname: '/scout', params: tripId ? { tripId } : {} });
+          return;
+        case NOTIF_ACTION.snooze:
+          void snooze(n);
+          return;
+        case NOTIF_ACTION.left:
+          // "Ya salí": solo descarta el aviso.
+          return;
       }
+      if (typeof url === 'string' && url.startsWith('/')) router.push(url as never);
     };
     const last = Notifications.getLastNotificationResponse();
-    if (last?.notification) go(last.notification);
-    const sub = Notifications.addNotificationResponseReceivedListener((r) => go(r.notification));
+    if (last?.notification) go(last);
+    const sub = Notifications.addNotificationResponseReceivedListener(go);
     return () => sub.remove();
   }, [enabled]);
 }

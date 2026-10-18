@@ -12,6 +12,7 @@ import { useLocationFix, useLocationProvider } from '../../location/LocationCont
 import { requestAlwaysLocation } from '../../tour/backgroundLocation';
 import { useTourStore, type LiveTour, type TourCard } from '../../tour/store';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { CameraIcon, FlagIcon, RouteIcon } from '../../ui/icons';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Skeleton } from '../../ui/States';
@@ -240,7 +241,11 @@ function TourCardView({ card, live }: { card: TourCard; live: LiveTour }) {
               <Skeleton height={18} width="60%" />
             </View>
           ) : card.error ? (
-            <Text style={styles.body}>No pude traer la historia de esta parada. {card.error}</Text>
+            <ErrorNotice
+              error={card.error}
+              doing="traer la historia de esta parada"
+              onRetry={() => void useTourStore.getState().showLayer(card.stopId, card.layer)}
+            />
           ) : card.text && !/^PENDIENTE/i.test(card.text) ? (
             <Text style={styles.narration}>{card.text}</Text>
           ) : (

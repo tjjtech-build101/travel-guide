@@ -6,6 +6,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
+import { ToolCallError } from '../../../../lib/api';
 import { useAddBlock, useMoveBlock } from '../../../plan/mutations';
 import { useMe } from '../../../plan/queries';
 import { showToast } from '../../../plan/store';
@@ -52,7 +53,8 @@ export function useGapSuggestions({ tripId, legId, dayId, here, minutes, date, l
         { trip_id: tripId, leg_id: legId!, lat: here!.lat, lng: here!.lng, minutes: mins, date, local_time: localTime.slice(0, 5), limit: 3 },
         { signal },
       );
-      if (!res.ok) throw new Error(res.error.message);
+      // Con código: si se muestra, lib/errors explica la causa real.
+      if (!res.ok) throw new ToolCallError(res.error.code, res.error.message, res.error.issues, res.error.provider, res.error.detail);
       return res.data.items ?? [];
     },
   });

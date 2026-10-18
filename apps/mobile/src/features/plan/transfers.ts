@@ -3,7 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { callTool } from '../../lib/api';
 import { planKeys } from './queries';
-import { showToast } from './store';
+import { showErrorToast, showToast } from './store';
 
 type Result = { days: number; added: number; estimated: number };
 
@@ -11,7 +11,7 @@ export async function calculateTransfers(qc: QueryClient, tripId: string, dayId?
   showToast({ text: 'Calculando cómo moverte entre lugares…', tone: 'info' }, 4000);
   const res = await callTool<'plan_transfers', Result>('plan_transfers', { trip_id: tripId, ...(dayId ? { day_id: dayId } : {}) });
   if (!res.ok) {
-    showToast({ text: `No pude calcular los traslados: ${res.error.message}`, tone: 'error' });
+    showErrorToast(res.error, 'calcular los traslados');
     return;
   }
   const { added, estimated } = res.data;

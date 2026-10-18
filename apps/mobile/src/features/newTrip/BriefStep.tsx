@@ -73,6 +73,21 @@ export function BriefStep() {
       step={2}
       title={round > 1 ? 'Afinemos un poco más' : 'Lo que entendí'}
       onBack={back}
+      scout={
+        loading === 'brief' && !brief
+          ? { text: 'Leyendo lo que me contaste…', mode: 'thinking' }
+          : error.brief && !brief
+            ? { text: 'Uy, se me trabó. Abajo te cuento qué pasó.', mode: 'error' }
+            : brief && !ready
+              ? { text: 'Me falta saber al menos a dónde van. Contame un poco más.', pose: 'think' }
+              : loading === 'round'
+                ? { text: 'Pensando qué más preguntarte…', mode: 'thinking' }
+                : loading === 'shapes'
+                  ? { text: 'Pensando formas de armarlo…', mode: 'thinking' }
+                  : brief?.questions.length
+                    ? { text: round > 1 ? 'Un par más y lo tengo.' : 'Esto es lo que entendí. Te dejo un par de preguntas: ya marqué lo que te sugiero.', pose: 'pointRight' }
+                    : { text: 'Esto es lo que entendí. Si está bien, seguimos.', pose: 'thumbs' }
+      }
       footer={
         brief && ready ? (
           <>
@@ -109,7 +124,7 @@ export function BriefStep() {
           <Skeleton height={110} />
         </View>
       ) : error.brief && !brief ? (
-        <ErrorBox message={`${error.brief} Igual te lo puedo armar con lo que me contaste.`} onRetry={() => void requestBrief(true)} fallback={fallback} />
+        <ErrorBox error={error.brief} doing="entender el viaje" onRetry={() => void requestBrief(true)} fallback={fallback} />
       ) : brief ? (
         <>
           <Understood brief={brief} />
@@ -139,13 +154,14 @@ export function BriefStep() {
           ) : null}
           {error.round ? (
             <ErrorBox
-              message={`${error.round} Podés seguir igual con lo que ya sé.`}
+              error={error.round}
+              doing="seguir con las preguntas"
               onRetry={() => void requestNextRound(true)}
               fallback={{ label: 'Ver opciones', onPress: () => void finishInterview(), loading: loading === 'shapes' }}
             />
           ) : null}
-          {error.shapes ? <InlineError message={error.shapes} /> : null}
-          {error.plan ? <InlineError message={`${error.plan} Probá de nuevo.`} /> : null}
+          {error.shapes ? <InlineError error={error.shapes} doing="pensar las formas del viaje" /> : null}
+          {error.plan ? <InlineError error={error.plan} doing="armar el viaje" /> : null}
         </>
       ) : (
         <ErrorBox message="No tengo nada para mostrarte todavía." onRetry={() => void requestBrief(true)} fallback={fallback} />

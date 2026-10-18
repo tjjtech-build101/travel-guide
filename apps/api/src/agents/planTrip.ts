@@ -25,7 +25,7 @@ import {
   type TransferMode,
 } from '@build101/shared';
 import type { Op } from '../blocks';
-import { conflict, dbError, forbidden, notFound } from '../errors';
+import { conflict, dbError, forbidden, jobErrorFields, notFound, orFallback, rethrowIfFatal } from '../errors';
 import { fmtDay, insertFeed } from '../feed';
 import { searchPlaces } from '../google/places';
 import { fetchForecast } from '../google/openMeteo';
@@ -419,10 +419,16 @@ type LegToFill = {
 
 type RunArgs = { jobId: string; tripId: string; input: ToolInput<'plan_trip'>; ctx: ToolCtx; createdTrip: boolean; firstLine: string };
 
+/** Texto del error para la persona (los de proveedor salen clasificados: "Claude se quedó sin créditos…"). */
 export function readable(err: unknown): string {
   if (err instanceof JobError) return err.message;
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.replace(/\s+/g, ' ').slice(0, 300);
+  return jobErrorFields(err).error;
+}
+
+/** Código y proveedor del error que hizo fallar el job (agent_jobs.error_code / error_provider). */
+export function errorCodeFields(err: unknown): { error_code: string; error_provider: string | null } {
+  const f = jobErrorFields(err);
+  return { error_code: f.error_code, error_provider: f.error_provider };
 }
 
 export async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
@@ -486,6 +492,8 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
   );
 
   let fatal: string | null = null;
+  let fatalErr: unknown = null;
+  const failedReasons: unknown[] = [];
   try {
     // ── Contexto: miembros, perfiles, tramos existentes, lugares guardados
     const [{ data: membersRaw, error: e1 }, { data: legsRaw, error: e2 }] = await Promise.all([
@@ -724,7 +732,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       let options = (prev ?? []) as LegOptionRow[];
       const dates = leg.days.map((d) => d.date);
       // Eventos del tramo en paralelo con el catálogo (no dependen de él; legEvents nunca tira y tiene su tope).
-      const eventsP: Promise<CatalogItem[]> = options.length ? Promise.resolve([]) : m.legEvents(city, dates, catalogDeps).catch(() => []);
+      const eventsP: Promise<CatalogItem[]> = options.length ? Promise.resolve([]) : m.legEvents(city, dates, catalogDeps).catch(orFallback([]));
       // El catálogo avisa su propio progreso ("Investigando…", "Ubicando…"): no lo repetimos acá.
       const cat = await withTimeout(`investigando ${leg.city}`, (signal) => m.getCatalog(admin, city, catalogDeps, { signal, onProgress: sayOnce }));
       addUsage(usage, cat.usage);
@@ -866,6 +874,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
           optionsCount += menu.options.length;
           if (menu.options.length) menuLegs.add(leg.id);
         } catch (err) {
+          rethrowIfFatal(err); // sin créditos / key inválida: el relleno por LLM fallaría igual
           console.warn(`[plan_trip/${jobId}] ${leg.city}: sin catálogo (${readable(err)}) → relleno por LLM`);
         }
         if (menu && mode === 'menu' && menu.options.length) return menu.options.length;
@@ -883,6 +892,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
             if (n > 0) return n;
             console.warn(`[plan_trip/${jobId}] ${leg.city}: el armado no escribió bloques → relleno por LLM`);
           } catch (err) {
+            rethrowIfFatal(err);
             console.warn(`[plan_trip/${jobId}] ${leg.city}: falló el armado (${readable(err)}) → relleno por LLM`);
           }
         }
@@ -896,11 +906,13 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         const leg = legsToFill[i];
         console.error(`[plan_trip/${jobId}] ${leg.city}:`, r.reason);
         failedLegs.push({ leg_id: leg.id, city: leg.city, error: readable(r.reason) });
+        failedReasons.push(r.reason);
       }
     });
   } catch (err) {
     console.error(`[plan_trip/${jobId}]`, err);
     fatal = readable(err);
+    fatalErr = err;
   } finally {
     progress.stopHeartbeat();
   }
@@ -971,17 +983,17 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
   console.log(
     `[plan_trip/${jobId}] fin en ${secs}s · ${createdBlocks.length} bloques · usage ${JSON.stringify(usage)} · ~USD ${estimateCostUsd(usage)}`,
   );
-  const error = fatal ?? (failedLegs.length ? failedLegs.map((f) => f.error).join(' ') : null);
+  const error = fatal ?? (failedLegs.length ? [...new Set(failedLegs.map((f) => f.error))].join(' ') : null);
   if (error) {
     await progress.push(fatal ? `Se trancó: ${fatal}` : `Quedó a medias: ${failedLegs.map((f) => f.city).join(', ')}`);
-    await progress.set({ status: 'failed', error, result });
+    await progress.set({ status: 'failed', error, ...errorCodeFields(fatalErr ?? failedReasons[0]), result });
   } else {
     await progress.push(
       menuReady
         ? `¡Listo el menú! ${legsWord}, ${daysCount} días, ${optionsCount} opciones para elegir`
         : `¡Listo! ${legsWord}, ${daysCount} días, ${createdBlocks.length} bloques`,
     );
-    await progress.set({ status: 'done', error: null, result });
+    await progress.set({ status: 'done', error: null, error_code: null, error_provider: null, result });
   }
   await progress.flush();
 }

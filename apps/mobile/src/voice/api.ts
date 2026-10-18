@@ -1,13 +1,16 @@
 // Endpoints de voz de la API (PRD 05): token temporal y cierre con resumen. La key de OpenAI nunca llega acá.
-import type { TranscriptLine, VoiceSessionInput, VoiceSessionStart } from '@build101/shared';
+import { isProvider, type Provider, type TranscriptLine, type VoiceSessionInput, type VoiceSessionStart } from '@build101/shared';
 
 import { env } from '../lib/env';
 import { supabase } from '../lib/supabase';
 
+/** Mismo formato que ToolCallError ({code, message, provider?, detail?}): lib/errors lo explica tal cual. */
 export class VoiceApiError extends Error {
   constructor(
     public code: string,
     message: string,
+    public provider?: Provider,
+    public detail?: string,
   ) {
     super(message);
     this.name = 'VoiceApiError';
@@ -28,14 +31,20 @@ async function post<T>(path: string, body: unknown, timeoutMs = 10_000): Promise
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
-    throw new VoiceApiError('network_error', e instanceof Error ? e.message : String(e));
+    const raw = e instanceof Error ? e.message : String(e);
+    // AbortSignal.timeout → TimeoutError: no es falta de red, es que el servidor tardó.
+    const name = e instanceof Error ? e.name : '';
+    throw new VoiceApiError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network_error', raw, undefined, raw);
   }
   const json = (await res.json().catch(() => null)) as
     | { ok: true; data: T }
-    | { ok: false; error: { code: string; message: string } }
+    | { ok: false; error: { code: string; message: string; provider?: string; detail?: string } }
     | null;
-  if (!json) throw new VoiceApiError(`http_${res.status}`, 'Respuesta inválida de la API');
-  if (!json.ok) throw new VoiceApiError(json.error.code, json.error.message);
+  if (!json) throw new VoiceApiError(res.status === 401 ? 'unauthenticated' : `http_${res.status}`, '', undefined, `HTTP ${res.status} sin JSON`);
+  if (!json.ok) {
+    const { code, message, provider, detail } = json.error;
+    throw new VoiceApiError(code, message, isProvider(provider) ? provider : undefined, detail);
+  }
   return json.data;
 }
 

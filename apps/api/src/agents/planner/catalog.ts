@@ -45,6 +45,7 @@ import type {
   PlannerMember,
   RawCatalogItem,
 } from './types';
+import { orFallback, rethrowIfFatal } from '../../errors';
 
 export const CATALOG_MAX_AGE_DAYS = 30;
 /** Menos que esto en caché = corrida que salió mal: se regenera. */
@@ -360,7 +361,7 @@ async function resolveInPlaces(
     const dayTrip = r.category === 'day_trip';
     const [place] = await deps
       .searchPlaces({ query: r.query, near: center ?? undefined, radius_m: dayTrip ? DAY_TRIP_RADIUS_M : CITY_RADIUS_M, max_results: 1 })
-      .catch(() => [] as PlaceSummary[]);
+      .catch(orFallback([] as PlaceSummary[]));
     const hasPoint = place?.google_place_id && place.lat != null && place.lng != null;
     if (!hasPoint) return dayTrip ? { raw: r, place: null } : null; // no existe en Places: afuera (una escapada puede quedar sin punto)
     if (center) {
@@ -394,7 +395,7 @@ async function resolveInPlaces(
   const hours = new Map<string, Awaited<ReturnType<CatalogDeps['placeHours']>>>();
   await mapUntil(wantHours, RESOLVE_CONCURRENCY, stop, async (e) => {
     const id = e.place!.google_place_id;
-    const h = await deps.placeHours(id).catch(() => null);
+    const h = await deps.placeHours(id).catch(orFallback(null));
     if (!stop.aborted) hours.set(id, h);
   });
 
@@ -403,7 +404,7 @@ async function resolveInPlaces(
   const points = await mapUntil(zones, RESOLVE_CONCURRENCY, stop, async (z) => {
     const [p] = await deps
       .searchPlaces({ query: `${z.zone}, ${city.city}`, near: center ?? undefined, radius_m: CITY_RADIUS_M, max_results: 1 })
-      .catch(() => [] as PlaceSummary[]);
+      .catch(orFallback([] as PlaceSummary[]));
     return p ?? null;
   });
   const lodging_zones = zones.map((z, i) => ({ zone: z.zone, why: z.why, lat: points[i]?.lat ?? null, lng: points[i]?.lng ?? null }));
@@ -501,7 +502,7 @@ async function buildCatalog(admin: Db, key: string, city: CityRef, deps: Catalog
     let center: Center = city.lat != null && city.lng != null ? { lat: city.lat, lng: city.lng } : null;
     if (!center) {
       const [c] = (await mapUntil([0], 1, places.signal, () =>
-        deps.searchPlaces({ query: [city.city, city.country].filter(Boolean).join(', '), max_results: 1 }).catch(() => [] as PlaceSummary[]),
+        deps.searchPlaces({ query: [city.city, city.country].filter(Boolean).join(', '), max_results: 1 }).catch(orFallback([] as PlaceSummary[])),
       ))[0] ?? [];
       if (c?.lat != null && c.lng != null) center = { lat: c.lat, lng: c.lng };
     }
@@ -654,7 +655,7 @@ export async function legEvents(
     return await mapLimit([...byTitle.values()], RESOLVE_CONCURRENCY, async ({ e, dates: ds }) => {
       const [place] = await deps
         .searchPlaces({ query: `${e.venue}, ${city.city}`, near: center, radius_m: CITY_RADIUS_M, max_results: 1 })
-        .catch(() => [] as PlaceSummary[]);
+        .catch(orFallback([] as PlaceSummary[]));
       let id = `evento-${slugify(e.title)}`;
       for (let n = 2; used.has(id); n++) id = `evento-${slugify(e.title)}-${n}`;
       used.add(id);
@@ -688,6 +689,7 @@ export async function legEvents(
       };
     });
   } catch (err) {
+    rethrowIfFatal(err);
     console.warn('[catalog] eventos del tramo fallaron:', (err as Error).message);
     return [];
   }

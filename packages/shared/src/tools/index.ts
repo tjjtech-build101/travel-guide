@@ -1,5 +1,6 @@
 // Registro único de herramientas: la API, Claude (Tool Runner) y OpenAI Realtime usan estas definiciones.
 import { z } from 'zod';
+import type { Provider } from '../errors';
 import {
   AddBlockInput,
   AddIdeaInput,
@@ -234,7 +235,11 @@ export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestion
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 
-export type ToolError = { code: string; message: string; issues?: unknown };
+/**
+ * `code`: ver packages/shared/src/errors.ts. `provider`: quién falló (solo en los provider_*).
+ * `detail`: texto técnico crudo para depurar (la app lo muestra solo en desarrollo).
+ */
+export type ToolError = { code: string; message: string; issues?: unknown; provider?: Provider; detail?: string };
 export type ToolResponse<T = unknown> =
   | { ok: true; data: T; undo_token?: string; feed_id?: string }
   | { ok: false; error: ToolError };

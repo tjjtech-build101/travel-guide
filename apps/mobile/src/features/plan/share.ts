@@ -26,18 +26,23 @@ export async function exportIcs(name: string, blocks: PlanBlock[], days: Pick<Da
     if (file.exists) file.delete();
     file.create();
     await file.write(text);
-    if (!(await Sharing.isAvailableAsync())) throw new Error('sharing no disponible');
+    if (!(await Sharing.isAvailableAsync())) {
+      showToast({ tone: 'error', title: 'No puedo compartir archivos acá', text: 'Este dispositivo no tiene cómo compartir el calendario.' }, 6000);
+      return;
+    }
     await Sharing.shareAsync(file.uri, { mimeType: 'text/calendar', UTI: 'public.calendar-event', dialogTitle: name });
   } catch (e) {
     if (__DEV__) console.warn('[plan] exportIcs', e);
-    showToast({ text: 'No se pudo generar el archivo', tone: 'error' });
+    // Falla local (disco o la hoja de compartir), no del servidor.
+    showToast({ tone: 'error', title: 'No pude armar el calendario', text: 'No se pudo guardar el archivo .ics en el celu. Probá de nuevo.' }, 6000);
   }
 }
 
 export async function shareDay(leg: Pick<LegRow, 'city'>, day: Pick<DayRow, 'date'>, blocks: PlanBlock[]): Promise<void> {
   try {
     await Share.share({ message: buildDayShareText(leg, day, blocks) });
-  } catch {
-    showToast({ text: 'No se pudo compartir el día', tone: 'error' });
+  } catch (e) {
+    if (__DEV__) console.warn('[plan] shareDay', e);
+    showToast({ tone: 'error', title: 'No pude compartir el día', text: 'No se abrió la hoja de compartir del celu. Probá de nuevo.' }, 6000);
   }
 }

@@ -8,8 +8,11 @@ import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
+import type { ScoutMode, ScoutPose } from '../../scout/ScoutRig';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { BackIcon } from '../../ui/icons';
+import { ScoutSays } from '../../ui/ScoutSays';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { daysLabel, MAX_DAYS, MIN_DAYS } from './calendarModel';
@@ -21,17 +24,22 @@ export function isoIn(days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Marco de cada fase: paso N de 4, atrás, contenido con scroll y pie fijo con las acciones. */
+/** Lo que dice el Scout arriba de una fase (cambia con el estado: pensando mientras carga, etc.). */
+export type StepScout = { text: string; pose?: ScoutPose; mode?: ScoutMode };
+
+/** Marco de cada fase: paso N de 4, atrás, el Scout que conduce (opcional), contenido con scroll y pie fijo con las acciones. */
 export function StepShell({
   step,
   title,
   onBack,
+  scout,
   children,
   footer,
 }: {
   step: number;
   title: string;
   onBack?: () => void;
+  scout?: StepScout;
   children: ReactNode;
   footer?: ReactNode;
 }) {
@@ -54,6 +62,7 @@ export function StepShell({
               </Text>
             </View>
           </View>
+          {scout ? <ScoutSays text={scout.text} pose={scout.pose} mode={scout.mode} size={78} /> : null}
           {children}
         </ScrollView>
         {footer ? <View style={styles.footer}>{footer}</View> : null}
@@ -168,16 +177,24 @@ export function TextButton({
 
 /** Error de una fase: el motivo, Reintentar y siempre una salida ("Armalo igual"). */
 export function ErrorBox({
+  error,
+  doing,
   message,
   onRetry,
   retrying,
   fallback,
 }: {
-  message: string;
+  error?: unknown;
+  /** Qué se estaba haciendo ("entender el viaje"), para el texto. */
+  doing?: string;
+  message?: string;
   onRetry: () => void;
   retrying?: boolean;
   fallback?: { label: string; onPress: () => void; loading?: boolean };
 }) {
+  if (error != null) {
+    return <ErrorNotice error={error} doing={doing} onRetry={onRetry} retrying={retrying} secondary={fallback} />;
+  }
   return (
     <View style={styles.error} accessibilityRole="alert">
       <Text style={styles.errorText}>{message}</Text>
@@ -191,7 +208,9 @@ export function ErrorBox({
   );
 }
 
-export function InlineError({ message }: { message: string }) {
+/** Error chico debajo del contenido. Con `error`: la causa real (sin botones, salvo "Volver a entrar"). */
+export function InlineError({ message, error, doing }: { message?: string; error?: unknown; doing?: string }) {
+  if (error != null) return <ErrorNotice error={error} doing={doing} />;
   return (
     <Text style={styles.inlineError} accessibilityRole="alert">
       {message}

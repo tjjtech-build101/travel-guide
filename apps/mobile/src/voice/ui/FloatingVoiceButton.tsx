@@ -6,12 +6,23 @@ import { Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { create } from 'zustand';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GuideTarget } from '../../features/guide/targets';
 import { useLocationProvider } from '../../location/LocationContext';
 import { useToast, Toast } from '../../ui/Toast';
 import { useVoiceStore } from '../store';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
+
+/**
+ * Pantallas que ya muestran su propio Scout (p. ej. el Mapa con un lugar elegido o el ▶ "Ver el día")
+ * esconden el flotante: un solo Scout a la vista.
+ */
+export const useFloatingScout = create<{ hidden: boolean; setHidden: (hidden: boolean) => void }>((set) => ({
+  hidden: false,
+  setHidden: (hidden) => set({ hidden }),
+}));
 
 const SIZE = 64;
 const EDGE = 16;
@@ -27,6 +38,7 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
   const insets = useSafeAreaInsets();
   const { toast, show } = useToast(2500);
   const [dragging, setDragging] = useState(false);
+  const hidden = useFloatingScout((s) => s.hidden);
 
   const x = useSharedValue(0); // 0 = derecha; negativo = hacia la izquierda
   const y = useSharedValue(0);
@@ -53,6 +65,7 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
 
   // En llamada manda la barra de arriba.
   if (status === 'live' || status === 'reconnecting' || status === 'ending') return null;
+  if (hidden) return <Toast toast={toast} />;
 
   const onPress = () => {
     if (dragging) return;
@@ -65,15 +78,17 @@ export function FloatingVoiceButton({ tripId }: { tripId: string }) {
     <>
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.wrap, { bottom: insets.bottom + TAB_BAR + EDGE, right: EDGE }, style]}>
-          <Pressable
-            onPress={onPress}
-            accessibilityRole="button"
-            accessibilityLabel={`Llamar a ${SCOUT.name}`}
-            style={[styles.btn, offline && styles.offline]}
-            hitSlop={6}
-          >
-            <ScoutAvatar size={SIZE - 12} state={status === 'connecting' ? 'connecting' : 'idle'} />
-          </Pressable>
+          <GuideTarget id="voice.button">
+            <Pressable
+              onPress={onPress}
+              accessibilityRole="button"
+              accessibilityLabel={`Llamar a ${SCOUT.name}`}
+              style={[styles.btn, offline && styles.offline]}
+              hitSlop={6}
+            >
+              <ScoutAvatar size={SIZE - 12} state={status === 'connecting' ? 'connecting' : 'idle'} />
+            </Pressable>
+          </GuideTarget>
         </Animated.View>
       </GestureDetector>
       <Toast toast={toast} />

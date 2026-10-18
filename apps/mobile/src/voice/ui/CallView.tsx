@@ -1,20 +1,21 @@
-// Vista de llamada expandida (PRD 05): avatar que late, subtítulos grandes, transcript, tarjetas y controles.
+// Vista de llamada expandida (PRD 05) como videollamada: el Scout vivo en ScoutStage (con subtítulos encima),\n// tarjetas de acción, controles y transcript completo.
 import { VOICE_LANGS } from '@build101/shared';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { describeError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
 import { CameraIcon, CaptionsIcon, HandIcon, HangUpIcon, MicIcon, SpeakerIcon } from '../../ui/icons';
 import { camera, useCameraStore } from '../camera/cameraStore';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
-import { useVoiceStore, type Line } from '../store';
-import { friendlyToolName } from '../toolBridge';
+import { useVoiceStore, type CallError, type Line } from '../store';
 import { ActionCards } from './ActionCards';
 import { SourcesButton, SourcesSheet, SourcesToast } from './Sources';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
-import { scoutStateOf } from '../useScout';
 import { mmss, SCOUT_COLOR, useElapsed } from './CallBar';
+import { ScoutStage } from './ScoutStage';
 
 const BG = '#14231A';
 
@@ -28,24 +29,39 @@ export function CallView() {
   const visible = !cameraOpen && (expanded || status === 'connecting' || status === 'error');
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useVoiceStore.getState().setExpanded(false)}>
-      <SafeAreaView style={styles.root}>{status === 'error' ? <ErrorView code={error?.code} message={error?.message} /> : <Live />}</SafeAreaView>
+      <SafeAreaView style={styles.root}>{status === 'error' ? <ErrorView error={error} /> : <Live />}</SafeAreaView>
     </Modal>
   );
 }
 
-function ErrorView({ code, message }: { code?: string; message?: string }) {
+// La causa real (sin micrófono, sin créditos de OpenAI, sin conexión, sesión vencida…) la explica lib/errors.
+function ErrorView({ error }: { error: CallError | null }) {
   const s = useVoiceStore.getState();
-  const denied = code === 'mic_denied';
+  const v = describeError(error, { doing: error?.reconnect ? 'reconectar la llamada' : 'conectar la llamada' });
   return (
     <View style={styles.center}>
       <ScoutAvatar size={120} state="error" />
-      <Text style={styles.title}>{denied ? 'Necesitamos el micrófono' : 'No pudimos conectar'}</Text>
-      <Text style={styles.sub}>{denied ? 'Activá el micrófono en Ajustes para hablar con el scout.' : message}</Text>
+      {v.tag ? <Text style={styles.errTag}>{v.tag}</Text> : null}
+      <Text style={styles.title}>{v.title}</Text>
+      <Text style={styles.sub}>{[v.body, v.hint].filter(Boolean).join(' ')}</Text>
+      {__DEV__ && v.detail ? (
+        <Text style={styles.errDetail} numberOfLines={4} selectable>
+          {v.code} · {v.detail}
+        </Text>
+      ) : null}
       <View style={styles.errButtons}>
-        {denied ? (
+        {v.action === 'settings' ? (
           <Button label="Abrir Ajustes" onPress={() => Linking.openSettings()} />
+        ) : v.action === 'login' ? (
+          <Button
+            label="Volver a entrar"
+            onPress={() => {
+              s.dismissSummary();
+              router.replace('/login');
+            }}
+          />
         ) : (
-          <Button label={code === 'reconnect_failed' ? 'Llamar' : 'Reintentar'} onPress={() => void s.startCall(s.args ?? {})} />
+          <Button label={error?.reconnect ? 'Llamar' : 'Reintentar'} onPress={() => void s.startCall(s.args ?? {})} />
         )}
         <Button label="Cerrar" variant="ghost" onPress={() => s.dismissSummary()} />
       </View>
@@ -58,13 +74,11 @@ function Live() {
   const name = useVoiceStore((s) => s.scoutName);
   const speaking = useVoiceStore((s) => s.speaking);
   const startedAt = useVoiceStore((s) => s.startedAt);
-  const tools = useVoiceStore((s) => s.toolsRunning);
-  const captions = useVoiceStore((s) => s.captions);
   const lines = useVoiceStore((s) => s.lines);
   const notice = useVoiceStore((s) => s.notice);
   const sourcesOpen = useVoiceStore((s) => s.sourcesOpen);
   const ptt = useVoiceStore((s) => s.turnTaking);
-  const avatarState = useVoiceStore(scoutStateOf);
+  const captions = useVoiceStore((s) => s.captions);
   const [showAll, setShowAll] = useState(false);
   const connecting = status === 'connecting';
   const elapsed = useElapsed(startedAt);
@@ -75,66 +89,29 @@ function Live() {
         <Pressable onPress={() => useVoiceStore.getState().setExpanded(false)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Minimizar">
           <Text style={styles.minimize}>⌄</Text>
         </Pressable>
+        <Text style={styles.name} numberOfLines={1}>
+          {name || 'Scout'}
+        </Text>
         <Text style={styles.timer}>{connecting || !startedAt ? '' : mmss(elapsed)}</Text>
       </View>
 
-      <View style={styles.hero}>
-        <ScoutAvatar size={132} state={avatarState} />
-        <Text style={styles.title}>{connecting ? `Llamando a ${name || 'Scout'}…` : name}</Text>
-        <Text style={styles.sub}>
-          {status === 'reconnecting'
-            ? 'Se cortó. Reconectando…'
-            : tools.length
-              ? `${friendlyToolName(tools[0].name)}…`
-              : speaking === 'assistant'
-                ? 'Hablando'
-                : speaking === 'user'
-                  ? 'Te escucha'
-                  : connecting
-                    ? ''
-                    : 'Decí lo que necesites'}
-        </Text>
-      </View>
+      <ScoutStage captions={captions} onOpenTranscript={() => setShowAll(true)}>
+        {ptt && speaking === 'assistant' ? (
+          <Pressable onPress={() => useVoiceStore.getState().interrupt()} style={styles.interrupt} accessibilityRole="button">
+            <Text style={styles.interruptText}>Interrumpir</Text>
+          </Pressable>
+        ) : null}
+      </ScoutStage>
 
-      {ptt && speaking === 'assistant' ? (
-        <Pressable onPress={() => useVoiceStore.getState().interrupt()} style={styles.interrupt} accessibilityRole="button">
-          <Text style={styles.interruptText}>Interrumpir</Text>
-        </Pressable>
-      ) : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-
       <ActionCards style={styles.cards} />
       <SourcesToast style={styles.cards} />
       <SourcesButton />
-
-      {captions ? (
-        <Pressable style={styles.captions} onPress={() => setShowAll(true)} accessibilityRole="button" accessibilityHint="Ver todo el transcript">
-          <Captions lines={lines} />
-          {lines.length > 2 ? <Text style={styles.more}>Ver todo</Text> : null}
-        </Pressable>
-      ) : (
-        <View style={styles.flex} />
-      )}
 
       <Controls />
       <TranscriptSheet visible={showAll} lines={lines} onClose={() => setShowAll(false)} />
       {/* Dentro del Modal de la llamada (iOS no presenta dos Modal hermanos a la vez). */}
       <SourcesSheet visible={sourcesOpen} />
-    </View>
-  );
-}
-
-function Captions({ lines }: { lines: Line[] }) {
-  const last = lines.filter((l) => l.text.trim()).slice(-2);
-  if (!last.length) return <Text style={styles.captionMuted}>Los subtítulos aparecen acá</Text>;
-  return (
-    <View style={{ gap: space.sm }}>
-      {last.map((l) => (
-        <Text key={l.id} style={[styles.caption, l.role === 'user' && styles.captionUser]} numberOfLines={3}>
-          {l.role === 'user' ? 'Vos: ' : ''}
-          {l.text}
-        </Text>
-      ))}
     </View>
   );
 }
@@ -254,23 +231,20 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl, gap: space.md },
-  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.lg, height: MIN_TOUCH },
+  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.lg, height: MIN_TOUCH, gap: space.md },
+  name: { flex: 1, color: '#fff', fontSize: font.h3, fontWeight: '800', textAlign: 'center' },
   minimize: { color: '#fff', fontSize: 34, lineHeight: 36, width: MIN_TOUCH },
-  timer: { color: 'rgba(255,255,255,0.8)', fontSize: font.body, fontVariant: ['tabular-nums'] },
-  hero: { alignItems: 'center', gap: space.sm, marginTop: space.lg },
+  timer: { color: 'rgba(255,255,255,0.8)', fontSize: font.body, fontVariant: ['tabular-nums'], width: MIN_TOUCH, textAlign: 'right' },
   title: { color: '#fff', fontSize: font.h2, fontWeight: '800', marginTop: space.md, textAlign: 'center' },
   sub: { color: 'rgba(255,255,255,0.75)', fontSize: font.body, minHeight: 22, textAlign: 'center' },
   errButtons: { alignSelf: 'stretch', gap: space.sm, marginTop: space.lg },
-  cards: { marginHorizontal: space.lg, marginTop: space.lg },
-  interrupt: { alignSelf: 'center', marginTop: space.md, paddingHorizontal: space.xl, minHeight: MIN_TOUCH, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: '#fff' },
+  errTag: { color: 'rgba(255,255,255,0.6)', fontSize: font.small, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: space.md },
+  errDetail: { color: 'rgba(255,255,255,0.45)', fontSize: 11, textAlign: 'center' },
+  cards: { marginHorizontal: space.lg, marginTop: space.md },
+  interrupt: { alignSelf: 'center', paddingHorizontal: space.xl, minHeight: MIN_TOUCH, justifyContent: 'center', borderRadius: radius.pill, backgroundColor: '#fff' },
   interruptText: { color: BG, fontWeight: '800', fontSize: font.body },
   notice: { color: '#FFD98A', fontSize: font.small, textAlign: 'center', marginTop: space.md, marginHorizontal: space.xl },
-  captions: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: space.xl, paddingBottom: space.lg },
-  caption: { color: '#fff', fontSize: 22, lineHeight: 29, fontWeight: '600' },
-  captionUser: { color: '#9CC3FF' },
-  captionMuted: { color: 'rgba(255,255,255,0.4)', fontSize: font.body, textAlign: 'center' },
-  more: { color: '#9CC3FF', fontSize: font.small, fontWeight: '700', marginTop: space.sm },
-  controls: { paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.lg, alignItems: 'center' },
+  controls: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.md, gap: space.md, alignItems: 'center' },
   langs: { flexDirection: 'row', gap: space.sm },
   lang: { paddingHorizontal: space.md, minHeight: 36, justifyContent: 'center', borderRadius: radius.pill, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' },
   langOn: { backgroundColor: '#fff' },

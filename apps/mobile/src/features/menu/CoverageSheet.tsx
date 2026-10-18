@@ -7,7 +7,7 @@ import { Alert, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { SheetBody, SheetHeader, SheetMessage, SheetRoot } from '../plan/components/Sheet';
-import { toolErrorMessage, useAddBlock } from '../plan/mutations';
+import { toolErrorView, useAddBlock } from '../plan/mutations';
 import { coverageTotals, ideaFromItem } from './model';
 import { useLegOptions } from './queries';
 
@@ -58,7 +58,11 @@ export function CoverageSheet({ visible, onClose, tripId, coverage }: Props) {
                                 { kind: 'idea', input: ideaFromItem(tripId, c.leg_id, m.name, opt?.item ?? null) },
                                 {
                                   onSuccess: () => setAdded((s) => ({ ...s, [key]: true })),
-                                  onError: (e) => Alert.alert('No se pudo sumar a ideas', toolErrorMessage(e)),
+                                  onError: (e) => {
+                                    // La causa real (sin conexión, sin permiso…), no un genérico.
+                                    const v = toolErrorView(e, 'sumarlo a ideas');
+                                    Alert.alert(v.title, [v.body, v.hint].filter(Boolean).join('\n\n'));
+                                  },
                                 },
                               )
                             }

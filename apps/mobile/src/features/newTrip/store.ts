@@ -6,6 +6,7 @@ import type { PlanTripStart, TripBriefResult, TripShape } from '@build101/shared
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
+import type { AppError } from '../../lib/errors';
 import { addDays, clampDays, daysInclusive } from './calendarModel';
 import type { AnswerValue, Answers, PlanMode } from './model';
 
@@ -40,7 +41,8 @@ type NewTripState = {
   jobMode: PlanMode | null;
   // No persistido:
   loading: Loadable | null;
-  error: Partial<Record<Loadable, string>>;
+  /** Por fase, la causa (lib/errors la explica en pantalla). */
+  error: Partial<Record<Loadable, AppError>>;
 
   setPhase: (phase: Phase) => void;
   back: () => void;
@@ -58,7 +60,7 @@ type NewTripState = {
   setShapes: (shapes: TripShape[], key: string) => void;
   chooseShape: (id: string | null) => void;
   setLoading: (what: Loadable | null) => void;
-  setError: (what: Loadable, message: string | null) => void;
+  setError: (what: Loadable, error: AppError | null) => void;
   setJob: (job: PlanTripStart, mode?: PlanMode | null) => void;
   reset: () => void;
 };
@@ -123,10 +125,10 @@ export const useNewTripStore = create<NewTripState>()(
         set((s) => ({ shapes, shapesKey, chosenShapeId: shapes.some((v) => v.id === s.chosenShapeId) ? s.chosenShapeId : null })),
       chooseShape: (chosenShapeId) => set({ chosenShapeId }),
       setLoading: (loading) => set({ loading }),
-      setError: (what, message) =>
+      setError: (what, e) =>
         set((s) => {
           const error = { ...s.error };
-          if (message) error[what] = message;
+          if (e) error[what] = e;
           else delete error[what];
           return { error };
         }),

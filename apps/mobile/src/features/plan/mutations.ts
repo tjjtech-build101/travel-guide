@@ -4,23 +4,50 @@ import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-q
 import * as Haptics from 'expo-haptics';
 
 import { callToolOrThrow, ToolCallError } from '../../lib/api';
+import { describeError, errorLine, type ErrorView } from '../../lib/errors';
 import { planKeys } from './queries';
 import type { PlanBlock } from './selectors';
-import { showToast } from './store';
+import { showErrorToast, showToast } from './store';
 
 type ApplyResult = { mode: 'applied' | 'proposed'; block?: PlanBlock; proposal_id?: string };
 
-/** Mensaje legible de un error de herramienta. */
-export function toolErrorMessage(e: unknown, fallback = 'No se pudo guardar. Probá de nuevo.'): string {
-  if (e instanceof ToolCallError) {
-    if (e.code === 'network_error') return 'Sin conexión: no se pudo guardar.';
-    // PRD 11 (decide_proposal): proposal_decided / apply_failed / booked traen un mensaje para mostrar tal cual.
-    const readable = ['forbidden', 'invalid_input', 'not_found', 'already_undone', 'proposal_decided', 'apply_failed', 'booked'];
-    if (readable.includes(e.code)) {
-      return e.message;
-    }
-  }
-  return fallback;
+// PRD 11 (decide_proposal) y conflictos: el servidor manda un texto en español para mostrar tal cual.
+const SERVER_TEXT_CODES = new Set([
+  'forbidden',
+  'invalid_input',
+  'not_found',
+  'already_undone',
+  'proposal_decided',
+  'apply_failed',
+  'booked',
+  'trip_not_empty',
+  'job_running',
+]);
+
+const serverText = (e: unknown): string | null =>
+  e instanceof ToolCallError && SERVER_TEXT_CODES.has(e.code) && e.message.trim() ? e.message : null;
+
+/** Error descripto (lib/errors), pero con el texto del servidor tal cual en los conflictos legibles. */
+export function toolErrorView(e: unknown, doing: string): ErrorView {
+  const v = describeError(e, { doing });
+  const text = serverText(e);
+  return text ? { ...v, title: `No pude ${doing}`, body: text, hint: undefined } : v;
+}
+
+/**
+ * Mensaje legible de un error de herramienta (una línea, para formularios).
+ * Conflictos con texto propio del servidor → ese texto; el resto → la causa real (lib/errors).
+ * `doing` en infinitivo: "guardar el bloque", "mover el bloque".
+ */
+export function toolErrorMessage(e: unknown, doing = 'guardar'): string {
+  return serverText(e) ?? errorLine(e, { doing });
+}
+
+/** Toast de error: conflictos legibles con el texto del servidor; el resto con la causa real. */
+export function showToolErrorToast(e: unknown, doing: string) {
+  const text = serverText(e);
+  if (text) return showToast({ tone: 'error', title: `No pude ${doing}`, text }, 6000);
+  showErrorToast(e, doing);
 }
 
 function snapshot(qc: QueryClient, tripId: string) {
@@ -47,7 +74,13 @@ function proposedToast(res: ApplyResult) {
 
 // ───────────────────────── update_block
 
-export type UpdateVars = { blockId: string; patch: Partial<BlockFieldsInput>; reason?: string };
+export type UpdateVars = {
+  blockId: string;
+  patch: Partial<BlockFieldsInput>;
+  reason?: string;
+  /** El que llama muestra el error (p. ej. el formulario del bloque): no tostear para no duplicar. */
+  silentError?: boolean;
+};
 
 export function useUpdateBlock(tripId: string) {
   const qc = useQueryClient();
@@ -73,10 +106,10 @@ export function useUpdateBlock(tripId: string) {
       );
       return { prev };
     },
-    onError: (e, _vars, ctx) => {
+    onError: (e, vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(planKeys.blocks(tripId), ctx.prev);
       haptic('error');
-      showToast({ text: toolErrorMessage(e), tone: 'error' });
+      if (!vars.silentError) showToolErrorToast(e, 'guardar el cambio');
     },
     onSuccess: (res) => {
       haptic('ok');
@@ -120,7 +153,7 @@ export function useMoveBlock(tripId: string) {
     onError: (e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(planKeys.blocks(tripId), ctx.prev);
       haptic('error');
-      showToast({ text: toolErrorMessage(e, 'No se pudo mover. Probá de nuevo.'), tone: 'error' });
+      showToolErrorToast(e, 'mover el bloque');
     },
     onSuccess: (res, vars) => {
       haptic('ok');
@@ -152,7 +185,7 @@ export function useRemoveBlock(tripId: string) {
     onError: (e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(planKeys.blocks(tripId), ctx.prev);
       haptic('error');
-      showToast({ text: toolErrorMessage(e, 'No se pudo borrar. Probá de nuevo.'), tone: 'error' });
+      showToolErrorToast(e, 'borrar el bloque');
     },
     onSuccess: (res) => {
       haptic('ok');
@@ -207,7 +240,7 @@ export async function undoAction(qc: QueryClient, tripId: string, undoToken: str
     showToast({ text: 'Deshecho', tone: 'info' }, 2500);
   } catch (e) {
     haptic('error');
-    showToast({ text: toolErrorMessage(e, 'No se pudo deshacer.'), tone: 'error' });
+    showToolErrorToast(e, 'deshacer');
   } finally {
     void qc.invalidateQueries({ queryKey: planKeys.blocks(tripId) });
     void qc.invalidateQueries({ queryKey: planKeys.proposals(tripId) });

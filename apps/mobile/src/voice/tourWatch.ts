@@ -4,6 +4,7 @@
 import type { AgentJobRow, GenerateTourResult, TourReadyEvent } from '@build101/shared';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
+import { errorLine } from '../lib/errors';
 import { supabase } from '../lib/supabase';
 
 const TIMEOUT_MS = 6 * 60_000;
@@ -43,7 +44,7 @@ export type JobWatchResult = { ok: true; row: AgentJobRow } | { ok: false; error
  * Resuelve cuando el job termina (done → fila; failed/timeout/sin heartbeat → error). Sirve para cualquier job que
  * la voz dispara (generate_tour, research).
  */
-export function watchJob(jobId: string, label = 'El trabajo'): Promise<JobWatchResult> {
+export function watchJob(jobId: string, label = 'El trabajo', doing?: string): Promise<JobWatchResult> {
   return new Promise((resolve) => {
     let channel: RealtimeChannel | null = null;
     let finished = false;
@@ -63,7 +64,8 @@ export function watchJob(jobId: string, label = 'El trabajo'): Promise<JobWatchR
     const finish = (row: AgentJobRow | null) => {
       if (finished || !row) return;
       if (row.status !== 'done' && row.status !== 'failed') return armStale(); // progreso: sigue vivo
-      if (row.status === 'failed') return end({ ok: false, error: row.error ?? `${label} falló` });
+      // El Scout lo dice en voz alta: la causa en criollo (sin créditos, Google caído…), no el texto crudo del job.
+      if (row.status === 'failed') return end({ ok: false, error: doing ? errorLine(row, { doing }) : (row.error ?? `${label} falló`) });
       end({ ok: true, row });
     };
     const timer = setTimeout(() => end({ ok: false, error: `${label} tardó demasiado` }), TIMEOUT_MS);
@@ -89,7 +91,7 @@ export type TourWatchResult = { ok: true; event: TourReadyEvent } | { ok: false;
 
 /** generate_tour: cuando termina, arma el payload de [EVENTO:tour_ready]. */
 export async function watchTourJob(jobId: string, tourId: string): Promise<TourWatchResult> {
-  const r = await watchJob(jobId, 'El armado del tour');
+  const r = await watchJob(jobId, 'El armado del tour', 'armar el tour');
   if (!r.ok) return r;
   return { ok: true, event: await tourReadyPayload(tourId, r.row.result as GenerateTourResult | null) };
 }

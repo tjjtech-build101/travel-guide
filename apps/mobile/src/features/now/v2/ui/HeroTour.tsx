@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { ErrorNotice } from '../../../../ui/ErrorNotice';
 import { Skeleton } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
@@ -53,8 +54,8 @@ type Props = TourPreviewProps & {
   startLabel?: string | null;
   onStart: () => void;
   starting?: boolean;
-  /** Mensaje si no se pudo empezar. */
-  error?: string | null;
+  /** Por qué no se pudo empezar (AppError de tour/store o texto): lib/errors lo explica en criollo. */
+  error?: unknown;
   onPress?: () => void;
   onLongPress?: () => void;
 };
@@ -71,11 +72,7 @@ export function HeroTour({ title, when, startLabel, onStart, starting, error, on
         <Text style={heroText.meta}>{status}</Text>
       </HeroHead>
       <TourPreview {...preview} />
-      {error ? (
-        <Text style={styles.error} accessibilityLiveRegion="polite">
-          {error}
-        </Text>
-      ) : null}
+      {error ? <ErrorNotice error={error} doing="empezar el tour" compact /> : null}
       <HeroActions
         primary={{
           label: error ? 'Probar de nuevo' : 'Empezar tour',
@@ -92,5 +89,4 @@ const styles = StyleSheet.create({
   preview: { gap: space.xs, marginTop: space.xs },
   map: { borderRadius: radius.md, overflow: 'hidden', marginBottom: space.xs },
   stats: { fontSize: font.body, fontWeight: '700', color: colors.text },
-  error: { fontSize: font.small, fontWeight: '600', color: colors.danger },
 });

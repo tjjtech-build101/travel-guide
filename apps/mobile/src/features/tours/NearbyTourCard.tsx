@@ -1,13 +1,15 @@
 // Progreso de "Tour acá, ahora" en Ahora (PRD 18 → 07): líneas del job en vivo (Realtime de agent_jobs),
-// paradas cuando está listo y "Empezar" (start_tour + motor). Error → "No pude armar el tour" + Reintentar.
+// paradas cuando está listo y "Empezar" (start_tour + motor). Error → la causa real (ErrorNotice) + Reintentar.
 import { SCOUT, type GenerateTourResult } from '@build101/shared';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 import { useTourStore } from '../../tour/store';
+import type { AppError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Skeleton } from '../../ui/States';
 import { Text } from '../../ui/Text';
@@ -39,15 +41,6 @@ function useTourStops(tourId: string | null, enabled: boolean) {
   });
 }
 
-/** Errores crudos del proveedor (JSON, códigos HTTP) → texto para la persona. */
-function friendlyError(error: string | null | undefined): string {
-  if (!error) return 'Algo falló armando el recorrido.';
-  if (/credit balance|rate.?limit|overloaded|^\d{3}\s*\{/i.test(error)) {
-    return `${SCOUT.name} no pudo investigar los lugares en este momento. Probá de nuevo en un rato.`;
-  }
-  return error.length > 160 ? `${error.slice(0, 157)}…` : error;
-}
-
 export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | null }) {
   const job = useNearbyTourJob((s) => s.job);
   const clear = useNearbyTourJob((s) => s.clear);
@@ -56,6 +49,10 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
   const row = q.data ?? null;
   const status = row ? (isStale(row) ? 'failed' : row.status) : 'queued';
   const stops = useTourStops(job?.tourId ?? null, status === 'done');
+  // Fallas de los botones (el reintento y el "Empezar"): se muestran en la tarjeta, nunca se pierden.
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<AppError | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
 
   useEffect(() => {
     void useNearbyTourJob.getState().hydrate();
@@ -66,24 +63,32 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
   const lines = (row?.progress ?? []).slice(-3);
 
   const retry = async () => {
-    if (!here) return;
-    clear();
-    // Mismas respuestas de la entrevista, desde donde estás ahora.
-    await startNearbyTour({ ...job.input, lat: here.lat, lng: here.lng, duration_min: job.durationMin, trip_id: job.tripId ?? undefined });
+    if (!here || retrying) return;
+    setRetrying(true);
+    setRetryError(null);
+    // Mismas respuestas de la entrevista, desde donde estás ahora. Si sale bien, track() reemplaza el job.
+    const res = await startNearbyTour({ ...job.input, lat: here.lat, lng: here.lng, duration_min: job.durationMin, trip_id: job.tripId ?? undefined });
+    setRetrying(false);
+    if (!res.ok) setRetryError(res.error);
   };
 
   const start = async () => {
+    setStartError(null);
     const ok = await useTourStore.getState().start({ tourId: job.tourId, tripId: job.tripId });
     if (ok) clear();
+    else setStartError(useTourStore.getState().error ?? { code: 'unknown', message: '' });
   };
 
-  if (status === 'failed') {
+  if (status === 'failed' || (q.isError && !row)) {
+    // La causa: el reintento que acaba de fallar, la fila del job (error_code + error_provider), un job colgado o
+    // que no se pudo leer el job.
+    const cause: unknown =
+      retryError ?? (row?.status === 'failed' ? row : row && isStale(row) ? { code: 'job_stale', message: '' } : (q.error ?? row));
     return (
       <View style={[styles.card, styles.error]}>
         <Text style={styles.kicker}>TOUR ACÁ, AHORA</Text>
-        <Text style={styles.title}>No pude armar el tour</Text>
-        <Text style={styles.body}>{friendlyError(row?.error)}</Text>
-        <Button label="Reintentar" onPress={() => void retry()} disabled={!here} style={styles.btn} />
+        <ErrorNotice error={cause} doing="armar el tour" onRetry={here ? () => void retry() : undefined} retrying={retrying} style={styles.btn} />
+        {!here ? <Text style={styles.muted}>Para reintentar necesito saber dónde estás.</Text> : null}
         <Button label="Cerrar" variant="ghost" onPress={clear} />
       </View>
     );
@@ -112,6 +117,7 @@ export function NearbyTourCard({ here }: { here: { lat: number; lng: number } | 
         ) : stops.isPending ? (
           <Skeleton height={18} />
         ) : null}
+        {startError ? <ErrorNotice error={startError} doing="empezar el tour" compact style={styles.btn} /> : null}
         <Button label="Empezar" loading={phase === 'starting'} onPress={() => void start()} style={styles.btn} />
         <Button label="Ahora no" variant="ghost" onPress={clear} />
       </View>

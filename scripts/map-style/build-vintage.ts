@@ -78,6 +78,18 @@ const fmt = ({ h, s, l, a }: Hsla) => {
   return a < 1 ? `hsla(${body}, ${a})` : `hsl(${body})`;
 };
 
+/**
+ * Los POI del mapa base (museos, hoteles, teatros) en segundo plano: los protagonistas son los pines del
+ * viaje. Mismo tono, más transparentes. (Se aplica también a mano sobre el JSON ya generado.)
+ */
+export const POI_OPACITY = { text: 0.5, icon: 0.4 };
+function quietPois(layers: { id: string; paint?: unknown }[]) {
+  for (const l of layers) {
+    if (l.id !== 'poi-label' && l.id !== 'transit-label') continue;
+    l.paint = { ...((l.paint as object) ?? {}), 'text-opacity': POI_OPACITY.text, 'icon-opacity': POI_OPACITY.icon };
+  }
+}
+
 let recolored = 0;
 function walk(v: unknown): unknown {
   if (typeof v === 'string') {
@@ -120,6 +132,7 @@ async function main() {
     }),
   );
 
+  quietPois(style.layers as { id: string; paint?: unknown }[]);
   writeFileSync(OUT, JSON.stringify(style));
   console.log(`${recolored} colores recoloreados → ${OUT}`);
 }

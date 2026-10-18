@@ -22,6 +22,7 @@
 | Cámara | 08 | #11 | `look_at_photo`: foto + GPS + orientación → qué estás mirando |
 | Caminar | 07 | #9, #10, #12, #13 | Herramientas del tour, motor de caminata (llegada, desvío, reloj, permanencia, silencio), tour en vivo dentro de Ahora, plan B sin voz, GPS en segundo plano, "Tour acá, ahora", posición fresca en las herramientas de la voz |
 | Horarios | — | #14 | Vigilante de horarios: "salí en X / vas tarde / por empezar" por notificación local (tocarla abre Ahora) o, con llamada abierta, `[EVENTO:schedule_alert]` al scout |
+| Notificaciones | — | (sin PR) | Avisos del vigilante con botones (Ya salí / Avisame en 5 / Hablar con el Scout; si vas tarde, Que el Scout lo reacomode) y `timeSensitive`. Deep link `build101://scout?tripId=&mode=` abre la llamada |
 
 ## Infra
 - Repo: github.com/tjjtech-build101/travel-guide · API: https://travel-guide-api-ten.vercel.app (21 herramientas) · Supabase nube: `veavkvhxmzzkgxhkqrub` (sa-east-1).

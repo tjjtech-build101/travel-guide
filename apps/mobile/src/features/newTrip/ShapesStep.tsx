@@ -30,7 +30,20 @@ export function ShapesStep() {
   const fallback = { label: 'Armalo igual', onPress: () => void startPlan('auto', false), loading: loading === 'plan' };
 
   return (
-    <StepShell step={3} title="Elegí la forma del viaje" onBack={back}>
+    <StepShell
+      step={3}
+      title="Elegí la forma del viaje"
+      onBack={back}
+      scout={
+        loading === 'shapes'
+          ? { text: 'Pensando 3 formas de armarlo…', mode: 'thinking' }
+          : error.shapes
+            ? { text: 'No me salieron las formas. Abajo te cuento por qué; lo puedo armar igual.', mode: 'error' }
+            : shapes?.length
+              ? { text: 'Te armé estas formas. Tocá la que más te guste: después lo afinamos.', pose: 'compass' }
+              : undefined
+      }
+    >
       {loading === 'shapes' ? (
         <View style={{ gap: space.md }} accessibilityLabel="Pensando 3 formas de armarlo">
           <Text style={styles.muted}>Pensando 3 formas de armarlo…</Text>
@@ -45,7 +58,7 @@ export function ShapesStep() {
           ))}
         </View>
       ) : error.shapes ? (
-        <ErrorBox message={`${error.shapes} Igual te lo puedo armar con lo que me contaste.`} onRetry={() => void requestShapes(true)} fallback={fallback} />
+        <ErrorBox error={error.shapes} doing="pensar las formas del viaje" onRetry={() => void requestShapes(true)} fallback={fallback} />
       ) : shapes?.length ? (
         <>
           <Text style={styles.muted}>Tocá la que más te guste. Después lo afinamos.</Text>
@@ -60,7 +73,7 @@ export function ShapesStep() {
               }}
             />
           ))}
-          {error.plan ? <InlineError message={`${error.plan} Probá de nuevo.`} /> : null}
+          {error.plan ? <InlineError error={error.plan} doing="armar el viaje" /> : null}
         </>
       ) : (
         <ErrorBox message="Todavía no tengo formas para mostrarte." onRetry={() => void requestShapes(true)} fallback={fallback} />

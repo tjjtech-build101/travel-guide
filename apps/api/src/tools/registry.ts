@@ -1,6 +1,6 @@
 // Registro de handlers: un handler por herramienta de toolDefs. HTTP (/tools/:name) y Claude (claude.ts) usan esto.
 import { isToolName, toolDefs, type ToolName, type ToolResponse } from '@build101/shared';
-import { ToolFailure } from '../errors';
+import { toFailure, ToolFailure } from '../errors';
 import { add_block } from './add_block';
 import { add_idea } from './add_idea';
 import { delete_trip } from './delete_trip';
@@ -123,9 +123,9 @@ export async function executeTool<N extends ToolName>(name: N, input: unknown, c
     }
     return { status: 200, body };
   } catch (err) {
-    if (err instanceof ToolFailure) return { status: err.status, body: { ok: false, error: err.toError() } };
-    console.error(`[tools/${name}]`, err);
-    return { status: 500, body: { ok: false, error: { code: 'internal', message: (err as Error)?.message ?? 'Error interno' } } };
+    const f = toFailure(err);
+    if (!(err instanceof ToolFailure) || f.status >= 500) console.error(`[tools/${name}]`, err);
+    return { status: f.status, body: { ok: false, error: f.toError() } };
   }
 }
 

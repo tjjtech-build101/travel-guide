@@ -25,7 +25,14 @@ export async function createJob(
   return data.id as string;
 }
 
-export type JobPatch = { status?: JobStatus; result?: unknown; error?: string | null };
+export type JobPatch = {
+  status?: JobStatus;
+  result?: unknown;
+  error?: string | null;
+  /** Ver jobErrorFields (errors.ts): código y proveedor para que la app explique qué pasó. */
+  error_code?: string | null;
+  error_provider?: string | null;
+};
 
 export class JobProgress {
   readonly lines: JobProgressLine[];
@@ -56,10 +63,15 @@ export class JobProgress {
   private write(patch: JobPatch): Promise<void> {
     const snapshot = [...this.lines];
     this.chain = this.chain.then(async () => {
-      const { error } = await this.admin
+      let { error } = await this.admin
         .from('agent_jobs')
         .update({ ...patch, progress: snapshot })
         .eq('id', this.jobId);
+      // Base sin la migración de error_code todavía: escribir igual el resto (si no, el job queda "running").
+      if (error && /error_code|error_provider/.test(error.message)) {
+        const { error_code: _c, error_provider: _p, ...rest } = patch;
+        ({ error } = await this.admin.from('agent_jobs').update({ ...rest, progress: snapshot }).eq('id', this.jobId));
+      }
       if (error) console.error(`[jobs/${this.jobId}] no pude escribir el progreso:`, error.message);
     });
     return this.chain;

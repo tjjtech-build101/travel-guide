@@ -24,7 +24,7 @@ import { createJob, JobProgress } from '../../jobs';
 import { loadTripRole } from '../../policy/writeMode';
 import type { ToolCtx } from '../../tools/types';
 import { JobError } from '../llm';
-import { defaultComposeDeps, pool, readable } from '../planTrip';
+import { defaultComposeDeps, errorCodeFields, pool, readable } from '../planTrip';
 import {
   anchorsForLeg,
   composeAndCheck,
@@ -150,6 +150,8 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
   const busy = new Set<string>();
   let choices = 0;
   let fatal: string | null = null;
+  let fatalErr: unknown = null;
+  const failedReasons: unknown[] = [];
 
   const emptyLegIds = new Set(args.legs.map((l) => l.id));
   const onBlockAdded = (b: { id: string; leg_id: string; day_id: string | null; title: string }) => {
@@ -266,11 +268,13 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
         const leg = args.legs[i];
         console.error(`[compose_days/${jobId}] ${leg.city}:`, r.reason);
         failedLegs.push({ leg_id: leg.id, city: leg.city, error: readable(r.reason) });
+        failedReasons.push(r.reason);
       }
     });
   } catch (err) {
     console.error(`[compose_days/${jobId}]`, err);
     fatal = readable(err);
+    fatalErr = err;
   } finally {
     progress.stopHeartbeat();
   }
@@ -304,13 +308,13 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
     undo_token,
     failed_legs: failedLegs,
   };
-  const error = fatal ?? (failedLegs.length ? failedLegs.map((f) => f.error).join(' ') : null);
+  const error = fatal ?? (failedLegs.length ? [...new Set(failedLegs.map((f) => f.error))].join(' ') : null);
   if (error) {
     await progress.push(fatal ? `Se trancó: ${fatal}` : `Quedó a medias: ${failedLegs.map((f) => f.city).join(', ')}`);
-    await progress.set({ status: 'failed', error, result });
+    await progress.set({ status: 'failed', error, ...errorCodeFields(fatalErr ?? failedReasons[0]), result });
   } else {
     await progress.push(`¡Listo! ${created.length} bloques${choices ? `, ${choices} lugares para elegir` : ''}`);
-    await progress.set({ status: 'done', error: null, result });
+    await progress.set({ status: 'done', error: null, error_code: null, error_provider: null, result });
   }
   await progress.flush();
 }

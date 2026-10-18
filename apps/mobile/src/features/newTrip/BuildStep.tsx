@@ -30,6 +30,13 @@ export function BuildStep() {
       step={4}
       title="¿Cómo lo armamos?"
       onBack={back}
+      scout={
+        loading === 'plan'
+          ? { text: '¡Arranco! Dame un segundo.', pose: 'map' }
+          : planError
+            ? { text: 'Uy, no se armó. Abajo te cuento qué pasó.', mode: 'error' }
+            : { text: '¿Lo armamos juntos, eligiendo de un menú, o lo armo yo directo?', pose: 'thumbs' }
+      }
       footer={
         shape ? (
           <>
@@ -76,7 +83,7 @@ export function BuildStep() {
           </View>
 
           {planError ? (
-            <ErrorBox message={`${planError} No se armó nada todavía.`} onRetry={() => go(busyMode ?? 'menu')} retrying={loading === 'plan'} />
+            <ErrorBox error={planError} doing="armar el viaje" onRetry={() => go(busyMode ?? 'menu')} retrying={loading === 'plan'} />
           ) : null}
         </>
       ) : (

@@ -11,7 +11,7 @@ import { shortDay, todayIso } from './calendarModel';
 import { CalendarSheet } from './Calendar';
 import { requestBrief, startPlan } from './flow';
 import { TELL_EXAMPLES, TELL_PROMPT } from './model';
-import { Bubble, DaysStepper, InlineError, StepShell } from './parts';
+import { DaysStepper, InlineError, StepShell } from './parts';
 import { useNewTripStore } from './store';
 
 export function TellStep() {
@@ -37,6 +37,15 @@ export function TellStep() {
     <StepShell
       step={1}
       title="Contame"
+      scout={
+        loading === 'brief'
+          ? { text: 'Dale, lo leo…', mode: 'thinking' }
+          : loading === 'plan'
+            ? { text: '¡Manos a la obra! Lo armo con lo que me contaste.', pose: 'map' }
+            : empty
+              ? { text: TELL_PROMPT, pose: 'wave' }
+              : { text: '¡Buenísimo! Cuando quieras, seguimos.', pose: 'thumbs' }
+      }
       footer={
         <>
           <Button label="Seguir" onPress={() => void requestBrief()} disabled={empty} loading={loading === 'brief'} />
@@ -51,8 +60,6 @@ export function TellStep() {
         </>
       }
     >
-      <Bubble text={TELL_PROMPT} />
-
       <TextInput
         value={story}
         onChangeText={setStory}
@@ -120,7 +127,7 @@ export function TellStep() {
         }}
       />
 
-      {planError ? <InlineError message={`${planError} Probá de nuevo.`} /> : null}
+      {planError ? <InlineError error={planError} doing="arrancar a armar el viaje" /> : null}
     </StepShell>
   );
 }

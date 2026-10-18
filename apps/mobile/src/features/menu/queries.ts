@@ -15,7 +15,7 @@ import * as Haptics from 'expo-haptics';
 
 import { callToolOrThrow } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
-import { toolErrorMessage } from '../plan/mutations';
+import { showToolErrorToast } from '../plan/mutations';
 import { planKeys } from '../plan/queries';
 import type { PlanBlock } from '../plan/selectors';
 import { showToast } from '../plan/store';
@@ -82,7 +82,7 @@ export function useReactOption(tripId: string, me: string) {
     onError: (e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
       haptic('error');
-      showToast({ text: toolErrorMessage(e, 'No se pudo guardar tu reacción. Probá de nuevo.'), tone: 'error' });
+      showToolErrorToast(e, 'guardar tu reacción');
     },
     onSettled: () => qc.invalidateQueries({ queryKey: key }),
   });
@@ -97,7 +97,7 @@ export function useComposeDays(tripId: string) {
         .data,
     onError: (e) => {
       haptic('error');
-      showToast({ text: toolErrorMessage(e, 'No pude arrancar a armar los días. Probá de nuevo.'), tone: 'error' });
+      showToolErrorToast(e, 'arrancar a armar los días');
     },
   });
 }
@@ -129,7 +129,7 @@ export function useChooseOption(tripId: string) {
     onError: (e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
       haptic('error');
-      showToast({ text: toolErrorMessage(e, 'No se pudo elegir. Probá de nuevo.'), tone: 'error' });
+      showToolErrorToast(e, 'elegir esa opción');
     },
     onSuccess: (res, vars) => {
       haptic('ok');

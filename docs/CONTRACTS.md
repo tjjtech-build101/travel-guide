@@ -114,7 +114,7 @@ diary_entries(id, trip_id, day_id, user_id null,   -- null = versión del grupo
 
 -- INFRA
 agent_jobs(id, kind text, trip_id null, user_id, status text, progress jsonb, -- [{at, text}]
-  result jsonb, error text, created_at, updated_at)
+  result jsonb, error text, error_code text null, error_provider text null, created_at, updated_at)
 device_tokens(user_id, token, platform, updated_at)
 ```
 
@@ -469,3 +469,14 @@ Sin migración: usa `agent_proposals` tal cual. Lo que falta del PRD 11 es el mo
 - **`generate_tour`** acepta `variant_stops[] {name, lat, lng, google_place_id?, wikidata_id?}` (máx. 15): esas paradas son el recorrido (entran como pedidas, el director no las cambia). `understandingToTourInput()` pasa lo entendido a los campos de `generate_tour`.
 - **Voz**: rápido (1-2 preguntas y arma) o detallado (entrevista → `tour_variants` → elige → `generate_tour` con `variant_stops`).
 - **Tour detallado = solo pantalla** (actualización): `tour_interview` y `tour_variants` pasan a `APP_ONLY_TOOLS` (la voz no los ve). Herramienta nueva del celu `open_tour_planner {story?, duration_min?}` en `VOICE_CLIENT_TOOLS`: la voz la llama cuando piden un tour a medida; la app abre `/tours/new` con lo contado precargado (params `story`, `duration`) y minimiza la llamada. Por voz solo se arma el tour rápido.
+
+---
+
+## Cambios: errores clasificados — en código
+
+- `ToolError` suma `provider?` y `detail?`: `{ code, message, issues?, provider?, detail? }`. `message` es texto para la persona (español); `detail` es el crudo técnico (la app lo muestra solo en desarrollo). Los 500 `internal` ya no devuelven el mensaje crudo como `message`.
+- Códigos de proveedor en `packages/shared/src/errors.ts` (`PROVIDERS`, `PROVIDER_ERROR_CODES`): `provider_no_credits` (402), `provider_auth` (502), `provider_denied` (502), `provider_rate_limited` (429), `provider_overloaded` (503), `provider_timeout` (504), `provider_unavailable` (502), `provider_refused` (422), con `provider` ∈ `anthropic | openai | google | supabase | weather | osm | wikipedia`. Reemplazan a `upstream_error` cuando se puede clasificar y a `vision_unavailable` (look_at_photo). `not_configured` lleva `provider` cuando aplica.
+- Auth: si Supabase Auth no responde → 503 `provider_unavailable` (`provider: 'supabase'`), no 401 (no desloguea).
+- `agent_jobs.error_code` / `error_provider` (migración `20261018000001_job_error_code.sql`): código del error que hizo fallar el job (provider_* o de dominio: `skeleton_failed`, `leg_failed`, `catalog_small`, `generate_failed`, `not_enough_candidates`, `internal`…). `error` sigue siendo el texto.
+- Los `.catch` que degradaban (seguir sin ese dato) dejan pasar los errores fatales de proveedor (sin créditos, key inválida): ya no se disfrazan de "no encontré lugares".
+- La app arma el texto lindo en `apps/mobile/src/lib/errors.ts` (`describeError`) y lo muestra con `ui/ErrorNotice`, `ErrorState` (prop `error`), `errorToast` / `showErrorToast` y `ScreenErrorBoundary` (error boundary de Expo Router).

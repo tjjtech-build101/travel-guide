@@ -1,6 +1,6 @@
 // Google Places API (New): searchText / searchNearby / place details, con X-Goog-FieldMask mínimo.
 import { env } from '../env';
-import { notConfigured, upstream } from '../errors';
+import { fetchFailure, httpFailure, notConfigured, upstream } from '../errors';
 import { cached } from './cache';
 import { isOsmId, osmDetails, osmFallbackEnabled, osmSearch } from './osm';
 
@@ -67,7 +67,7 @@ const PRICE_LEVELS: Record<string, number> = {
 
 export function googleKey(): string {
   const key = env().GOOGLE_MAPS_API_KEY;
-  if (!key) throw notConfigured('Google Maps (GOOGLE_MAPS_API_KEY)');
+  if (!key) throw notConfigured('Google Maps (GOOGLE_MAPS_API_KEY)', 'google');
   return key;
 }
 
@@ -86,13 +86,17 @@ export async function googleFetch<T>(url: string, init: { method: 'GET' | 'POST'
       signal: AbortSignal.timeout(8000),
     });
   } catch (err) {
-    throw upstream(`Google no respondió: ${(err as Error).message}`);
+    throw fetchFailure('google', err);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw upstream(`Google respondió ${res.status}: ${text.slice(0, 300)}`);
+    throw httpFailure('google', res.status, text);
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    throw upstream('Google devolvió una respuesta ilegible.', 'google', (err as Error).message);
+  }
 }
 
 function toSummary(p: GPlace): PlaceSummary {

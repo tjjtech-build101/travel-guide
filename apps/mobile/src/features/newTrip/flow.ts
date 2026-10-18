@@ -3,6 +3,7 @@
 import type { PlanTripStart, TripBriefResult, TripShapesResult, ToolError } from '@build101/shared';
 
 import { callTool } from '../../lib/api';
+import { errorLine, toAppError, type AppError } from '../../lib/errors';
 import { queryClient } from '../../lib/queryClient';
 import { tripKeys } from '../trips/keys';
 import {
@@ -24,13 +25,20 @@ import { chosenShape, currentBrief, useNewTripStore } from './store';
 
 const get = () => useNewTripStore.getState();
 
-export function friendlyError(e: Pick<ToolError, 'code' | 'message'>): string {
-  if (e.code === 'network_error') return 'No me pude conectar. Revisá la conexión y probamos de nuevo.';
-  // La API deployada todavía no tiene la entrevista/las formas (unknown_tool = 404 de /tools/:name).
-  if (e.code === 'http_501' || e.code === 'not_implemented' || e.code === 'unknown_tool' || e.code === 'http_404')
-    return 'Esta versión del servidor todavía no tiene las preguntas. Lo puedo armar igual con lo que me contaste.';
-  if (e.code === 'unauthenticated') return 'Se cerró tu sesión. Volvé a entrar.';
-  return 'No me salió esta vez.';
+// La API deployada todavía no tiene la entrevista/las formas (unknown_tool = 404 de /tools/:name).
+const OLD_SERVER = ['http_501', 'not_implemented', 'unknown_tool', 'http_404'];
+const OLD_SERVER_MSG = 'Esta versión del servidor todavía no tiene las preguntas. Lo puedo armar igual con lo que me contaste.';
+
+/** Error de una llamada → lo que se guarda en el store (la causa real la explica lib/errors en la pantalla). */
+export function phaseError(e: ToolError): AppError {
+  if (OLD_SERVER.includes(e.code)) return { code: 'old_server', message: OLD_SERVER_MSG, detail: `${e.code}: ${e.message}` };
+  return toAppError(e);
+}
+
+/** Una línea con la causa real (la usa también el planificador de tours, features/newTour). */
+export function friendlyError(e: Pick<ToolError, 'code' | 'message'> & Partial<ToolError>): string {
+  if (OLD_SERVER.includes(e.code)) return OLD_SERVER_MSG;
+  return errorLine(e);
 }
 
 /**
@@ -87,7 +95,7 @@ async function fetchRound(round: number): Promise<{ ok: true; data: TripBriefRes
   // Mientras tanto la persona volvió y cambió algo: esta respuesta ya no sirve.
   if (keyOf(briefRequest(round)) !== key) return { ok: false };
   if (!res.ok) {
-    get().setError(round === 1 ? 'brief' : 'round', friendlyError(res.error));
+    get().setError(round === 1 ? 'brief' : 'round', phaseError(res.error));
     return { ok: false };
   }
   return { ok: true, data: { ...res.data, questions: res.data.questions ?? [] }, key };
@@ -170,11 +178,11 @@ export async function requestShapes(force = false): Promise<boolean> {
   const now = shapesRequest();
   if (inputKey(now.conversation, now.startDate) !== key) return false;
   if (!res.ok) {
-    get().setError('shapes', friendlyError(res.error));
+    get().setError('shapes', phaseError(res.error));
     return false;
   }
   if (!res.data.variants?.length) {
-    get().setError('shapes', 'No se me ocurrió ninguna forma con lo que me contaste.');
+    get().setError('shapes', { code: 'no_shapes', message: 'No se me ocurrió ninguna forma con lo que me contaste.' });
     return false;
   }
   get().setShapes(res.data.variants, key);
@@ -200,7 +208,7 @@ export async function startPlan(mode: PlanMode, withShape = true): Promise<boole
   );
   get().setLoading(null);
   if (!res.ok) {
-    get().setError('plan', friendlyError(res.error));
+    get().setError('plan', phaseError(res.error));
     return false;
   }
   void queryClient.invalidateQueries({ queryKey: tripKeys.mine() });

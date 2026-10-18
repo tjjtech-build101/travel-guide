@@ -12,6 +12,7 @@ import { toolErrorMessage, useAddBlock } from '../../../features/plan/mutations'
 import { useMe, usePermissions, usePlanOverview } from '../../../features/plan/queries';
 import type { PlanLeg } from '../../../features/plan/selectors';
 import { Button } from '../../../ui/Button';
+import { ErrorNotice } from '../../../ui/ErrorNotice';
 import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 
@@ -46,6 +47,22 @@ export default function NewBlockSheet() {
       <SheetRoot>
         <SheetHeader title="Agregar" />
         <SheetMessage title="Cargando…" />
+      </SheetRoot>
+    );
+  }
+  if (overview.isError && !overview.data) {
+    // Falló la carga del viaje: no es un tema de permisos.
+    return (
+      <SheetRoot>
+        <SheetHeader title="Agregar" />
+        <SheetBody>
+          <ErrorNotice
+            error={overview.error}
+            doing="cargar el viaje"
+            onRetry={() => void overview.refetch()}
+            retrying={overview.isFetching}
+          />
+        </SheetBody>
       </SheetRoot>
     );
   }
@@ -108,7 +125,7 @@ export default function NewBlockSheet() {
       }
       closeSheet();
     } catch (e) {
-      setErrors({ form: toolErrorMessage(e) });
+      setErrors({ form: toolErrorMessage(e, state.dayId === null ? 'guardar la idea' : 'agregar el bloque') });
     }
   };
 

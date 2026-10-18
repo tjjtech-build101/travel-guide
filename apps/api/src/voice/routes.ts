@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { SCOUT, VoiceSessionEndInput, VoiceSessionInput, type VoiceSessionStart } from '@build101/shared';
 import { requireAuth, type AuthVars } from '../auth';
-import { dbError, notFound, ToolFailure } from '../errors';
+import { dbError, notFound, toFailure, ToolFailure } from '../errors';
 import { createJob, runInBackground } from '../jobs';
 import { loadVoiceContext, TRIP_TZ } from './context';
 import { buildInstructions, nowText, type InstructionsInput } from './instructions';
@@ -34,9 +34,9 @@ export function staticInstructions(mode: 'chat' | 'tour'): string {
 }
 
 const fail = (err: unknown) => {
-  if (err instanceof ToolFailure) return { status: err.status, body: { ok: false as const, error: err.toError() } };
-  console.error('[voice]', err);
-  return { status: 500, body: { ok: false as const, error: { code: 'internal', message: (err as Error)?.message ?? 'Error interno' } } };
+  const f = toFailure(err);
+  if (!(err instanceof ToolFailure) || f.status >= 500) console.error('[voice]', err);
+  return { status: f.status, body: { ok: false as const, error: f.toError() } };
 };
 
 async function readJson(text: string): Promise<{ ok: true; value: unknown } | { ok: false }> {

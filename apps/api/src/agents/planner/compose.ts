@@ -52,6 +52,7 @@ import {
   type DiversityKind,
 } from './check';
 import type { ComposeDeps, ComposedBlock, ComposeInput, ComposeLeg, ComposeOutput, PickedItem, PlannerGroup } from './types';
+import { orFallback } from '../../errors';
 
 type LL = { lat: number; lng: number };
 
@@ -858,7 +859,7 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
       if (query) {
         const [r] = await deps
           .searchPlaces({ query: watch && !leg.center ? `${query} ${leg.city}` : query, near: leg.center ?? undefined, radius_m: watch ? 3000 : 30_000, max_results: 1 })
-          .catch(() => [] as PlaceSummary[]);
+          .catch(orFallback([] as PlaceSummary[]));
         if (r && r.google_place_id && hasLL(r) && (!leg.center || distanceMeters(leg.center, r) <= 60_000)) place = r;
       }
       const it = anchorItem(a, place);
@@ -1209,7 +1210,7 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
         key,
         deps
           .searchPlaces({ query: `${query} ${near ? '' : leg.city}`.trim(), near: near ?? undefined, radius_m: 1500, max_results: 10 })
-          .catch(() => [] as PlaceSummary[]),
+          .catch(orFallback([] as PlaceSummary[])),
       );
     return cache.get(key)!;
   };
@@ -1251,7 +1252,7 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
         const near = z.lat != null && z.lng != null ? { lat: z.lat, lng: z.lng } : leg.center;
         return deps
           .searchPlaces({ query: `hotel ${z.zone}${near ? '' : ` ${leg.city}`}`, near: near ?? undefined, radius_m: 1500, max_results: 5 })
-          .catch(() => [] as PlaceSummary[]);
+          .catch(orFallback([] as PlaceSummary[]));
       }),
     );
     const chosen: { p: PlaceSummary; z: (typeof zones)[number] }[] = [];
