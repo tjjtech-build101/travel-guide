@@ -60,7 +60,10 @@ export class SimulatedLocationProvider implements LocationProvider, SimulatedCon
   }
 
   requestFix(): Promise<LocationFix | null> {
-    return Promise.resolve(this.current ? { ...this.current, t: Date.now() } : null);
+    // Aunque nadie lo haya arrancado (no emite), el punto del track en `t` es dónde "está".
+    if (!this.cursor) return Promise.resolve(this.current ? { ...this.current, t: Date.now() } : null);
+    const s = this.cursor.sampleAt(this.t);
+    return Promise.resolve({ t: Date.now(), lat: s.lat, lng: s.lng, heading: s.heading, speed: s.speed, accuracy: s.accuracy });
   }
 
   subscribe(cb: (fix: LocationFix) => void): () => void {
