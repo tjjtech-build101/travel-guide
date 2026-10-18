@@ -262,7 +262,7 @@ export type TripBriefResult = {
   questions: TripQuestion[];
   /** true = hay lo mínimo para armar (al menos un destino). */
   ready: boolean;
-  /** v2: ronda actual (1-3). */
+  /** Ronda actual (1-4). */
   round?: number;
   /** v2: true = ya sé lo suficiente; la app pasa a las formas del viaje (aunque queden opcionales). */
   done?: boolean;
