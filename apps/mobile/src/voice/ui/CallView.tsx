@@ -3,7 +3,7 @@ import { VOICE_LANGS } from '@build101/shared';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { describeError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
@@ -26,9 +26,13 @@ export function CallView() {
   // Conectando y error también se ven acá (pantalla completa), aunque no se haya expandido; con la cámara abierta no
   // (iOS no presenta dos Modal: la llamada se abre de fondo para narrar la foto).
   const visible = !cameraOpen && (expanded || status === 'connecting' || status === 'error');
+  // Insets explícitos: SafeAreaView dentro de un Modal fullScreen a veces mide 0 en iOS y el header queda bajo el notch.
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useVoiceStore.getState().setExpanded(false)}>
-      <SafeAreaView style={styles.root}>{status === 'error' ? <ErrorView error={error} /> : <Live />}</SafeAreaView>
+      <View style={[styles.root, { paddingTop: insets.top + space.sm, paddingBottom: insets.bottom }]}>
+        {status === 'error' ? <ErrorView error={error} /> : <Live />}
+      </View>
     </Modal>
   );
 }
@@ -84,7 +88,7 @@ function Live() {
   return (
     <View style={styles.flex}>
       <View style={styles.top}>
-        <Pressable onPress={() => useVoiceStore.getState().setExpanded(false)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Minimizar">
+        <Pressable onPress={() => useVoiceStore.getState().setExpanded(false)} hitSlop={12} style={styles.minimizeBtn} accessibilityRole="button" accessibilityLabel="Minimizar">
           <Text style={styles.minimize}>⌄</Text>
         </Pressable>
         <Text style={styles.name} numberOfLines={1}>
@@ -227,7 +231,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl, gap: space.md },
   top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.lg, height: MIN_TOUCH, gap: space.md },
   name: { flex: 1, color: '#fff', fontSize: font.h3, fontWeight: '800', textAlign: 'center' },
-  minimize: { color: '#fff', fontSize: 34, lineHeight: 36, width: MIN_TOUCH },
+  minimizeBtn: { width: MIN_TOUCH, height: MIN_TOUCH, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.12)' },
+  minimize: { color: '#fff', fontSize: 30, lineHeight: 30, marginTop: -8 },
   timer: { color: 'rgba(255,255,255,0.8)', fontSize: font.body, fontVariant: ['tabular-nums'], width: MIN_TOUCH, textAlign: 'right' },
   title: { color: '#fff', fontSize: font.h2, fontWeight: '800', marginTop: space.md, textAlign: 'center' },
   sub: { color: 'rgba(255,255,255,0.75)', fontSize: font.body, minHeight: 22, textAlign: 'center' },
