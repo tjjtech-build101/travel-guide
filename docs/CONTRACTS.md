@@ -138,6 +138,7 @@ device_tokens(user_id, token, platform, updated_at)
 | Grupo | `where_is_everyone` | Ubicaciones permitidas + ETA | 13 |
 | Grupo | `create_meetup` / `notify_member` | Encuentro / aviso in-app | 13 |
 | Lugares | `search_places` / `place_details` | Google Places (horario, abierto ahora, precio) | 00 |
+| Dónde estoy | `where_am_i` | Google Places `searchNearby` por distancia + viewport (en qué lugar está adentro) + barrio/ciudad (Nominatim). Sin key: Overpass `is_in`. Input `{ lat?, lng?, accuracy_m? }` (el celu completa la posición) → `{ here, inside: {…, confidence: high\|medium} \| null, nearby[], area }` | 05 |
 | Lugares | `route_eta` | Google Routes (a pie / transporte) | 00 |
 | Lugares | `nearby` | Café, baño, cajero, farmacia, comida | 26 |
 | Contexto | `weather` / `events_search` / `convert_currency` | Open-Meteo / web search de Claude / tasas | 16/23 |

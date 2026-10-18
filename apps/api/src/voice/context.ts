@@ -158,7 +158,7 @@ async function resolveFocus(ctx: ToolCtx, focus: Focus | undefined): Promise<str
     return `el lugar «${focus.label}»${coords}`;
   }
   if (focus.lat !== undefined && focus.lng !== undefined) {
-    return `un punto del mapa en ${focus.lat.toFixed(5)}, ${focus.lng.toFixed(5)} (si hace falta, buscá qué hay cerca con search_places)`;
+    return `un punto del mapa en ${focus.lat.toFixed(5)}, ${focus.lng.toFixed(5)} (si hace falta, mirá qué hay ahí con where_am_i pasándole esas coordenadas)`;
   }
   if (focus.google_place_id) return `el lugar con id ${focus.google_place_id} (pedí place_details para saber cuál es)`;
   return null;
