@@ -27,8 +27,10 @@ type Source = {
   simulated: boolean;
   /** Lectura nueva del provider en este momento; null si no llega a tiempo. */
   request: (timeoutMs: number) => Promise<LocationFix | null>;
+  /** Último recurso: la ubicación con la que arrancó la llamada. */
+  callStart: () => { lat: number; lng: number; accuracy?: number | null } | null;
 };
-let source: Source = { get: () => null, simulated: false, request: async () => null };
+let source: Source = { get: () => null, simulated: false, request: async () => null, callStart: () => null };
 let registered = false;
 
 /** Quién da la última posición (TourRunner le pasa el LocationProvider actual). */
@@ -45,15 +47,20 @@ export function freshPosition(now = Date.now()): Pos | null {
   return toPos(f);
 }
 
-/** Lectura nueva del GPS ahora mismo; si no llega, la última fresca; si tampoco, la última que haya (vieja > nada). */
-async function currentPosition(): Promise<Pos | null> {
-  const now = await source.request(REQUEST_FIX_MS).catch((e) => {
-    console.warn('[where_am_i] GPS:', (e as Error).message);
+/**
+ * Lectura nueva del GPS ahora mismo; si no llega: la última muestra del provider; si tampoco: con la que arrancó la
+ * llamada. `why` explica qué falló (va al error y al panel de eventos).
+ */
+async function currentPosition(): Promise<{ pos: Pos | null; why: string }> {
+  let why = 'el GPS no respondió a tiempo';
+  const now = await source.request(REQUEST_FIX_MS).catch((e: Error) => {
+    why = e.name === 'LocationPermissionError' ? 'no hay permiso de ubicación' : `GPS: ${e.message}`;
     return null;
   });
-  if (now) return toPos(now);
-  const last = source.get();
-  return freshPosition() ?? (last ? toPos(last) : null);
+  if (now) return { pos: toPos(now), why: '' };
+  const last = source.get() ?? source.callStart();
+  if (last) return { pos: { lat: last.lat, lng: last.lng, accuracy: last.accuracy ?? null }, why };
+  return { pos: null, why };
 }
 
 export function registerFreshPositionTools() {
@@ -63,8 +70,15 @@ export function registerFreshPositionTools() {
     registerLocalTool(name, async (input) => {
       // where_am_i sin coordenadas: le pedimos al GPS dónde está AHORA (no la última muestra).
       const needsHere = name === 'where_am_i' && (typeof input.lat !== 'number' || typeof input.lng !== 'number');
-      const here = needsHere ? await currentPosition() : freshPosition();
-      const body = withFreshPosition(name, input, here);
+      if (needsHere) {
+        const { pos, why } = await currentPosition();
+        if (!pos) {
+          console.warn(`[where_am_i] sin ubicación: ${why}`);
+          return { ok: false, error: { code: 'no_location', message: `No pude saber dónde está el celu (${why}). Decíselo a la persona en una frase.` } };
+        }
+        return callTool(name, withFreshPosition(name, input, pos) as never, { actor: 'agent' });
+      }
+      const body = withFreshPosition(name, input, freshPosition());
       return callTool(name, body as never, { actor: 'agent' });
     });
   }

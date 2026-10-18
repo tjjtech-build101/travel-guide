@@ -53,6 +53,11 @@ export function setLocationSource(fn: () => Fix) {
 export function currentLocation(): Fix {
   return locationSource();
 }
+/** Con qué ubicación arrancó la llamada (último recurso de where_am_i si el GPS no responde). */
+let callStartFix: Fix = null;
+export function callStartLocation(): Fix {
+  return callStartFix;
+}
 
 export type Line = { id: string; role: 'user' | 'assistant'; text: string; at: string; final: boolean };
 export type ActionCard = { id: string; text: string; proposed: boolean; undoToken: string; tripId: string | null; at: number };
@@ -579,6 +584,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       focus: args.focus,
       location: (() => {
         const f = args.location ?? locationSource();
+        callStartFix = f;
         return f ? { lat: f.lat, lng: f.lng, accuracy: f.accuracy ?? null } : undefined;
       })(),
       lang: isRetry ? get().lang : undefined,

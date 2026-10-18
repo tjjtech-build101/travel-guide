@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
 import { registerFreshPositionTools, setFreshPositionSource } from '../location/freshPositionTools';
+import { callStartLocation } from '../voice/store';
 import { useLocationProvider } from '../location/LocationContext';
 import { startBackgroundUpdates, stopBackgroundUpdates } from './backgroundLocation';
 import { useTourStore } from './store';
@@ -29,6 +30,7 @@ export function TourRunner() {
         get: () => provider.getCurrent(),
         simulated: provider.kind === 'simulated',
         request: (timeoutMs) => provider.requestFix(timeoutMs),
+        callStart: callStartLocation,
       }),
     [provider],
   );

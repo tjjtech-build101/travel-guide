@@ -117,17 +117,18 @@ export class RealLocationProvider implements LocationProvider {
     const perm = await Location.requestForegroundPermissionsAsync();
     if (perm.status !== 'granted') throw new LocationPermissionError(perm.canAskAgain);
     const loc = await Promise.race([
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), timeoutMs)),
     ]);
-    if (!loc) return null;
+    const best = loc ?? (await Location.getLastKnownPositionAsync().catch(() => null));
+    if (!best) return null;
     const fix: LocationFix = {
-      t: loc.timestamp,
-      lat: loc.coords.latitude,
-      lng: loc.coords.longitude,
-      heading: this.heading ?? validHeading(loc.coords.heading),
-      speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : null,
-      accuracy: loc.coords.accuracy ?? 0,
+      t: best.timestamp,
+      lat: best.coords.latitude,
+      lng: best.coords.longitude,
+      heading: this.heading ?? validHeading(best.coords.heading),
+      speed: best.coords.speed != null && best.coords.speed >= 0 ? best.coords.speed : null,
+      accuracy: best.coords.accuracy ?? 0,
     };
     this.emit(fix);
     return fix;
