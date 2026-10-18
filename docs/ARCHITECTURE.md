@@ -12,7 +12,7 @@ notion_url: https://app.notion.com/p/3fc81924a5c681e0a1b8f8b260816f70
 | App | **Expo (React Native) + TypeScript**, development build (no Expo Go) | Expo Router. Necesario por ubicación en segundo plano, geofencing, audio con pantalla bloqueada, Mapbox, CallKit, Live Activities. |
 | Backend de datos | **Supabase** | Postgres + PostGIS + pgvector, Auth (Google), Realtime, Storage. |
 | API | **TypeScript (Hono) en Vercel** | API de herramientas, agentes de Claude, token temporal de OpenAI Realtime. |
-| Cerebro (agentes) | **Claude Opus 5.5** (`claude-opus-5-5`) con `@anthropic-ai/sdk` | Esfuerzo por trabajo: `high` planificador/tours, `medium` investigar/verificar, `low` visión/resúmenes. Tool Runner (`betaZodTool` + `toolRunner`), web search/fetch nativos, salidas estructuradas, streaming, `fallbacks` server-side. |
+| Cerebro (agentes) | **Claude Sonnet 5.5** (`claude-sonnet-5-5`) con `@anthropic-ai/sdk` | Esfuerzo por trabajo: `high` planificador/tours, `medium` investigar/verificar, `low` visión/resúmenes. Tool Runner (`betaZodTool` + `toolRunner`), web search/fetch nativos, salidas estructuradas, streaming, `fallbacks` server-side. |
 | Voz 1 a 1 | **OpenAI Realtime** (voz-a-voz, WebRTC desde el celu) | Token temporal desde la API. Se puede comparar con otros el sábado; cambiar es barato porque las herramientas viven en el backend. |
 | Voz grupal (fase 2) | LiveKit + pipeline (Deepgram → Claude → TTS) | Solo si sobra tiempo. |
 | Mapa | **Mapbox** (`@rnmapbox/maps`) | 3D, estilos, cámara animada. |

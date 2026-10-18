@@ -1,6 +1,7 @@
 // Estado de UI del Plan (compartido con el Mapa, PRD 03) + toast de acción con "Deshacer".
 import { create } from 'zustand';
 
+import { describeError } from '../../lib/errors';
 import type { PlanFilter } from './selectors';
 
 export type PlanView = 'list' | 'split' | 'map';
@@ -62,6 +63,8 @@ export const usePlanMapStore = create<PlanMapState>((set, get) => ({
 export type ActionToastState = {
   id: number;
   text: string;
+  /** Causa del error (línea de arriba, en negrita). */
+  title?: string;
   tone: 'success' | 'error' | 'info';
   undoToken?: string;
   tripId?: string;
@@ -92,3 +95,9 @@ export const useActionToast = create<ToastStore>((set, get) => ({
 
 export const showToast = (t: Omit<ActionToastState, 'id'>, durationMs?: number) =>
   useActionToast.getState().show(t, durationMs);
+
+/** Toast de error con la causa real (lib/errors): "Sin conexión · Revisá el wifi…". */
+export const showErrorToast = (error: unknown, doing?: string, durationMs = 6000) => {
+  const v = describeError(error, { doing });
+  showToast({ tone: 'error', title: v.title, text: v.hint ?? v.body }, durationMs);
+};

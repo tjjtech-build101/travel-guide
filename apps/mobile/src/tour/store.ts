@@ -40,6 +40,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { create } from 'zustand';
 
+import { toAppError, type AppError } from '../lib/errors';
 import { useVoiceStore, voice } from '../voice/store';
 import { getStopContent, skipStopRemote, startTour, syncProgress } from './api';
 
@@ -58,7 +59,8 @@ export type TourCard =
       text: string | null;
       sources: { url: string; title?: string }[];
       alreadyTold: boolean;
-      error: string | null;
+      /** Causa real (lib/errors la explica). */
+      error: AppError | null;
     }
   | { kind: 'dwell'; id: string; stopId: string; name: string; offer: StopLayer }
   | { kind: 'left_route'; id: string; payload: LeftRoutePayload }
@@ -83,7 +85,8 @@ type State = {
   phase: 'idle' | 'starting' | 'live' | 'done';
   live: LiveTour | null;
   card: TourCard | null;
-  error: string | null;
+  /** Por qué falló el último start_tour (lib/errors la explica). */
+  error: AppError | null;
   hydrated: boolean;
   /** Últimos eventos (menú dev / depuración). */
   log: TourLogEntry[];
@@ -297,9 +300,9 @@ export const useTourStore = create<TourStore>((set, get) => {
         get().startFromResult(r, { tripId, participants });
         return true;
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        log(`start_tour falló: ${message}`);
-        set({ phase: s.phase === 'live' || s.phase === 'done' ? s.phase : 'idle', error: message });
+        const error = toAppError(e);
+        log(`start_tour falló: ${error.code} ${error.detail ?? error.message}`);
+        set({ phase: s.phase === 'live' || s.phase === 'done' ? s.phase : 'idle', error });
         return false;
       }
     },
@@ -439,7 +442,7 @@ export const useTourStore = create<TourStore>((set, get) => {
       } catch (e) {
         const cur = get().card;
         if (cur?.id !== id) return;
-        set({ card: { ...cur, loading: false, error: e instanceof Error ? e.message : String(e) } as TourCard });
+        set({ card: { ...cur, loading: false, error: toAppError(e) } as TourCard });
       }
       persist();
     },

@@ -6,6 +6,9 @@ import { needsOnboarding } from '../../features/profile/model';
 import { useMyProfile, useOnboardingSkip } from '../../features/profile/queries';
 import { colors } from '../../ui/theme';
 
+// Si una pantalla del área logueada revienta: el Scout explica y ofrece reintentar (ui/ErrorBoundary).
+export { ScreenErrorBoundary as ErrorBoundary } from '../../ui/ErrorBoundary';
+
 /** PRD 10: si profiles.onboarded_at es null, abre el onboarding (salvo "Ahora no" en esta sesión). */
 function useOnboardingGate() {
   const profile = useMyProfile();
@@ -46,6 +49,8 @@ function AppStack() {
       {/* PRD 10 mínimo: onboarding con chips (primer login) y perfil editable. */}
       <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="profile" options={{ title: 'Tu perfil', headerBackTitle: 'Atrás' }} />
+      {/* Deep link de las notificaciones (build101://scout): abre la llamada con el Scout. */}
+      <Stack.Screen name="scout" options={{ headerShown: false, animation: 'none' }} />
       {/* Grupo: acceso secundario desde el "⋯" de Planificación (multiplayer fuera del MVP). */}
       <Stack.Screen name="group/[tripId]" options={{ title: 'Grupo y actividad', headerBackTitle: 'Viaje' }} />
       {/* PRD 02 · sheets del Plan (detalle/edición, crear, propuestas, traer del banco). */}

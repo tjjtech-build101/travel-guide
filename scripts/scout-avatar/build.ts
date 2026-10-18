@@ -1,4 +1,4 @@
-// Genera las imágenes y videos del Scout desde parts.ts → apps/mobile/assets/scout/
+// Genera las imágenes y videos del Scout desde apps/mobile/src/scout/parts.ts (la misma geometría que anima la app en vivo) → apps/mobile/assets/scout/
 //   poses/scout-<pose>.png (@2x, @3x)   una imagen por pose, fondo transparente, 195×240 pt
 //   head/scout-head.png (@2x, @3x)      solo la cabeza, para avatares redondos, 96×96 pt
 //   talk/scout-talk-<boca>.png (…)      pose tranquila con cada boca, para animar "hablando"
@@ -24,7 +24,7 @@ import {
   type Mouth,
   type ScoutPose,
   type SvgNode,
-} from './parts';
+} from '../../apps/mobile/src/scout/parts';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const OUT = join(ROOT, 'apps/mobile/assets/scout');

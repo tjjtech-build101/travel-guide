@@ -1,17 +1,20 @@
 // Perfil simple (PRD 10 mínimo): ver y editar las preferencias que usa el Scout para armar tours.
 import { SCOUT } from '@build101/shared';
+import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../features/auth/AuthProvider';
 import { useOutdoorMode } from '../../features/now/v2/outdoor';
+import { useGuideStore } from '../../features/guide/store';
 import { draftFromProfile, patchFromDraft, type ProfileDraft } from '../../features/profile/model';
 import { ProfileForm } from '../../features/profile/ProfileForm';
 import { useMyProfile, useSaveProfile } from '../../features/profile/queries';
-import { errorDetail } from '../../features/trips/queries';
 import { Avatar } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
+import { ScoutAvatar } from '../../ui/ScoutAvatar';
+import { errorLine } from '../../lib/errors';
 import { ErrorState, LoadingList } from '../../ui/States';
 import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
@@ -33,7 +36,7 @@ export default function ProfileScreen() {
 
   if (profile.isPending) return <LoadingList count={2} />;
   if (profile.isError || !draft) {
-    return <ErrorState message="No pude cargar tu perfil" detail={errorDetail(profile.error)} onRetry={() => profile.refetch()} />;
+    return <ErrorState message="No pude cargar tu perfil" error={profile.error} doing="cargar tu perfil" onRetry={() => profile.refetch()} />;
   }
 
   const me = {
@@ -63,9 +66,24 @@ export default function ProfileScreen() {
           <Text style={styles.switchLabel}>Modo exterior (más contraste y letra grande)</Text>
           <Switch value={outdoor} onValueChange={setOutdoor} accessibilityLabel="Modo exterior" />
         </View>
+        <View style={styles.guide}>
+          <ScoutAvatar size={48} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.guideTitle}>La guía de {SCOUT.name}</Text>
+            <Text style={styles.sub}>Te vuelvo a mostrar cómo funciona cada pantalla.</Text>
+          </View>
+        </View>
+        <Button
+          label="Volver a ver la guía"
+          variant="secondary"
+          onPress={() => {
+            useGuideStore.getState().resetAll();
+            router.navigate('/');
+          }}
+        />
       </ScrollView>
       <SafeAreaView edges={['bottom']} style={styles.bar}>
-        {save.isError ? <Text style={styles.error}>No pude guardar. Probá de nuevo.</Text> : null}
+        {save.isError ? <Text style={styles.error}>{errorLine(save.error, { doing: 'guardar tu perfil' })}</Text> : null}
         {saved && !dirty ? <Text style={styles.ok}>Listo, guardado.</Text> : null}
         <Button
           label="Guardar cambios"
@@ -95,6 +113,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   name: { fontSize: font.h2, fontWeight: '800', color: colors.text },
   sub: { fontSize: font.small, color: colors.textMuted, marginTop: 2 },
+  guide: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginBottom: -space.md },
+  guideTitle: { fontSize: font.h3, fontWeight: '800', color: colors.text },
   bar: {
     backgroundColor: colors.surface,
     paddingHorizontal: space.lg,

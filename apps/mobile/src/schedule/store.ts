@@ -27,7 +27,7 @@ import { queryClient } from '../lib/queryClient';
 import { useTourStore } from '../tour/store';
 import { useVoiceStore, voice } from '../voice/store';
 import { createDelivery } from './delivery';
-import { sendLocalNotification } from './notifications';
+import { NOTIF_CATEGORY, sendLocalNotification } from './notifications';
 
 const STORAGE_KEY = 'schedule.sent.v1';
 const FLUSH_MS = 1000;
@@ -109,7 +109,10 @@ export const useScheduleStore = create<State & Actions>((set, get) => {
         title,
         body,
         url: tripId ? `/trip/${tripId}/now` : '/',
-        data: { event: 'schedule_alert', ...a.payload },
+        data: { event: 'schedule_alert', trip_id: tripId ?? null, ...a.payload },
+        // Botones: "Ya salí / Avisame en 5 / Hablar con el Scout" o, si vas tarde, "Que el Scout lo reacomode".
+        category: a.payload.kind === 'running_late' ? NOTIF_CATEGORY.late : a.payload.kind === 'leave_now' ? NOTIF_CATEGORY.leave : undefined,
+        timeSensitive: a.payload.kind !== 'starting_soon',
       });
       log(ok ? `notificación: ${title}` : `sin permiso de notificaciones: ${title}`);
     },

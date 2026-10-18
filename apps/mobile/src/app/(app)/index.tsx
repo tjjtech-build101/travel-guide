@@ -18,11 +18,12 @@ import {
   TripRow,
 } from '../../features/home/components';
 import { firstName, greeting, splitTrips } from '../../features/home/selectors';
+import { GuideTarget, useGuide } from '../../features/guide/useGuide';
 import { useNow } from '../../features/now/clock';
 import { PlusIcon } from '../../features/plan/components/TypeIcon';
 import { useMyProfile } from '../../features/profile/queries';
 import { tripKeys } from '../../features/trips/keys';
-import { errorDetail, useMyTrips } from '../../features/trips/queries';
+import { useMyTrips } from '../../features/trips/queries';
 import { formatDay } from '../../lib/format';
 import { localParts } from '../../features/now/selectors';
 import { Avatar } from '../../ui/Avatar';
@@ -44,6 +45,8 @@ export default function HomeScreen() {
   const { now } = useNow();
   const [showAllPast, setShowAllPast] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Primera vez: el Scout se presenta y muestra dónde está cada cosa.
+  useGuide('welcome', !trips.isPending);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -75,20 +78,24 @@ export default function HomeScreen() {
         </View>
       ) : trips.isError ? (
         <View style={styles.error}>
-          <ErrorState message="No pudimos cargar tus viajes" detail={errorDetail(trips.error)} onRetry={() => trips.refetch()} />
+          <ErrorState message="No pudimos cargar tus viajes" error={trips.error} doing="cargar tus viajes" onRetry={() => trips.refetch()} />
         </View>
       ) : (
         <>
-          {hero && split?.live[0]?.id === hero.id ? (
-            <HeroLive trip={hero} now={now} />
-          ) : hero ? (
-            <HeroUpcoming trip={hero} now={now} />
-          ) : (
-            <HeroWelcome onNewTrip={openNewTrip} />
-          )}
+          <GuideTarget id="home.hero">
+            {hero && split?.live[0]?.id === hero.id ? (
+              <HeroLive trip={hero} now={now} />
+            ) : hero ? (
+              <HeroUpcoming trip={hero} now={now} />
+            ) : (
+              <HeroWelcome onNewTrip={openNewTrip} />
+            )}
+          </GuideTarget>
 
           <View style={styles.quickRow}>
-            <QuickAction label="Nuevo viaje" hint="Armalo con el Scout" icon={<PlusIcon color={colors.khakiText} size={20} />} onPress={openNewTrip} />
+            <GuideTarget id="home.newTrip" style={styles.quickTarget}>
+              <QuickAction label="Nuevo viaje" hint="Armalo con el Scout" icon={<PlusIcon color={colors.khakiText} size={20} />} onPress={openNewTrip} />
+            </GuideTarget>
             {/* PRD 04 (Unirme con código) */}
             <QuickAction label="Unirme con código" hint="Al viaje de tu grupo" icon={<GroupIcon color={colors.khakiText} size={20} />} soon />
             <QuickAction label="Tus gustos" hint="Para tus tours" icon={<PlanIcon color={colors.khakiText} size={20} />} onPress={() => router.push('/profile')} />
@@ -156,15 +163,17 @@ function Greeting({ now }: { now: number }) {
           {name ? `, ${name}` : ''}
         </Text>
       </Pressable>
-      <Pressable
-        onPress={() => router.push('/profile')}
-        accessibilityRole="button"
-        accessibilityLabel="Tu perfil"
-        hitSlop={8}
-        style={styles.avatarBtn}
-      >
-        <Avatar person={person} size={44} />
-      </Pressable>
+      <GuideTarget id="home.profile">
+        <Pressable
+          onPress={() => router.push('/profile')}
+          accessibilityRole="button"
+          accessibilityLabel="Tu perfil"
+          hitSlop={8}
+          style={styles.avatarBtn}
+        >
+          <Avatar person={person} size={44} />
+        </Pressable>
+      </GuideTarget>
     </View>
   );
 }
@@ -176,6 +185,7 @@ const styles = StyleSheet.create({
   hello: { fontSize: font.title, fontWeight: '700', color: colors.text },
   avatarBtn: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: 'flex-end', justifyContent: 'center' },
   quickRow: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
+  quickTarget: { flex: 1, flexDirection: 'row' },
   list: { gap: space.sm },
   link: { fontSize: font.small, fontWeight: '700', color: colors.primary },
   error: { minHeight: 360 },

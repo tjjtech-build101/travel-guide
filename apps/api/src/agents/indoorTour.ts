@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import type { GenerateTourResult, ToolInput, TourRoute } from '@build101/shared';
-import { dbError } from '../errors';
+import { dbError, jobErrorFields } from '../errors';
 import { insertFeed } from '../feed';
 import { fetchPageText } from '../google/pageText';
 import { createJob, JobProgress } from '../jobs';
@@ -287,6 +287,7 @@ export async function runIndoorTour(
   let title: string | null = null;
   let stopCount = 0;
   let fatal: string | null = null;
+  let fatalErr: unknown = null;
   try {
     // 1) El lugar.
     const near = input.lat != null && input.lng != null ? { lat: input.lat, lng: input.lng } : null;
@@ -398,7 +399,8 @@ export async function runIndoorTour(
     stopCount = stopRows.length;
   } catch (err) {
     console.error(`[indoor_tour/${jobId}]`, err);
-    fatal = ctrl.signal.aborted ? 'La investigación tardó demasiado.' : err instanceof Error ? err.message.slice(0, 300) : String(err);
+    fatal = ctrl.signal.aborted ? 'La investigación tardó demasiado.' : jobErrorFields(err).error;
+    fatalErr = ctrl.signal.aborted ? { name: 'TimeoutError', message: fatal } : err;
   } finally {
     clearTimeout(budget);
     progress.stopHeartbeat();
@@ -418,7 +420,8 @@ export async function runIndoorTour(
   if (fatal) {
     await admin.from('tours').update({ status: 'failed' }).eq('id', tourId);
     await progress.push(`Se trancó: ${fatal}`);
-    await progress.set({ status: 'failed', error: fatal, result });
+    const f = jobErrorFields(fatalErr);
+    await progress.set({ status: 'failed', error: fatal, error_code: f.error_code, error_provider: f.error_provider, result });
   } else {
     await progress.push(`¡Listo! «${title}» · ${stopCount} paradas`);
     await progress.set({ status: 'done', error: null, result });

@@ -27,6 +27,7 @@ import { openRoute } from '../../../../features/route/nav';
 import { formatDay } from '../../../../lib/format';
 import { Avatar } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
+import { ErrorNotice } from '../../../../ui/ErrorNotice';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { BLOCK_STATUS } from '@build101/shared';
@@ -47,6 +48,26 @@ export default function BlockSheet() {
       <SheetRoot>
         <SheetHeader title="Bloque" />
         <SheetMessage title="Cargando…" />
+      </SheetRoot>
+    );
+  }
+  if ((blocks.isError && !blocks.data) || (overview.isError && !overview.data)) {
+    // Falló la carga: no es que el bloque no exista.
+    const err = blocks.error ?? overview.error;
+    return (
+      <SheetRoot>
+        <SheetHeader title="Bloque" />
+        <SheetBody>
+          <ErrorNotice
+            error={err}
+            doing="cargar el bloque"
+            onRetry={() => {
+              void blocks.refetch();
+              void overview.refetch();
+            }}
+            retrying={blocks.isFetching || overview.isFetching}
+          />
+        </SheetBody>
       </SheetRoot>
     );
   }
@@ -288,11 +309,12 @@ function EditMode({ block, tripId, onDone }: { block: PlanBlock; tripId: string;
     const patch = diffPatch(block, fields);
     if (!Object.keys(patch).length) return onDone();
     try {
-      await update.mutateAsync({ blockId: block.id, patch });
+      // silentError: el error se muestra acá en el formulario (sin toast encima).
+      await update.mutateAsync({ blockId: block.id, patch, silentError: true });
       onDone();
     } catch (e) {
       // El caché ya volvió al valor anterior (rollback); el formulario conserva lo que escribió.
-      setErrors({ form: toolErrorMessage(e) });
+      setErrors({ form: toolErrorMessage(e, 'guardar el bloque') });
     }
   };
 

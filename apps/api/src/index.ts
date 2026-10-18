@@ -4,7 +4,7 @@ import { cors } from 'hono/cors';
 import { TOOL_NAMES } from '@build101/shared';
 import { requireAuth, type AuthVars } from './auth';
 import { env, missingSupabaseEnv } from './env';
-import { dbError } from './errors';
+import { dbError, toFailure } from './errors';
 import { enrichStopTracked, internalToken } from './agents/tourDeepResearch';
 import { runInBackground } from './jobs';
 import { serviceClient } from './supabase';
@@ -84,7 +84,8 @@ app.get('/jobs/:id', requireAuth, async (c) => {
 app.notFound((c) => c.json({ ok: false, error: { code: 'not_found', message: 'Ruta inexistente.' } }, 404));
 app.onError((err, c) => {
   console.error('[api]', err);
-  return c.json({ ok: false, error: { code: 'internal', message: err.message } }, 500);
+  const f = toFailure(err);
+  return c.json({ ok: false, error: f.toError() }, f.status as 500);
 });
 
 export default app;

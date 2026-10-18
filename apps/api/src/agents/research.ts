@@ -9,6 +9,7 @@
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import type { ResearchResult, ToolInput } from '@build101/shared';
+import { jobErrorFields } from '../errors';
 import { createJob, JobProgress } from '../jobs';
 import { appendFacts, ensurePlace, findPlaceByName, type LibraryFact } from '../places/library';
 import type { ToolCtx } from '../tools/types';
@@ -222,9 +223,11 @@ export async function runResearch(args: {
     await progress.set({ status: 'done', error: null, result });
     return result;
   } catch (err) {
-    const msg = ctrl.signal.aborted ? 'La búsqueda tardó demasiado' : (err as Error).message.slice(0, 300);
+    const f = ctrl.signal.aborted
+      ? { error: 'La búsqueda tardó demasiado', error_code: 'timeout', error_provider: null }
+      : jobErrorFields(err);
     await progress.push('No pude investigarlo');
-    await progress.set({ status: 'failed', error: msg });
+    await progress.set({ status: 'failed', ...f });
     throw err;
   } finally {
     clearTimeout(budget);

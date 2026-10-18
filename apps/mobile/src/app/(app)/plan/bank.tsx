@@ -14,6 +14,7 @@ import { Text } from '../../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../../ui/theme';
 import { openNewBlock } from '../../../features/plan/nav';
 import { Button } from '../../../ui/Button';
+import { ErrorNotice } from '../../../ui/ErrorNotice';
 
 export default function BankSheet() {
   const { tripId, legId, dayId } = useLocalSearchParams<{ tripId: string; legId: string; dayId: string }>();
@@ -30,6 +31,16 @@ export default function BankSheet() {
       <SheetHeader title={`Traer al ${dayName}`} />
       {blocks.isPending ? (
         <SheetMessage title="Cargando…" />
+      ) : blocks.isError && !blocks.data ? (
+        // Falló la carga: no decir que el banco está vacío.
+        <SheetBody>
+          <ErrorNotice
+            error={blocks.error}
+            doing="cargar las ideas"
+            onRetry={() => void blocks.refetch()}
+            retrying={blocks.isFetching}
+          />
+        </SheetBody>
       ) : !ideas.length ? (
         <SheetBody>
           <SheetMessage title="El banco de ideas está vacío" subtitle={`Anotá ideas sin día en ${leg?.city ?? 'este tramo'} y después las agendás.`} />

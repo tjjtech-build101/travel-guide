@@ -1,7 +1,7 @@
 // OpenAI Realtime: config de la sesión y token temporal (client_secret). La key nunca sale del servidor.
 import { APP_ONLY_TOOLS, REALTIME_TRANSCRIBE_MODEL, SCOUT, toRealtimeTools, TOOL_NAMES, VOICE_CLIENT_TOOLS, type ToolName } from '@build101/shared';
 import { env } from '../env';
-import { notConfigured, upstream } from '../errors';
+import { fetchFailure, httpFailure, notConfigured, upstream } from '../errors';
 import { handlers } from '../tools/registry';
 
 const CLIENT_SECRETS_URL = 'https://api.openai.com/v1/realtime/client_secrets';
@@ -92,7 +92,7 @@ export async function createCall(
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
   const key = env().OPENAI_API_KEY;
-  if (!key) throw notConfigured('OpenAI (OPENAI_API_KEY)');
+  if (!key) throw notConfigured('OpenAI (OPENAI_API_KEY)', 'openai');
   const fd = new FormData();
   fd.set('sdp', sdp);
   fd.set('session', JSON.stringify(session));
@@ -105,16 +105,17 @@ export async function createCall(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
-    throw upstream(`OpenAI no respondió: ${(err as Error).message}`);
+    throw fetchFailure('openai', err);
   }
   const text = await res.text();
-  if (!res.ok || !text.startsWith('v=')) throw upstream(`OpenAI ${res.status}: ${text.slice(0, 300)}`);
+  if (!res.ok) throw httpFailure('openai', res.status, text);
+  if (!text.startsWith('v=')) throw upstream('OpenAI devolvió una respuesta que no esperábamos.', 'openai', text.slice(0, 300));
   return text;
 }
 
 export async function createClientSecret(session: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<ClientSecret> {
   const key = env().OPENAI_API_KEY;
-  if (!key) throw notConfigured('OpenAI (OPENAI_API_KEY)');
+  if (!key) throw notConfigured('OpenAI (OPENAI_API_KEY)', 'openai');
   let res: Response;
   try {
     res = await fetchImpl(CLIENT_SECRETS_URL, {
@@ -124,12 +125,17 @@ export async function createClientSecret(session: Record<string, unknown>, fetch
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (err) {
-    throw upstream(`OpenAI no respondió: ${(err as Error).message}`);
+    throw fetchFailure('openai', err);
   }
-  const json = (await res.json().catch(() => null)) as { value?: string; expires_at?: number; error?: { message?: string } } | null;
-  if (!res.ok || !json?.value) {
-    // El mensaje de OpenAI no incluye la key; sirve para debug (p. ej. un esquema de herramienta inválido).
-    throw upstream(`OpenAI ${res.status}: ${json?.error?.message ?? 'sin client_secret'}`);
+  const raw = await res.text().catch(() => '');
+  let json: { value?: string; expires_at?: number } | null;
+  try {
+    json = JSON.parse(raw) as { value?: string; expires_at?: number };
+  } catch {
+    json = null;
   }
+  // El cuerpo de error de OpenAI no incluye la key; va en `detail` (p. ej. un esquema de herramienta inválido).
+  if (!res.ok) throw httpFailure('openai', res.status, raw);
+  if (!json?.value) throw upstream('OpenAI no devolvió el token de la llamada.', 'openai', raw.slice(0, 300));
   return { value: json.value, expires_at: json.expires_at ?? null };
 }

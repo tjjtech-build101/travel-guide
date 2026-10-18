@@ -1,6 +1,6 @@
 // Open-Meteo (PRD 16): pronóstico diario + horario, sin key. https://open-meteo.com/en/docs
 import type { WeatherDay } from '@build101/shared';
-import { upstream } from '../errors';
+import { fetchFailure, httpFailure } from '../errors';
 import { cached } from './cache';
 
 const BASE = 'https://api.open-meteo.com/v1/forecast';
@@ -58,9 +58,9 @@ export async function fetchForecast(args: { lat: number; lng: number; date_from:
       try {
         res = await fetch(`${BASE}?${q}`, { signal: AbortSignal.timeout(8000) });
       } catch (err) {
-        throw upstream(`Open-Meteo no respondió: ${(err as Error).message}`);
+        throw fetchFailure('weather', err);
       }
-      if (!res.ok) throw upstream(`Open-Meteo respondió ${res.status}`);
+      if (!res.ok) throw httpFailure('weather', res.status, '');
       const body = (await res.json()) as OpenMeteoResponse;
       const fetched_at = new Date().toISOString();
       const daily = body.daily;

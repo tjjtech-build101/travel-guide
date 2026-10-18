@@ -3,14 +3,15 @@ import { SCOUT } from '@build101/shared';
 import { router } from 'expo-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, type ReactNode } from 'react';
-import { Alert, Image, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { AvatarStack } from '../../ui/Avatar';
 import { Skeleton } from '../../ui/States';
-import { SCOUT_POSES, type ScoutPose } from '../../ui/ScoutImage';
+import { ScoutRig, type ScoutPose } from '../../scout/ScoutRig';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { callTool } from '../../lib/api';
+import { errorLine } from '../../lib/errors';
 import { formatDateRange } from '../../lib/format';
 import { ChevronIcon, DotsIcon, SparkIcon } from '../plan/components/TypeIcon';
 import { confirm, showMenu } from '../plan/menu';
@@ -49,7 +50,7 @@ export function useTripMenu() {
               void (async () => {
                 const res = await callTool('delete_trip', { trip_id: trip.id });
                 if (res.ok) void qc.invalidateQueries({ queryKey: tripKeys.mine() });
-                else Alert.alert('No pude borrar el viaje', res.error.message);
+                else Alert.alert('No pude borrar el viaje', errorLine(res.error, { doing: 'borrar el viaje' }));
               })();
             },
           ),
@@ -83,7 +84,7 @@ function HeroShell({
       style={({ pressed }) => [styles.hero, pressed && styles.pressed]}
     >
       <View style={styles.heroGlow} />
-      <Image source={SCOUT_POSES[pose]} style={styles.heroScout} resizeMode="contain" accessibilityIgnoresInvertColors />
+      <ScoutRig width={92} pose={pose} style={styles.heroScout} />
       {children}
     </Pressable>
   );
@@ -146,7 +147,24 @@ export function HeroLive({ trip, now }: { trip: TripCard; now: number }) {
   let body: ReactNode;
   if (!today) {
     body = overview.isError || blocks.isError ? (
-      <Text style={styles.nowEmpty}>No pudimos cargar el plan de hoy.</Text>
+      // La causa real (sin conexión, sesión vencida…) y un Reintentar chico (el héroe entero abre Ahora).
+      <View style={{ gap: space.xs }}>
+        <Text style={styles.nowEmpty}>No pudimos cargar el plan de hoy.</Text>
+        <Text style={styles.nowAfter} numberOfLines={2}>
+          {errorLine(overview.error ?? blocks.error, { doing: 'cargar el plan de hoy' })}
+        </Text>
+        <Pressable
+          onPress={() => {
+            void overview.refetch();
+            void blocks.refetch();
+          }}
+          accessibilityRole="button"
+          hitSlop={8}
+          style={styles.nowRetry}
+        >
+          <Text style={styles.nowRetryText}>{overview.isFetching || blocks.isFetching ? 'Reintentando…' : 'Reintentar'}</Text>
+        </Pressable>
+      </View>
     ) : (
       <View style={{ gap: space.sm }}>
         <Skeleton width="40%" height={14} style={styles.skeletonDark} />
@@ -413,7 +431,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     opacity: 0.45,
   },
-  heroScout: { position: 'absolute', right: 6, top: 10, width: 92, height: 113 },
+  heroScout: { position: 'absolute', right: 6, top: 10 },
   kicker: {
     fontSize: font.tiny,
     fontWeight: '700',
@@ -444,6 +462,8 @@ const styles = StyleSheet.create({
   nowTitle: { fontSize: font.h2, fontWeight: '700', color: ON_DARK },
   nowAfter: { fontSize: font.small, color: ON_DARK_MUTED, marginTop: space.xs },
   nowEmpty: { fontSize: font.body, color: ON_DARK },
+  nowRetry: { alignSelf: 'flex-start', minHeight: MIN_TOUCH, justifyContent: 'center' },
+  nowRetryText: { fontSize: font.small, fontWeight: '700', color: ON_DARK, textDecorationLine: 'underline' },
   progressTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255,249,238,0.15)', overflow: 'hidden', marginTop: space.xs },
   progressFill: { height: 6, borderRadius: 3, backgroundColor: colors.bronze },
   skeletonDark: { backgroundColor: 'rgba(255,249,238,0.14)' },

@@ -4,10 +4,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { env } from '../env';
-import { notConfigured } from '../errors';
+import { notConfigured, providerFailure } from '../errors';
 import { addUsage, emptyUsage, TripSkeleton, type Usage } from './schemas';
 
-export const PLANNER_MODEL = 'claude-opus-5-5';
+export const PLANNER_MODEL = 'claude-sonnet-5-5';
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -74,7 +74,7 @@ export class JobError extends Error {
 // Exportados: los reusan otros agentes (ej. tourLlm.ts) para no duplicar el cliente ni el parseo.
 export function anthropicClient(): Anthropic {
   const apiKey = env().ANTHROPIC_API_KEY;
-  if (!apiKey) throw notConfigured('Anthropic (ANTHROPIC_API_KEY)');
+  if (!apiKey) throw notConfigured('Anthropic (ANTHROPIC_API_KEY)', 'anthropic');
   // 2 reintentos (429/5xx) por defecto del SDK.
   return new Anthropic({ apiKey });
 }
@@ -110,7 +110,7 @@ export function anthropicPlanner(): PlannerLLM {
         params as unknown as Parameters<typeof client.beta.messages.create>[0],
       )) as unknown as { stop_reason: string | null; content: AnyBlock[]; usage: Parameters<typeof addUsage>[1] };
       const usage = addUsage(emptyUsage(), msg.usage);
-      if (msg.stop_reason === 'refusal') throw new JobError('skeleton_failed', 'Claude no quiso armar el esqueleto (refusal).');
+      if (msg.stop_reason === 'refusal') throw providerFailure('provider_refused', 'anthropic', 'skeleton refusal', 'Claude no quiso armar este viaje.');
       if (msg.stop_reason === 'max_tokens') throw new JobError('skeleton_failed', 'El esqueleto quedó cortado (max_tokens).');
       let skeleton: TripSkeleton;
       try {

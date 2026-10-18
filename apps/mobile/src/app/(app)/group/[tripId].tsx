@@ -2,7 +2,7 @@
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useLocalSearchParams } from 'expo-router';
-import { errorDetail, useActivityFeed, useTripMembers } from '../../../features/trips/queries';
+import { useActivityFeed, useTripMembers } from '../../../features/trips/queries';
 import { timeAgo } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
 import { ErrorState, LoadingList } from '../../../ui/States';
@@ -21,7 +21,8 @@ export default function GroupTab() {
     return (
       <ErrorState
         message="No pudimos cargar el grupo"
-        detail={errorDetail(members.error ?? feed.error)}
+        error={members.error ?? feed.error}
+        doing="cargar el grupo"
         onRetry={() => {
           void members.refetch();
           void feed.refetch();

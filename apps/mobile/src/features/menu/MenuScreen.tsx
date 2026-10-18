@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useGuide } from '../guide/useGuide';
 import type { AvatarPerson } from '../../ui/Avatar';
 import { Button } from '../../ui/Button';
 import { EmptyState, ErrorState } from '../../ui/States';
@@ -14,7 +15,6 @@ import { colors, font, space } from '../../ui/theme';
 import { AgentJobProgress } from '../jobs/AgentJobProgress';
 import { ActionToast } from '../plan/components/ActionToast';
 import { useMe, usePermissions, usePlanBlocks, usePlanOverview } from '../plan/queries';
-import { errorDetail } from '../trips/queries';
 import { LegChips, MenuSkeleton, OptionCard } from './components';
 import { buildMenuSections, initialMenuLeg, menuCounts, menuLegStates, nextReaction, reactionsByOption } from './model';
 import { useComposeDays, useLegOptionReactions, useLegOptions, useReactOption } from './queries';
@@ -33,6 +33,7 @@ export function MenuScreen({ tripId, legId: requestedLeg }: { tripId: string; le
   const perms = usePermissions(tripId);
   const react = useReactOption(tripId, me);
   const compose = useComposeDays(tripId);
+  useGuide('menu');
   const [jobId, setJobId] = useState<string | null>(null);
   const [legId, setLegId] = useState<string | null>(null);
 
@@ -105,7 +106,8 @@ export function MenuScreen({ tripId, legId: requestedLeg }: { tripId: string; le
     return (
       <ErrorState
         message="No pudimos cargar el menú"
-        detail={errorDetail(overview.error ?? options.error ?? reactions.error)}
+        error={overview.error ?? options.error ?? reactions.error}
+        doing="cargar el menú"
         onRetry={retry}
       />
     );

@@ -11,7 +11,7 @@ import { StyleSheet, View } from 'react-native';
 import { SheetBody, SheetHeader, SheetRoot, SheetMessage } from '../../../features/plan/components/Sheet';
 import { SparkIcon } from '../../../features/plan/components/TypeIcon';
 import { STATUS_LABEL, TIME_FLEX_LABEL, TYPE_LABEL } from '../../../features/plan/labels';
-import { toolErrorMessage } from '../../../features/plan/mutations';
+import { toolErrorView } from '../../../features/plan/mutations';
 import { changesLabel, splitProposals } from '../../../features/plan/proposals';
 import { planKeys, usePendingProposals, usePermissions, usePlanBlocks, usePlanOverview } from '../../../features/plan/queries';
 import { hhmm, shortDay, type PlanBlock, type PlanLeg, type PlanMember } from '../../../features/plan/selectors';
@@ -20,6 +20,7 @@ import { callToolOrThrow } from '../../../lib/api';
 import { timeAgo } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
 import { Button } from '../../../ui/Button';
+import { ErrorNotice } from '../../../ui/ErrorNotice';
 import { Text } from '../../../ui/Text';
 import { colors, font, radius, space } from '../../../ui/theme';
 
@@ -75,8 +76,18 @@ export default function ProposalsSheet() {
       <SheetHeader title={fresh.length ? `Propuestas (${fresh.length})` : 'Propuestas'} />
       {proposals.isPending || blocks.isPending ? (
         <SheetMessage title="Cargando propuestas…" />
-      ) : proposals.isError ? (
-        <SheetMessage title="No pudimos cargar las propuestas" subtitle="Revisá la conexión y abrí de nuevo." />
+      ) : (proposals.isError && !proposals.data) || (blocks.isError && !blocks.data) ? (
+        <SheetBody>
+          <ErrorNotice
+            error={proposals.error ?? blocks.error}
+            doing="cargar las propuestas"
+            onRetry={() => {
+              void proposals.refetch();
+              void blocks.refetch();
+            }}
+            retrying={proposals.isFetching || blocks.isFetching}
+          />
+        </SheetBody>
       ) : !total ? (
         <SheetMessage
           title="No hay propuestas pendientes"
@@ -137,6 +148,8 @@ function ProposalCard({
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<Decision | null>(null);
+  // El error de decidir se muestra en la tarjeta: un toast quedaría tapado por el sheet.
+  const [failure, setFailure] = useState<{ error: unknown; decision: Decision } | null>(null);
   const author = members.find((m) => m.id === p.created_by);
   const authorName = p.by_agent ? SCOUT.name : author?.display_name?.split(' ')[0] || 'Alguien del grupo';
   const ops = p.ops ?? [];
@@ -151,6 +164,7 @@ function ProposalCard({
 
   const decide = async (decision: Decision) => {
     setBusy(decision);
+    setFailure(null);
     try {
       const res = await callToolOrThrow<'decide_proposal', DecideProposalResult>('decide_proposal', { proposal_id: p.id, decision });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -164,7 +178,7 @@ function ProposalCard({
       }
     } catch (e) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      showToast({ text: toolErrorMessage(e, 'No se pudo decidir la propuesta. Probá de nuevo.'), tone: 'error' });
+      setFailure({ error: e, decision });
     } finally {
       setBusy(null);
       void qc.invalidateQueries({ queryKey: planKeys.proposals(tripId) });
@@ -200,6 +214,13 @@ function ProposalCard({
           <OpLine key={i} op={op} blocks={blocks} dayLabel={dayLabel} />
         ))}
       </View>
+      {failure ? (
+        <ErrorNotice
+          compact
+          error={failure.error}
+          view={toolErrorView(failure.error, failure.decision === 'accept' ? 'aceptar la propuesta' : 'rechazar la propuesta')}
+        />
+      ) : null}
       {staleReason ? (
         <>
           <Text style={styles.staleText}>Venció: {staleReason}</Text>

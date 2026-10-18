@@ -26,9 +26,16 @@ export function ActionToast({ bottom }: { bottom: number }) {
       pointerEvents="box-none"
     >
       <View style={[styles.box, { backgroundColor: bg }]} accessibilityRole="alert" accessibilityLiveRegion="polite">
-        <Text style={styles.text} numberOfLines={2}>
-          {toast.text}
-        </Text>
+        <View style={styles.texts}>
+          {toast.title ? (
+            <Text style={styles.title} numberOfLines={1}>
+              {toast.title}
+            </Text>
+          ) : null}
+          <Text style={[styles.text, toast.title ? styles.sub : null]} numberOfLines={toast.title ? 3 : 2}>
+            {toast.text}
+          </Text>
+        </View>
         {toast.undoToken && toast.tripId ? (
           <Pressable
             accessibilityRole="button"
@@ -67,7 +74,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
   },
-  text: { flex: 1, color: '#fff', fontSize: font.small, fontWeight: '600', paddingVertical: space.sm },
+  texts: { flex: 1, paddingVertical: space.sm },
+  title: { color: '#fff', fontSize: font.small, fontWeight: '800' },
+  text: { color: '#fff', fontSize: font.small, fontWeight: '600' },
+  sub: { fontWeight: '400', marginTop: 1 },
   undo: { minHeight: MIN_TOUCH, minWidth: 96, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.md },
   undoText: { color: '#8DB8FF', fontSize: font.body, fontWeight: '800' },
 });

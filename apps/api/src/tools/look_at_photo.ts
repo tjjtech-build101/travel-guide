@@ -7,7 +7,7 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { distanceMeters, isManualTour, LookAtPhotoModelOutput, type LookAtPhotoOutput, type ToolInput } from '@build101/shared';
 import { PLANNER_MODEL } from '../agents/llm';
 import { env } from '../env';
-import { badInput, dbError, notConfigured, ToolFailure, upstream } from '../errors';
+import { badInput, classifyAnthropic, dbError, notConfigured, providerFailure, upstream } from '../errors';
 import { runInBackground } from '../jobs';
 import { ensurePlace } from '../places/library';
 import type { Db } from '../supabase';
@@ -100,7 +100,7 @@ const SYSTEM = [
   'quality: blurry si está movida, dark si está oscura (en ese caso narration pide sacar otra).',
 ].join('\n');
 
-/** VISION_MODEL permite comparar modelos por latencia (default Opus 5.5, Arquitectura). */
+/** VISION_MODEL permite comparar modelos por latencia (default Sonnet 5.5, Arquitectura). */
 export function visionModel(): string {
   return process.env.VISION_MODEL?.trim() || PLANNER_MODEL;
 }
@@ -132,17 +132,19 @@ export const anthropicVision: VisionLLM = async ({ system, text, imageBase64 }) 
   try {
     created = await client.beta.messages.create(params as never);
   } catch (err) {
-    const m = (err as Error).message ?? '';
-    // Sin saldo / sin acceso: error legible (el scout dice que ahora no puede mirar) en vez de un 500 crudo.
-    if (/credit balance|billing|quota/i.test(m)) throw new ToolFailure(503, 'vision_unavailable', 'Ahora no puedo mirar fotos (sin saldo de Claude).');
-    throw upstream(`Claude visión: ${m.slice(0, 200)}`);
+    // Sin saldo, key inválida, saturado…: error clasificado (provider_*) en vez de un 500 crudo.
+    throw classifyAnthropic(err) ?? upstream('Claude no pudo mirar la foto.', 'anthropic', (err as Error).message?.slice(0, 300));
   }
   const msg = created as unknown as {
     stop_reason: string | null;
     content: { type: string; text?: string }[];
   };
-  if (msg.stop_reason === 'refusal') throw upstream('Claude no quiso describir la foto.');
-  return format.parse(msg.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''));
+  if (msg.stop_reason === 'refusal') throw providerFailure('provider_refused', 'anthropic', 'refusal', 'Claude no quiso describir esa foto.');
+  try {
+    return format.parse(msg.content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join(''));
+  } catch (err) {
+    throw upstream('Claude contestó algo que no pudimos leer.', 'anthropic', (err as Error).message.slice(0, 300));
+  }
 };
 
 /** Inyectable en tests. */

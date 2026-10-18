@@ -12,7 +12,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
 
-import { callTool } from '../../lib/api';
+import { callTool, ToolCallError } from '../../lib/api';
+import type { AppError } from '../../lib/errors';
 import { env } from '../../lib/env';
 
 export const NEARBY_TOUR_TOOL = 'generate_tour';
@@ -39,13 +40,14 @@ export async function fetchTourBrief(args: { lat: number; lng: number; trip_id?:
     duration_min: args.duration_min,
     ...(args.trip_id ? { trip_id: args.trip_id } : {}),
   });
-  if (!res.ok) throw new Error(res.error.message);
+  if (!res.ok) throw new ToolCallError(res.error.code, res.error.message, res.error.issues, res.error.provider, res.error.detail);
   return res.data;
 }
 
 export type NearbyTourResult =
   | { ok: true; job_id: string; tour_id: string }
-  | { ok: false; code: 'not_available' | 'no_location' | 'error'; message: string };
+  /** `error`: la causa real (lib/errors la explica: sin créditos, sin conexión…); `message` queda para logs. */
+  | { ok: false; code: 'not_available' | 'no_location' | 'error'; message: string; error: AppError };
 
 /** Herramientas que expone la API (GET /health). Lista vacía si no responde. */
 export async function fetchApiTools(): Promise<string[]> {
@@ -83,8 +85,12 @@ export async function startNearbyTour(input: StartNearbyTourInput): Promise<Near
     useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: input.trip_id ?? null, input });
     return { ok: true, job_id: res.data.job_id, tour_id: res.data.tour_id };
   }
-  if (res.error.code === 'unknown_tool') return { ok: false, code: 'not_available', message: 'El "Tour acá, ahora" llega muy pronto.' };
-  return { ok: false, code: 'error', message: res.error.message };
+  if (res.error.code === 'unknown_tool') {
+    const message = 'El "Tour acá, ahora" llega muy pronto.';
+    return { ok: false, code: 'not_available', message, error: { code: 'not_available', message } };
+  }
+  const { code, message, provider, detail } = res.error;
+  return { ok: false, code: 'error', message, error: { code, message, provider, detail } };
 }
 
 /**
@@ -100,7 +106,8 @@ export async function generateTourForBlock(block: {
   duration_min: number | null;
 }): Promise<NearbyTourResult> {
   if (block.lat == null || block.lng == null) {
-    return { ok: false, code: 'no_location', message: 'Este bloque no tiene una ubicación cargada.' };
+    const message = 'Este bloque no tiene una ubicación cargada.';
+    return { ok: false, code: 'no_location', message, error: { code: 'no_location', message } };
   }
   const duration_min = block.duration_min ?? 60;
   const res = await callTool<'generate_tour', GenerateTourStart>('generate_tour', {
@@ -117,8 +124,12 @@ export async function generateTourForBlock(block: {
     useNearbyTourJob.getState().track({ jobId: res.data.job_id, tourId: res.data.tour_id, durationMin: duration_min, tripId: block.trip_id });
     return { ok: true, job_id: res.data.job_id, tour_id: res.data.tour_id };
   }
-  if (res.error.code === 'unknown_tool') return { ok: false, code: 'not_available', message: 'Generar tour llega muy pronto.' };
-  return { ok: false, code: 'error', message: res.error.message };
+  if (res.error.code === 'unknown_tool') {
+    const message = 'Generar tour llega muy pronto.';
+    return { ok: false, code: 'not_available', message, error: { code: 'not_available', message } };
+  }
+  const { code, message, provider, detail } = res.error;
+  return { ok: false, code: 'error', message, error: { code, message, provider, detail } };
 }
 
 // ---------- job en curso ----------

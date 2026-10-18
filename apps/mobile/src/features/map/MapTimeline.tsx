@@ -1,13 +1,13 @@
 // Lista del Mapa como sendero: la hora grande a la izquierda y los números unidos por la misma línea
 // punteada que el recorrido del mapa. "Ahora" y "Próximo" a la vista; las paradas de un tour van
-// adentro de su tour.
+// adentro de su tour (sin número: los números son del día; así no hay dos "3").
 import { SCOUT } from '@build101/shared';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
 
 import { Text } from '../../ui/Text';
 import { colors, font, radius, space } from '../../ui/theme';
-import type { MapPoint, PointStatus } from './model';
+import { sameish, type MapPoint, type PointStatus } from './model';
 
 type Props = {
   points: MapPoint[];
@@ -78,7 +78,8 @@ function TimelineRow({
   const done = status === 'done';
   const dotY = nested ? DOT_Y.stop : DOT_Y.main;
   const duration = durationLabel(point.start, point.end);
-  const meta = point.kind === 'block' ? point.place : point.sublabel;
+  // El lugar solo si no está ya en el título ("Feria de Tristán Narvaja" dos veces, no).
+  const meta = point.kind === 'block' ? (point.place && !sameish(point.place, point.label) ? point.place : null) : point.sublabel;
   const a11y = [point.start, point.label, status === 'now' ? 'ahora' : status === 'next' ? 'próximo' : null].filter(Boolean).join(', ');
 
   return (
@@ -114,11 +115,11 @@ function TimelineRow({
         <View
           style={[
             nested ? styles.stopDot : styles.dot,
-            { marginTop: dotY - (nested ? 8 : 12), backgroundColor: done ? colors.khaki : point.color },
+            { marginTop: dotY - (nested ? 5 : 12), backgroundColor: done ? colors.khaki : point.color },
             selected && styles.dotSelected,
           ]}
         >
-          <Text style={nested ? styles.stopDotText : styles.dotText}>{point.order ?? '•'}</Text>
+          {nested ? null : <Text style={styles.dotText}>{point.order ?? '•'}</Text>}
         </View>
       </View>
 
@@ -175,8 +176,7 @@ const styles = StyleSheet.create({
   },
   dotSelected: { transform: [{ scale: 1.2 }] },
   dotText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
-  stopDot: { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  stopDotText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  stopDot: { width: 10, height: 10, borderRadius: 5 },
   card: {
     flex: 1,
     backgroundColor: colors.surface,

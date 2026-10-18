@@ -20,3 +20,4 @@ export * from './routeProgress';
 export * from './tourBrief';
 export * from './planner';
 export * from './tourPlanner';
+export * from './errors';

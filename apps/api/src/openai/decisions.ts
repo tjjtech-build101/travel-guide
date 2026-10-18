@@ -2,7 +2,7 @@
 // libre. Acá solo el tipo "predicate" (probabilidad de que una condición sea cierta), 150ms, $0.10/1M
 // tokens de entrada, sin cargo de salida. https://developers.openai.com/api/docs/guides/decisions
 import { env } from '../env';
-import { notConfigured, upstream } from '../errors';
+import { fetchFailure, httpFailure, notConfigured, upstream } from '../errors';
 
 const ENDPOINT = 'https://api.openai.com/v1/decisions';
 const MODEL = 'gpt-6-luna';
@@ -12,7 +12,7 @@ type DecisionsResponse = { answers: { type: string; name: string; probability: n
 /** Probabilidad (0-1) de que `instructions` sea cierto para `input`. */
 export async function predicate(input: string, name: string, instructions: string): Promise<number> {
   const apiKey = env().OPENAI_API_KEY;
-  if (!apiKey) throw notConfigured('OpenAI (OPENAI_API_KEY)');
+  if (!apiKey) throw notConfigured('OpenAI (OPENAI_API_KEY)', 'openai');
   let res: Response;
   try {
     res = await fetch(ENDPOINT, {
@@ -22,11 +22,11 @@ export async function predicate(input: string, name: string, instructions: strin
       signal: AbortSignal.timeout(5000),
     });
   } catch (err) {
-    throw upstream(`OpenAI Decisions no respondió: ${(err as Error).message}`);
+    throw fetchFailure('openai', err);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw upstream(`OpenAI Decisions respondió ${res.status}: ${text.slice(0, 300)}`);
+    throw httpFailure('openai', res.status, text);
   }
   const body = (await res.json()) as DecisionsResponse;
   const answer = body.answers.find((a) => a.name === name);

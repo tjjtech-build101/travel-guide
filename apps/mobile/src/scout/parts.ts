@@ -1,6 +1,6 @@
 // Geometría del Scout (chibi de cuerpo entero). Puro datos, sin React: cada nodo es
-// [tag, props, ...hijos] con props en camelCase (las de react-native-svg, para poder animarlo en
-// la app más adelante). build.ts lo pasa a SVG y genera PNG y videos.
+// [tag, props, ...hijos] con props en camelCase (las de react-native-svg): la app lo dibuja y anima en
+// vivo (src/scout/ScoutRig.tsx) y scripts/scout-avatar/build.ts lo pasa a SVG y genera PNG y videos.
 // Coordenadas: viewBox "-10 0 260 320". La cabeza se dibuja a escala 1 y se agranda con
 // HEAD_T; el cuerpo (piernas, torso, brazos) se achica desde los pies con BODY_T.
 

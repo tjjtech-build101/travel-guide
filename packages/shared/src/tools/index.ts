@@ -1,5 +1,6 @@
 // Registro único de herramientas: la API, Claude (Tool Runner) y OpenAI Realtime usan estas definiciones.
 import { z } from 'zod';
+import type { Provider } from '../errors';
 import {
   AddBlockInput,
   AddIdeaInput,
@@ -31,6 +32,7 @@ import {
   UndoInput,
   UpdateBlockInput,
   WeatherInput,
+  WhereAmIInput,
 } from './schemas';
 import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, TourStatusInput } from './tour';
 import { GapSuggestionsInput, NowBriefInput, PlanDayInput, ReportLateInput } from './nowTools';
@@ -79,6 +81,11 @@ export const toolDefs = {
   place_details: {
     description: 'Detalle de un lugar: horarios, si está abierto, precio, web, teléfono.',
     input: PlaceDetailsInput,
+  },
+  where_am_i: {
+    description:
+      'Dónde está la persona: el lugar en el que probablemente está adentro (universidad, parque, museo, shopping…), los lugares más cercanos por distancia (Google Places) y barrio/ciudad. Llamala SIN lat/lng: el celu completa la posición actual.',
+    input: WhereAmIInput,
   },
   route_eta: {
     description: 'Tiempos y distancias entre 2 a 10 puntos, a pie, en transporte o en auto.',
@@ -234,7 +241,11 @@ export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestion
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 
-export type ToolError = { code: string; message: string; issues?: unknown };
+/**
+ * `code`: ver packages/shared/src/errors.ts. `provider`: quién falló (solo en los provider_*).
+ * `detail`: texto técnico crudo para depurar (la app lo muestra solo en desarrollo).
+ */
+export type ToolError = { code: string; message: string; issues?: unknown; provider?: Provider; detail?: string };
 export type ToolResponse<T = unknown> =
   | { ok: true; data: T; undo_token?: string; feed_id?: string }
   | { ok: false; error: ToolError };

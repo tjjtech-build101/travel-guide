@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { create } from 'zustand';
 
+import { toAppError, type AppError } from '../lib/errors';
 import { endVoiceSession, startVoiceSession } from './api';
 import { looksLikeEcho } from './echo';
 import { micPermission, requestMic } from './permissions';
@@ -55,7 +56,8 @@ export function currentLocation(): Fix {
 
 export type Line = { id: string; role: 'user' | 'assistant'; text: string; at: string; final: boolean };
 export type ActionCard = { id: string; text: string; proposed: boolean; undoToken: string; tripId: string | null; at: number };
-export type CallError = { code: string; message: string };
+/** Causa real de la falla (lib/errors la explica). `reconnect`: se cayó una llamada que ya estaba andando. */
+export type CallError = AppError & { reconnect?: boolean };
 export type VoiceLogEntry = { at: number; dir: '←' | '→' | '🔧' | '⚠️'; text: string };
 
 type State = {
@@ -82,7 +84,8 @@ type State = {
   toolsRunning: { callId: string; name: string }[];
   actions: ActionCard[];
   expanded: boolean;
-  summary: { jobId: string | null; voiceSessionId: string; durationS: number; tripId: string | null } | null;
+  /** `error`: por qué no hay job de resumen (falló el cierre en la API). */
+  summary: { jobId: string | null; voiceSessionId: string; durationS: number; tripId: string | null; error?: AppError } | null;
   /** Fuentes de lo que contó el scout en esta llamada (research, cámara, paradas), más nuevas al final. */
   sources: VoiceSourceGroup[];
   /** Hoja de Fuentes abierta. */
@@ -591,7 +594,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     });
     if (s.answer_sdp) await c.applyAnswer(s.answer_sdp);
     else if (s.client_secret) await c.answer(s.client_secret);
-    else throw new Error('La API no devolvió ni answer_sdp ni client_secret');
+    else throw Object.assign(new Error(''), { code: 'internal', detail: 'La API no devolvió ni answer_sdp ni client_secret' });
     console.log(`[voice] mic+oferta ${tPrep} ms · API${s.answer_sdp ? '+SDP' : ''} ${tApi} ms · total ${Date.now() - t0} ms`);
     set({
       session: { voice_session_id: s.voice_session_id, instructions_base: s.instructions_base, session_config: s.session_config },
@@ -618,7 +621,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     } catch (e) {
       console.warn('[voice] no pude reconectar', e);
       stopCallAudio();
-      set({ status: 'error', error: { code: 'reconnect_failed', message: 'No pudimos reconectar' } });
+      set({ status: 'error', error: { ...toAppError(e), reconnect: true } });
     } finally {
       reconnecting = false;
     }
@@ -681,10 +684,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         conn?.close();
         conn = null;
         stopCallAudio();
-        const message = e instanceof Error ? e.message : String(e);
-        console.warn('[voice] no pude conectar', message);
+        const error = toAppError(e);
+        console.warn('[voice] no pude conectar', error.code, error.detail ?? error.message);
         hapticResult(false);
-        set({ status: 'error', error: { code: (e as { code?: string }).code ?? 'connect_failed', message } });
+        set({ status: 'error', error });
       }
     },
 
@@ -703,12 +706,14 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         return;
       }
       let jobId: string | null = null;
+      let error: AppError | undefined;
       try {
         jobId = (await endVoiceSession(id, finalTranscript(s.lines))).job_id;
       } catch (e) {
         console.warn('[voice] no pude cerrar la sesión', e);
+        error = toAppError(e);
       }
-      set({ status: 'summary', expanded: false, summary: { jobId, voiceSessionId: id, durationS, tripId: s.args?.tripId ?? null } });
+      set({ status: 'summary', expanded: false, summary: { jobId, voiceSessionId: id, durationS, tripId: s.args?.tripId ?? null, error } });
     },
 
     injectEvent: (type, payload, opts = {}) => {
@@ -810,3 +815,8 @@ export const voice = {
     useVoiceStore.getState().injectEvent(type, payload, opts),
   isLive: () => useVoiceStore.getState().status === 'live',
 };
+
+/** Stats de WebRTC de la llamada abierta (voice/levels saca de acá el volumen para animar al Scout). */
+export function callStats(): Promise<Map<string, unknown> | null> {
+  return conn ? conn.stats() : Promise.resolve(null);
+}

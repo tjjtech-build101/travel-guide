@@ -7,6 +7,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { GuideTarget, useGuide } from '../../../../features/guide/useGuide';
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
 import { ActionToast } from '../../../../features/plan/components/ActionToast';
@@ -52,7 +53,8 @@ import {
 import { ToursTab } from '../../../../features/planning/ToursTab';
 import { generateTourForBlock } from '../../../../features/tours/nearbyTour';
 import { useTripId } from '../../../../features/trips/TripContext';
-import { errorDetail, useTrip } from '../../../../features/trips/queries';
+import { useTrip } from '../../../../features/trips/queries';
+import { errorAlert } from '../../../../lib/errors';
 import type { AvatarPerson } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
 import { EmptyState, ErrorState } from '../../../../ui/States';
@@ -183,7 +185,7 @@ function ItineraryView() {
     (b: PlanBlock) => {
       const quick = async () => {
         const res = await generateTourForBlock({ id: b.id, trip_id: tripId, lat: b.lat, lng: b.lng, duration_min: b.duration_min });
-        if (!res.ok) Alert.alert('No pude generar el tour', res.message);
+        if (!res.ok) Alert.alert(...errorAlert(res.error ?? res, { doing: 'generar el tour' }));
         else Alert.alert('Generando el tour', 'El Scout está armando el recorrido con paradas verificadas. Lo vas a ver en la pestaña Tours cuando esté listo.');
       };
       const detailed = () =>
@@ -297,9 +299,12 @@ function ItineraryView() {
     void proposals.refetch();
   };
 
+  // Primera vez en un viaje con días: el Scout muestra cómo moverse (tramos, filtro, tabs y él mismo).
+  useGuide('trip', !loading && !hardError && !!legs?.length);
+
   if (loading) return <PlanSkeleton />;
   if (hardError || !sections || !legs) {
-    return <ErrorState message="No pudimos cargar el plan" detail={errorDetail(overview.error ?? blocks.error)} onRetry={retry} />;
+    return <ErrorState message="No pudimos cargar el plan" error={overview.error ?? blocks.error} doing="cargar el plan" onRetry={retry} />;
   }
 
   if (legs.length === 0) {
@@ -430,29 +435,35 @@ function ItineraryView() {
         <AgentJobProgress tripId={tripId} showSkeleton={false} />
       </View>
       <View style={styles.top}>
-        <LegStrip
-          groups={sections.groups}
-          legColors={legColors}
-          activeLegIds={activeLegIds}
-          onPress={(leg, group) => {
-            if (group.parallel && !parallelView) setBranchByDate(selectBranch(branchByDate, group, leg.id));
-            select({ legId: leg.id });
-            // Esperar a que se recalculen las filas si cambió la rama.
-            requestAnimationFrame(() => scrollToLeg(leg.id));
-          }}
-        />
-        <View style={styles.bar}>
-          <Segmented
-            options={FILTER_OPTIONS}
-            value={filter}
-            onChange={(f) => {
-              void Haptics.selectionAsync().catch(() => {});
-              setFilter(f);
+        <GuideTarget id="plan.legs">
+          <LegStrip
+            groups={sections.groups}
+            legColors={legColors}
+            activeLegIds={activeLegIds}
+            onPress={(leg, group) => {
+              if (group.parallel && !parallelView) setBranchByDate(selectBranch(branchByDate, group, leg.id));
+              select({ legId: leg.id });
+              // Esperar a que se recalculen las filas si cambió la rama.
+              requestAnimationFrame(() => scrollToLeg(leg.id));
             }}
           />
-          <IconButton onPress={tripMenu} label="Más opciones del viaje">
-            <DotsIcon color={colors.text} />
-          </IconButton>
+        </GuideTarget>
+        <View style={styles.bar}>
+          <GuideTarget id="plan.filter" style={styles.flexRow}>
+            <Segmented
+              options={FILTER_OPTIONS}
+              value={filter}
+              onChange={(f) => {
+                void Haptics.selectionAsync().catch(() => {});
+                setFilter(f);
+              }}
+            />
+          </GuideTarget>
+          <GuideTarget id="plan.more">
+            <IconButton onPress={tripMenu} label="Más opciones del viaje">
+              <DotsIcon color={colors.text} />
+            </IconButton>
+          </GuideTarget>
         </View>
       </View>
       <ProposalBanner count={pendingCount} onPress={() => openProposals(tripId)} />
@@ -493,6 +504,7 @@ const styles = StyleSheet.create({
   job: { paddingHorizontal: space.lg },
   top: { paddingTop: space.xs, gap: space.sm, backgroundColor: colors.bg },
   bar: { flexDirection: 'row', alignItems: 'center', gap: space.xs, paddingLeft: space.lg, paddingRight: space.sm },
+  flexRow: { flex: 1, flexDirection: 'row' },
   // Espacio abajo para el FAB y el botón flotante de voz (PRD 05).
   list: { paddingHorizontal: space.lg, paddingBottom: FAB_SIZE + space.xxl * 2 },
   idea: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },

@@ -203,6 +203,28 @@ export function completedSections(d: ProfileDraft): number {
 
 export const TOTAL_SECTIONS = 6;
 
+/** ¿Ya contestó esta sección? (onboarding conversacional: cambia "Saltar" por "Seguir" y el Scout festeja). */
+export function sectionAnswered(id: 'interests' | 'pace' | 'chronotype' | 'budget' | 'style' | 'avoid' | 'dietary' | 'languages', d: ProfileDraft): boolean {
+  switch (id) {
+    case 'interests':
+      return Object.values(d.interests).some((s) => (s ?? 0) > 0);
+    case 'pace':
+      return !!d.pace;
+    case 'chronotype':
+      return !!d.chronotype;
+    case 'budget':
+      return !!d.budget_level;
+    case 'style':
+      return !!d.travel_style;
+    case 'avoid':
+      return d.avoid.length > 0;
+    case 'dietary':
+      return d.dietary.length > 0;
+    case 'languages':
+      return d.languages.length > 0;
+  }
+}
+
 export function needsOnboarding(p: Pick<ProfileRow, 'onboarded_at'> | null | undefined): boolean {
   return !!p && !p.onboarded_at;
 }

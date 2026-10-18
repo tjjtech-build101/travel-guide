@@ -15,6 +15,7 @@ import { distanceMeters } from '@build101/shared';
 import { env } from '../env';
 import { fetchPageText } from '../google/pageText';
 import { wikidataInfo, wikipediaArticle, wikipediaGeosearch, type WikiArticle } from '../google/wikipedia';
+import { jobErrorFields } from '../errors';
 import { createJob, JobProgress, runInBackground } from '../jobs';
 import { appendFacts, normText, type LibraryFact } from '../places/library';
 import type { Db } from '../supabase';
@@ -382,9 +383,9 @@ export async function enrichStopTracked(admin: Db, stopId: string, deps?: DeepDe
     await progress?.push(`+${r.facts_added} datos · ${r.words_before}→${r.words_after} palabras`);
     await progress?.set({ status: 'done', error: null, result: r });
   } catch (err) {
-    const msg = (err as Error).message.replace(/\s+/g, ' ').slice(0, 300);
-    console.error(`[deep-research] ${stopId}:`, msg);
-    await progress?.set({ status: 'failed', error: msg });
+    const f = jobErrorFields(err);
+    console.error(`[deep-research] ${stopId}:`, (err as Error).message);
+    await progress?.set({ status: 'failed', ...f });
   } finally {
     await progress?.flush();
   }

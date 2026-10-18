@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { callTool } from '../../../lib/api';
+import { errorLine } from '../../../lib/errors';
 import { formatDay } from '../../../lib/format';
 import { Avatar } from '../../../ui/Avatar';
 import { Text } from '../../../ui/Text';
@@ -527,7 +528,8 @@ function PlaceField({ state: s, onChange, leg }: { state: BlockFormState; onChan
     setLoading(false);
     if (!res.ok) {
       setResults(null);
-      setError('No pudimos buscar lugares ahora. Queda el nombre que escribiste.');
+      // La causa real (sin conexión, Google sin configurar…) + que el nombre escrito queda igual.
+      setError(`${errorLine(res.error, { doing: 'buscar lugares' })} Queda el nombre que escribiste.`);
       return;
     }
     const data = res.data as { places?: PlaceResult[] } | PlaceResult[];

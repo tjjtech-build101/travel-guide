@@ -7,7 +7,9 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import type { AppError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
+import { ErrorNotice } from '../../ui/ErrorNotice';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
@@ -30,7 +32,7 @@ export function TourSetupSheet({
   const [duration, setDuration] = useState<number>(60);
   const [wish, setWish] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppError | null>(null);
 
   useEffect(() => {
     if (!visible) {
@@ -49,7 +51,7 @@ export function TourSetupSheet({
     if (res.ok) {
       setWish('');
       onClose();
-    } else setError(res.message);
+    } else setError(res.error);
   };
 
   const detailed = () => {
@@ -101,7 +103,7 @@ export function TourSetupSheet({
           </View>
 
           {!here ? <Text style={styles.muted}>Necesito tu ubicación para armar el tour desde donde estás.</Text> : null}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <ErrorNotice error={error} doing="armar el tour" onRetry={() => void quick()} retrying={submitting} /> : null}
         </ScrollView>
 
         <View style={styles.footer}>
@@ -137,6 +139,5 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   muted: { fontSize: font.small, color: colors.textMuted },
-  error: { fontSize: font.small, color: colors.danger },
   footer: { padding: space.lg, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
 });

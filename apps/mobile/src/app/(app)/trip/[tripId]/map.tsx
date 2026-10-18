@@ -1,23 +1,33 @@
 // Tab Mapa (PRD 03, 2D primero): el recorrido que viene (tramos del viaje, bloques del día y paradas de tour).
-// Mapa a pantalla completa + hoja deslizable con la lista del día como sendero (MapTimeline).
-// Tocar cualquier elemento → el avatar redondo del Scout ("Hablar") → useScout().startScoutCall({ focus }).
+// Mapa casi a pantalla completa + hoja deslizable que arranca chica ("peek") con Ahora / Próximo; arriba de todo
+// la lista del día como sendero (MapTimeline). Tocar cualquier elemento → tarjeta compacta con el Scout
+// ("Hablar") → useScout().startScoutCall({ focus }). Un solo Scout a la vista: el flotante se esconde.
+// ▶ "Ver el día": el Scout camina de parada en parada contando un gancho de cada una (guion en model.previewSteps).
 // Bloques y paradas: además "Cómo llego" (ruta embebida, features/route) en la tarjeta del elegido.
 // Sin EXPO_PUBLIC_MAPBOX_TOKEN no se monta Mapbox: aviso + la misma lista de puntos (todo lo demás funciona igual).
 import { SCOUT } from '@build101/shared';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import {
   buildMapModel,
+  chipDay,
+  citySeparators,
   dayOptions,
   defaultDayId,
   focusForCoordinate,
   focusForPoint,
+  previewSteps,
+  sameish,
   timelineStatus,
+  walkMinutes,
   type MapPoint,
   type MapScope,
+  type PreviewStep,
 } from '../../../../features/map/model';
 import { MapTimeline } from '../../../../features/map/MapTimeline';
 import { useMapTours } from '../../../../features/map/queries';
@@ -27,21 +37,28 @@ import { openBlock } from '../../../../features/plan/nav';
 import { useMe, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import { mapPointTarget } from '../../../../features/route/model';
 import { openRoute } from '../../../../features/route/nav';
+import { shortDay } from '../../../../features/plan/selectors';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail } from '../../../../features/trips/queries';
 import { env } from '../../../../lib/env';
-import { useLocationProvider } from '../../../../location/LocationContext';
+import { useLocationFix, useLocationProvider } from '../../../../location/LocationContext';
 import { Button } from '../../../../ui/Button';
+import { ErrorNotice } from '../../../../ui/ErrorNotice';
+import { useGuide } from '../../../../features/guide/useGuide';
 import { ScoutAvatar } from '../../../../ui/ScoutAvatar';
 import { EmptyState, ErrorState, LoadingList } from '../../../../ui/States';
 import { Text } from '../../../../ui/Text';
 import { colors, font, radius, space } from '../../../../ui/theme';
 import { useScout } from '../../../../voice/useScout';
+import { useFloatingScout } from '../../../../voice/ui/FloatingVoiceButton';
 
 const HAS_TOKEN = !!env.mapboxToken;
-// Alturas de la hoja: solo el título, a la mitad y casi completa.
-const SNAP_FRACTIONS = [0.2, 0.5, 0.9] as const;
+// Alturas de la hoja: chica (título + ahora/próximo o el lugar elegido), a la mitad y casi completa.
+// Arranca chica: si entraste al Mapa es para ver el mapa.
+const SNAP_FRACTIONS = [0.27, 0.55, 0.9] as const;
 const SNAP_POINTS = SNAP_FRACTIONS.map((f) => `${f * 100}%`);
+// ▶ Ver el día: cuánto se queda en cada escena (el vuelo dura ~1,8 s).
+const STEP_MS = { intro: 3200, stop: 3600 } as const;
 
 export default function MapTab() {
   const tripId = useTripId();
@@ -51,6 +68,9 @@ export default function MapTab() {
   const { now } = useNow(60_000);
   const scout = useScout();
   const location = useLocationProvider();
+  const fix = useLocationFix();
+  const setFloatingHidden = useFloatingScout((s) => s.setHidden);
+  useGuide('map');
 
   // Mi posición en el mapa: se pide al abrir el Mapa (momento justo). Si la niegan, el mapa funciona igual.
   const { start, active } = location;
@@ -67,8 +87,8 @@ export default function MapTab() {
   const initialDay = defaultDayId(options, todayDate, today.kind === 'today' ? today.day.id : null);
 
   const [scope, setScope] = useState<MapScope | null>(null);
-  // Deep link (pruebas y demo): ?day=2026-10-18 abre ese día · ?day=trip el viaje entero.
-  const link = useLocalSearchParams<{ day?: string }>();
+  // Deep link (pruebas y demo): ?day=2026-10-18 abre ese día · ?day=trip el viaje entero · &play=1 arranca el ▶.
+  const link = useLocalSearchParams<{ day?: string; play?: string }>();
   useEffect(() => {
     if (!link.day) return;
     if (link.day === 'trip') setScope({ kind: 'trip' });
@@ -95,9 +115,37 @@ export default function MapTab() {
 
   const [selected, setSelected] = useState<MapPoint | null>(null);
   const sheet = useRef<BottomSheet>(null);
-  const [sheetIndex, setSheetIndex] = useState(1);
+  const [sheetIndex, setSheetIndex] = useState(0);
   const [areaHeight, setAreaHeight] = useState(0);
-  useEffect(() => setSelected(null), [effectiveScope.kind, effectiveScope.kind === 'day' ? effectiveScope.dayId : '']);
+  const [recenterTick, setRecenterTick] = useState(0);
+  const [preview, setPreview] = useState<{ steps: PreviewStep[]; index: number } | null>(null);
+  const scopeKey = effectiveScope.kind === 'day' ? effectiveScope.dayId : 'trip';
+  useEffect(() => {
+    setSelected(null);
+    setPreview(null);
+  }, [scopeKey]);
+
+  // Un solo Scout a la vista: con un lugar elegido o en el ▶, el flotante se esconde (solo mientras el Mapa está enfocado).
+  const ownScout = !!selected || !!preview;
+  useFocusEffect(
+    useCallback(() => {
+      setFloatingHidden(ownScout);
+      return () => setFloatingHidden(false);
+    }, [ownScout, setFloatingHidden]),
+  );
+
+  // ▶: avanzar solo, escena por escena (se corta con un toque).
+  useEffect(() => {
+    if (!preview) return;
+    const step = preview.steps[preview.index];
+    if (!step || step.kind === 'outro') return;
+    if (step.kind === 'stop') void Haptics.selectionAsync().catch(() => {});
+    const t = setTimeout(
+      () => setPreview((p) => (p ? { ...p, index: Math.min(p.index + 1, p.steps.length - 1) } : p)),
+      step.kind === 'intro' ? STEP_MS.intro : STEP_MS.stop,
+    );
+    return () => clearTimeout(t);
+  }, [preview]);
 
   const talk = (focus: ReturnType<typeof focusForPoint>, context?: Record<string, unknown>) => {
     void scout.startScoutCall({ focus, tripId, mode: 'chat', context });
@@ -126,12 +174,17 @@ export default function MapTab() {
     });
   };
 
+  // &play=1 en el deep link: arrancar el ▶ apenas haya puntos (para la demo).
+  const autoPlayed = useRef(false);
+
   if (overview.isPending || blocks.isPending) return <LoadingList count={3} />;
   if (overview.isError || blocks.isError) {
     return (
       <ErrorState
         message="No pudimos cargar el mapa del viaje"
         detail={errorDetail(overview.error ?? blocks.error)}
+        error={overview.error ?? blocks.error}
+        doing="cargar el plan del viaje"
         onRetry={() => {
           void overview.refetch();
           void blocks.refetch();
@@ -152,22 +205,44 @@ export default function MapTab() {
   const isToday = effectiveScope.kind === 'day' && today.kind === 'today' && today.day.id === effectiveScope.dayId;
   const status = isToday && today.kind === 'today' ? timelineStatus(model.points, today.minutes) : new Map();
   const dayOption = effectiveScope.kind === 'day' ? options.find((o) => o.dayId === (effectiveScope as { dayId: string }).dayId) : null;
-  const sheetTitle = effectiveScope.kind === 'trip' ? 'Todo el viaje' : `${isToday ? 'Hoy · ' : ''}${dayOption?.label ?? ''}`;
-  const placesCount = model.points.filter((p) => p.kind !== 'stop').length;
+  const parallel = !!dayOption && options.filter((o) => o.date === dayOption.date).length > 1;
+  const dayTitle = dayOption ? `${isToday ? 'Hoy · ' : ''}${shortDay(dayOption.date)}${parallel ? ` · ${dayOption.label.split(' · ')[1] ?? ''}` : ''}` : '';
+  const sheetTitle = effectiveScope.kind === 'trip' ? 'Todo el viaje' : dayTitle;
+  const places = model.points.filter((p) => p.kind !== 'stop');
+  const stopCount = model.points.length - places.length;
   const sheetCount =
     effectiveScope.kind === 'trip'
-      ? `${placesCount} ${placesCount === 1 ? 'ciudad' : 'ciudades'}`
-      : `${placesCount} ${placesCount === 1 ? 'lugar' : 'lugares'}`;
+      ? `${places.length} ${places.length === 1 ? 'ciudad' : 'ciudades'}`
+      : `${places.length} ${places.length === 1 ? 'lugar' : 'lugares'}${stopCount ? ` · ${stopCount} paradas` : ''}`;
   const bottomInset = areaHeight * SNAP_FRACTIONS[Math.min(sheetIndex, 1)];
+  const nowPoint = places.find((p) => status.get(p.id) === 'now') ?? null;
+  const nextPoint = places.find((p) => status.get(p.id) === 'next') ?? null;
+  const steps = effectiveScope.kind === 'day' ? previewSteps(model.points, tours.data ?? [], dayTitle) : [];
+  const canPlay = HAS_TOKEN && steps.length > 0;
+  const step = preview ? preview.steps[preview.index] : null;
 
   // "Cómo llego" al pin elegido (bloque o parada de tour; un tramo es una ciudad entera, no).
   const selectedTarget = selected ? mapPointTarget(selected) : null;
 
   const select = (p: MapPoint) => {
     setSelected(p);
-    // Que el punto quede a la vista: la hoja a la mitad.
-    if (sheetIndex !== 1) sheet.current?.snapToIndex(1);
+    // La tarjeta vive en la hoja chica: solo bajarla si estaba casi completa (que el punto quede a la vista).
+    if (sheetIndex === 2) sheet.current?.snapToIndex(0);
   };
+
+  const play = () => {
+    if (!steps.length) return;
+    setSelected(null);
+    sheet.current?.snapToIndex(0);
+    setPreview({ steps, index: 0 });
+  };
+  const stopPreview = () => setPreview(null);
+  if (link.play === '1' && !autoPlayed.current && canPlay && !preview) {
+    autoPlayed.current = true;
+    setTimeout(play, 800);
+  }
+
+  const minutesTo = (p: MapPoint) => (fix ? walkMinutes(fix, p) : null);
 
   return (
     <View style={styles.flex}>
@@ -176,6 +251,7 @@ export default function MapTab() {
         scope={effectiveScope}
         onChange={(s) => setScope(s)}
         todayDayId={today.kind === 'today' ? today.day.id : null}
+        legCity={(id) => legs.find((l) => l.id === id)?.city ?? ''}
       />
 
       <View style={styles.flex} onLayout={(e) => setAreaHeight(e.nativeEvent.layout.height)}>
@@ -184,8 +260,16 @@ export default function MapTab() {
             model={model}
             selectedId={selected?.id ?? null}
             onSelect={select}
-            onLongPress={(lat, lng) => talk(focusForCoordinate(lat, lng), { source: 'map', kind: 'coordinate' })}
+            onDeselect={() => setSelected(null)}
+            onLongPress={(lat, lng) => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              talk(focusForCoordinate(lat, lng), { source: 'map', kind: 'coordinate' });
+            }}
             bottomInset={bottomInset}
+            status={status}
+            next={nextPoint}
+            recenterTick={recenterTick}
+            preview={preview ? { target: step?.kind === 'stop' ? step.point : null } : null}
           />
         ) : (
           <View style={styles.tokenBanner}>
@@ -197,9 +281,33 @@ export default function MapTab() {
           </View>
         )}
 
+        {HAS_TOKEN && !preview ? (
+          <View style={[styles.mapButtons, { bottom: bottomInset + space.md }]} pointerEvents="box-none">
+            {canPlay ? (
+              <Pressable
+                onPress={play}
+                accessibilityRole="button"
+                accessibilityLabel={`Ver el día con ${SCOUT.name}`}
+                style={({ pressed }) => [styles.playBtn, pressed && styles.pressed]}
+              >
+                <PlayIcon />
+                <Text style={styles.playText}>Ver el día</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => setRecenterTick((n) => n + 1)}
+              accessibilityRole="button"
+              accessibilityLabel="Centrar en mi ubicación"
+              style={({ pressed }) => [styles.roundBtn, pressed && styles.pressed]}
+            >
+              <LocateIcon />
+            </Pressable>
+          </View>
+        ) : null}
+
         <BottomSheet
           ref={sheet}
-          index={1}
+          index={0}
           snapPoints={SNAP_POINTS}
           onChange={setSheetIndex}
           backgroundStyle={styles.sheetBg}
@@ -212,69 +320,43 @@ export default function MapTab() {
             <Text style={styles.muted}>{sheetCount}</Text>
           </View>
 
-          {selected ? (
-            <View style={styles.action}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
-                <Badge point={selected} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.actionTitle} numberOfLines={2}>
-                    {selected.label}
-                  </Text>
-                  {selected.sublabel ? (
-                    <Text style={styles.muted} numberOfLines={2}>
-                      {selected.sublabel}
-                    </Text>
-                  ) : null}
-                </View>
-                <Pressable
-                  onPress={() => talkAbout(selected)}
-                  disabled={busy}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Hablar con ${SCOUT.name} de esto`}
-                  accessibilityState={{ busy }}
-                  hitSlop={8}
-                  style={({ pressed }) => [styles.talk, pressed && styles.pressed]}
-                >
-                  <ScoutAvatar size={44} state={scout.state} />
-                  <Text style={styles.talkText}>Hablar</Text>
-                </Pressable>
-                <Pressable onPress={() => setSelected(null)} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12} style={styles.close}>
-                  <Text style={styles.closeText}>✕</Text>
-                </Pressable>
-              </View>
-              {selectedTarget || (selected.kind === 'block' && selected.blockId) ? (
-                <View style={styles.actionRow}>
-                  {selected.kind === 'block' && selected.blockId ? (
-                    <Button
-                      label="Ver en el plan"
-                      variant="secondary"
-                      style={styles.actionBtn}
-                      onPress={() => openBlock(tripId, selected.blockId!)}
-                    />
-                  ) : null}
-                  {selectedTarget ? (
-                    <Button
-                      label="Cómo llego"
-                      variant="secondary"
-                      style={styles.actionBtn}
-                      accessibilityHint="Ver la ruta hasta acá"
-                      onPress={() => openRoute(router, tripId, selectedTarget)}
-                    />
-                  ) : null}
-                </View>
-              ) : null}
-              {selected.kind === 'leg' && selected.legId ? (
-                <Button
-                  label="Ver sus días"
-                  variant="secondary"
-                  onPress={() => {
-                    const first = options.find((o) => o.legId === selected.legId);
-                    if (first) setScope({ kind: 'day', dayId: first.dayId });
-                  }}
-                />
-              ) : null}
-            </View>
-          ) : null}
+          <View style={styles.peek}>
+            {selected ? (
+              <SelectedCard
+                point={selected}
+                minutes={minutesTo(selected)}
+                busy={busy}
+                scoutState={scout.state}
+                onTalk={() => talkAbout(selected)}
+                onClose={() => setSelected(null)}
+                onRoute={selectedTarget ? () => openRoute(router, tripId, selectedTarget) : null}
+                onOpen={
+                  selected.kind === 'block' && selected.blockId
+                    ? { label: 'Ver en el plan', run: () => openBlock(tripId, selected.blockId!) }
+                    : selected.kind === 'leg' && selected.legId
+                      ? {
+                          label: 'Ver sus días',
+                          run: () => {
+                            const first = options.find((o) => o.legId === selected.legId);
+                            if (first) setScope({ kind: 'day', dayId: first.dayId });
+                          },
+                        }
+                      : null
+                }
+              />
+            ) : (
+              <Summary
+                scope={effectiveScope}
+                isToday={isToday}
+                places={places}
+                nowPoint={nowPoint}
+                nextPoint={nextPoint}
+                minutesTo={minutesTo}
+                canPlay={canPlay}
+                onPress={select}
+              />
+            )}
+          </View>
 
           <BottomSheetScrollView contentContainerStyle={styles.listContent}>
             {model.unlocated.length ? <Text style={styles.chipInfo}>{model.unlocated.length} sin ubicación</Text> : null}
@@ -287,11 +369,247 @@ export default function MapTab() {
             ) : null}
             <MapTimeline points={model.points} selectedId={selected?.id ?? null} status={status} onPress={select} />
             {tourIds.length > 0 && tours.isPending ? <Text style={styles.muted}>Cargando las paradas del tour…</Text> : null}
-            {tours.isError ? <Text style={styles.error}>No pudimos cargar las paradas del tour.</Text> : null}
+            {tours.isError ? (
+              <ErrorNotice error={tours.error} doing="cargar las paradas del tour" onRetry={() => void tours.refetch()} retrying={tours.isFetching} />
+            ) : null}
           </BottomSheetScrollView>
         </BottomSheet>
+
+        {preview && step ? (
+          <>
+            {/* Un toque en el mapa corta el recorrido. */}
+            <Pressable
+              style={[StyleSheet.absoluteFill, { bottom: bottomInset }]}
+              onPress={stopPreview}
+              accessibilityRole="button"
+              accessibilityLabel="Cortar el recorrido"
+            />
+            <PreviewCard
+              step={step}
+              index={preview.index}
+              total={preview.steps.length}
+              height={areaHeight * SNAP_FRACTIONS[0]}
+              onStop={stopPreview}
+              onTalk={() => {
+                stopPreview();
+                talk({ label: `El día ${sheetTitle}` }, { source: 'map_preview', day: sheetTitle, places: places.map((p) => p.label) });
+              }}
+              onReplay={play}
+            />
+          </>
+        ) : null}
       </View>
     </View>
+  );
+}
+
+/** El lugar elegido, compacto: número, título, hora · a pie · "Ver en el plan ›", el Scout y ✕. */
+function SelectedCard({
+  point,
+  minutes,
+  busy,
+  scoutState,
+  onTalk,
+  onClose,
+  onOpen,
+  onRoute,
+}: {
+  point: MapPoint;
+  minutes: number | null;
+  busy: boolean;
+  scoutState: ReturnType<typeof useScout>['state'];
+  onTalk: () => void;
+  onClose: () => void;
+  onOpen: { label: string; run: () => void } | null;
+  /** "Cómo llego" (ruta embebida): bloques y paradas con ubicación; un tramo es una ciudad entera, no. */
+  onRoute: (() => void) | null;
+}) {
+  // Sin repetir: el lugar solo si no está ya en el título ("Visita guiada al Teatro Solís" · "Teatro Solís").
+  const meta =
+    point.kind === 'block'
+      ? [point.start, point.place && !sameish(point.place, point.label) ? point.place : null, minutes ? `${minutes} min a pie` : null]
+      : [point.sublabel, minutes ? `${minutes} min a pie` : null];
+  const metaText = meta.filter(Boolean).join(' · ');
+  return (
+    <View style={styles.card}>
+      <Badge point={point} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {point.label}
+        </Text>
+        <View style={styles.cardMetaRow}>
+          {metaText ? (
+            <Text style={[styles.muted, { flexShrink: 1 }]} numberOfLines={1}>
+              {metaText}
+            </Text>
+          ) : null}
+          {onOpen ? (
+            <Pressable onPress={onOpen.run} accessibilityRole="link" hitSlop={8}>
+              <Text style={styles.link}>{onOpen.label} ›</Text>
+            </Pressable>
+          ) : null}
+          {onRoute ? (
+            <Pressable onPress={onRoute} accessibilityRole="link" accessibilityHint="Ver la ruta hasta acá" hitSlop={8}>
+              <Text style={styles.link}>Cómo llego ›</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      <Pressable
+        onPress={onTalk}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel={`Hablar con ${SCOUT.name} de esto`}
+        accessibilityState={{ busy }}
+        hitSlop={8}
+        style={({ pressed }) => [styles.talk, pressed && styles.pressed]}
+      >
+        <ScoutAvatar size={36} state={scoutState} />
+        <Text style={styles.talkText}>Hablar</Text>
+      </Pressable>
+      <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar" hitSlop={12} style={styles.close}>
+        <Text style={styles.closeText}>✕</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** Lo que importa sin abrir la hoja: ahora y próximo (hoy), por dónde arranca (otro día) o las ciudades (viaje). */
+function Summary({
+  scope,
+  isToday,
+  places,
+  nowPoint,
+  nextPoint,
+  minutesTo,
+  canPlay,
+  onPress,
+}: {
+  scope: MapScope;
+  isToday: boolean;
+  places: MapPoint[];
+  nowPoint: MapPoint | null;
+  nextPoint: MapPoint | null;
+  minutesTo: (p: MapPoint) => number | null;
+  canPlay: boolean;
+  onPress: (p: MapPoint) => void;
+}) {
+  if (scope.kind === 'trip') {
+    return <Text style={styles.hint}>Tocá una ciudad para ver sus días.</Text>;
+  }
+  if (!places.length) return null;
+  const rows: { tag: string; point: MapPoint; strong: boolean }[] = [];
+  if (isToday) {
+    if (nowPoint) rows.push({ tag: 'Ahora', point: nowPoint, strong: true });
+    if (nextPoint) rows.push({ tag: `Próximo${nextPoint.start ? ` ${nextPoint.start}` : ''}`, point: nextPoint, strong: !nowPoint });
+    if (!rows.length) return <Text style={styles.hint}>Terminaste el día. ¡Bien ahí!</Text>;
+  } else {
+    const first = places[0];
+    rows.push({ tag: `Arranca${first.start ? ` ${first.start}` : ''}`, point: first, strong: true });
+  }
+  return (
+    <View style={{ gap: 2 }}>
+      {rows.map((r) => {
+        const min = minutesTo(r.point);
+        return (
+          <Pressable
+            key={r.tag}
+            onPress={() => onPress(r.point)}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.summaryRow, pressed && styles.pressed]}
+          >
+            <Text style={[styles.summaryTag, r.strong && styles.summaryTagOn]}>{r.tag}</Text>
+            <Text style={styles.summaryLabel} numberOfLines={1}>
+              {r.point.label}
+            </Text>
+            {min && r.tag !== 'Ahora' ? <Text style={styles.muted}>{min} min</Text> : null}
+          </Pressable>
+        );
+      })}
+      {!isToday && canPlay ? <Text style={styles.hint}>Tocá «Ver el día» y {SCOUT.name} te lo recorre.</Text> : null}
+    </View>
+  );
+}
+
+/** Globito del Scout durante el ▶: escena actual, progreso y, al final, "Hablar" / "Otra vez" / "Listo". */
+function PreviewCard({
+  step,
+  index,
+  total,
+  height,
+  onStop,
+  onTalk,
+  onReplay,
+}: {
+  step: PreviewStep;
+  index: number;
+  total: number;
+  height: number;
+  onStop: () => void;
+  onTalk: () => void;
+  onReplay: () => void;
+}) {
+  const last = step.kind === 'outro';
+  return (
+    <View style={[styles.preview, { minHeight: height }]} accessibilityLiveRegion="polite">
+      <View style={styles.previewRow}>
+        <ScoutAvatar size={52} state={last ? 'idle' : 'speaking'} pose={last ? 'thumbs' : null} />
+        <View style={styles.bubble}>
+          <Text style={styles.previewTitle} numberOfLines={2}>
+            {step.kind === 'stop' && step.point.order ? `${step.point.order}. ` : ''}
+            {step.title}
+          </Text>
+          {step.body ? (
+            <Text style={styles.previewBody} numberOfLines={3}>
+              {step.body}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.previewFooter}>
+        <View style={styles.dots}>
+          {Array.from({ length: total }, (_, i) => (
+            <View key={i} style={[styles.progressDot, i <= index && styles.progressDotOn]} />
+          ))}
+        </View>
+        {last ? (
+          <View style={styles.previewActions}>
+            <Pressable onPress={onReplay} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.link}>Otra vez</Text>
+            </Pressable>
+            <Pressable onPress={onStop} accessibilityRole="button" hitSlop={8}>
+              <Text style={styles.link}>Listo</Text>
+            </Pressable>
+            <Button label={`Hablar con ${SCOUT.name}`} onPress={onTalk} style={styles.previewTalk} />
+          </View>
+        ) : (
+          <Pressable onPress={onStop} accessibilityRole="button" accessibilityLabel="Cortar el recorrido" hitSlop={10}>
+            <Text style={styles.link}>Cortar ✕</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <Svg width={14} height={14} viewBox="0 0 14 14">
+      <Path d="M3 1.5v11l9.5-5.5z" fill={colors.primaryText} />
+    </Svg>
+  );
+}
+
+function LocateIcon() {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 22 22">
+      <Circle cx={11} cy={11} r={6} stroke={colors.primary} strokeWidth={2} fill="none" />
+      <Circle cx={11} cy={11} r={2.4} fill={colors.primary} />
+      <Line x1={11} y1={1} x2={11} y2={4.5} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" />
+      <Line x1={11} y1={17.5} x2={11} y2={21} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" />
+      <Line x1={1} y1={11} x2={4.5} y2={11} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" />
+      <Line x1={17.5} y1={11} x2={21} y2={11} stroke={colors.primary} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
   );
 }
 
@@ -311,11 +629,13 @@ function ScopeBar({
   scope,
   onChange,
   todayDayId,
+  legCity,
 }: {
   options: ReturnType<typeof dayOptions>;
   scope: MapScope;
   onChange: (s: MapScope) => void;
   todayDayId: string | null;
+  legCity: (legId: string) => string;
 }) {
   // Que el chip elegido quede a la vista (al abrir en "hoy" o por deep link).
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -326,21 +646,25 @@ function ScopeBar({
     const x = selectedKey === 'trip' ? 0 : xs.current.get(selectedKey);
     if (x != null) scroll.current?.scrollTo({ x: Math.max(0, x - space.lg), animated: true });
   }, [selectedKey, laidOut]);
+  // Chips cortos ("Hoy", "Lun 19"); la ciudad va como separador solo cuando cambia.
+  const seps = citySeparators(options, legCity);
   return (
     <ScrollView ref={scroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scopeBar} style={styles.scopeWrap}>
-      <Chip label="Todo el viaje" on={scope.kind === 'trip'} onPress={() => onChange({ kind: 'trip' })} />
-      {options.map((o) => (
-        <Chip
-          key={o.dayId}
-          onLayout={(x) => {
-            xs.current.set(o.dayId, x);
-            if (o.dayId === selectedKey) setLaidOut((n) => n + 1);
-          }}
-          label={o.dayId === todayDayId ? `Hoy · ${o.label.split(' · ')[1] ?? ''}` : o.label}
-          color={o.color}
-          on={scope.kind === 'day' && scope.dayId === o.dayId}
-          onPress={() => onChange({ kind: 'day', dayId: o.dayId })}
-        />
+      <Chip label="Viaje" on={scope.kind === 'trip'} onPress={() => onChange({ kind: 'trip' })} />
+      {options.map((o, i) => (
+        <View key={o.dayId} style={styles.chipGroup}>
+          {seps[i] ? <Text style={styles.citySep}>{seps[i]}</Text> : null}
+          <Chip
+            onLayout={(x) => {
+              xs.current.set(o.dayId, x);
+              if (o.dayId === selectedKey) setLaidOut((n) => n + 1);
+            }}
+            label={o.dayId === todayDayId ? 'Hoy' : chipDay(o.date)}
+            color={o.color}
+            on={scope.kind === 'day' && scope.dayId === o.dayId}
+            onPress={() => onChange({ kind: 'day', dayId: o.dayId })}
+          />
+        </View>
       ))}
     </ScrollView>
   );
@@ -363,6 +687,7 @@ function Chip({
     <Pressable
       onPress={onPress}
       onLayout={onLayout ? (e) => onLayout(e.nativeEvent.layout.x) : undefined}
+      accessibilityLabel={label}
       accessibilityRole="button"
       accessibilityState={{ selected: on }}
       style={[styles.chip, on && styles.chipOn]}
@@ -417,8 +742,103 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: space.sm,
     paddingHorizontal: space.lg,
-    paddingBottom: space.sm,
+    paddingBottom: space.xs,
   },
+  peek: { paddingHorizontal: space.md, paddingBottom: space.sm },
+  chipGroup: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  citySep: { fontSize: font.tiny, fontWeight: '700', color: colors.textMuted, marginLeft: space.xs },
+  mapButtons: { position: 'absolute', right: space.md, alignItems: 'flex-end', gap: space.sm },
+  roundBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  playBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 48,
+    paddingHorizontal: space.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.scout,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  playText: { color: colors.scoutText, fontWeight: '800', fontSize: font.small },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    paddingVertical: space.sm,
+    paddingLeft: space.md,
+    paddingRight: space.xs,
+  },
+  cardTitle: { fontSize: font.body, fontWeight: '700', color: colors.text },
+  cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  link: { fontSize: font.small, fontWeight: '800', color: colors.primary },
+  hint: { fontSize: font.small, color: colors.textMuted, paddingHorizontal: space.xs },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 36, paddingHorizontal: space.xs },
+  summaryTag: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.khakiText,
+    backgroundColor: colors.khakiLight,
+    paddingHorizontal: space.sm,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    overflow: 'hidden',
+  },
+  summaryTagOn: { backgroundColor: colors.primary, color: colors.primaryText },
+  summaryLabel: { flex: 1, fontSize: font.body, fontWeight: '600', color: colors.text },
+  preview: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: space.lg,
+    gap: space.md,
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: -2 },
+    elevation: 8,
+  },
+  previewRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.md },
+  bubble: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderTopLeftRadius: 4,
+    padding: space.md,
+    gap: 4,
+  },
+  previewTitle: { fontSize: font.h3, fontWeight: '600', color: colors.text },
+  previewBody: { fontSize: font.small, color: colors.text },
+  previewFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.md },
+  dots: { flexDirection: 'row', gap: 5, flexShrink: 1, flexWrap: 'wrap' },
+  progressDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.border },
+  progressDotOn: { backgroundColor: colors.scout },
+  previewActions: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  previewTalk: { paddingHorizontal: space.md },
   sheetTitle: { flex: 1, fontSize: font.h2, fontWeight: '600', color: colors.text },
   listContent: { paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xxl * 3 },
   chipInfo: {
@@ -434,23 +854,9 @@ const styles = StyleSheet.create({
     marginLeft: space.xs,
   },
   muted: { fontSize: font.small, color: colors.textMuted },
-  error: { fontSize: font.small, color: colors.danger },
   badge: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   badgeStop: { width: 24, height: 24, borderRadius: 12 },
   badgeText: { color: '#FFFFFF', fontWeight: '800', fontSize: font.tiny },
-  action: {
-    marginHorizontal: space.md,
-    marginBottom: space.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    padding: space.md,
-    gap: space.sm,
-  },
-  actionRow: { flexDirection: 'row', gap: space.sm },
-  actionBtn: { flex: 1 },
-  actionTitle: { fontSize: font.h3, fontWeight: '600', color: colors.text },
   close: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   talk: { alignItems: 'center' },
   talkText: { fontSize: font.tiny, fontWeight: '800', color: colors.scout },

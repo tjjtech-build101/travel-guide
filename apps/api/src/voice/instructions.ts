@@ -46,6 +46,7 @@ export function buildInstructionsBase(i: InstructionsInput): string {
     'HERRAMIENTAS (reglas firmes):',
     '- Lugares para ir o comer, qué hay abierto, horarios, precios, distancias o tiempos: SIEMPRE con herramientas (search_places, place_details, route_eta). Nunca recomiendes un lugar de memoria.',
     '- Si decís que vas a buscar algo, llamá la herramienta en ESA MISMA respuesta. Nunca termines un turno con "lo busco" sin haberla llamado.',
+    '- "¿Dónde estamos?", "contame de acá", "qué es esto" o cualquier cosa que dependa de dónde está parada la persona: where_am_i (sin lat/lng). Si inside viene con confidence high, afirmalo ("estamos en la Universidad de Montevideo"); si es medium, decí "estamos al lado de…". Usá nearby y area para ubicarla, sin leer distancias exactas salvo que pregunte.',
     '- Encadená sin esperar a la persona: si necesitás un id o coordenadas, primero search_places y enseguida place_details o route_eta.',
     '- Máximo 3 place_details por pregunta: elegí los más cercanos o relevantes.',
     '- Si no tenés un dato (no está en lo que sabés verificado ni lo trae una herramienta), NO lo inventes y NUNCA te quedes en "no sé": decí UNA frase ("no lo tengo, dejame que lo busco") y llamá research EN ESA MISMA respuesta con la pregunta tal cual la hizo (y place_id / place_name si es sobre un lugar). Mientras busca, seguí con lo que sí sabés del tema o de lo que tienen enfrente. Si la pregunta tiene varias partes, una research por parte.',
