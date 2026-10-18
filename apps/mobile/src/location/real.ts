@@ -28,22 +28,26 @@ export class RealLocationProvider implements LocationProvider {
   private lastEmit = 0;
   private starting: Promise<void> | null = null;
   private bgSub: (() => void) | null = null;
+  /** Sube en cada stop(): un start() que todavía esperaba permiso/watch cuando lo apagaron no deja nada prendido. */
+  private gen = 0;
 
   start(): Promise<void> {
     if (this.positionSub) return Promise.resolve();
     if (!this.starting) {
-      this.starting = this.doStart().finally(() => {
-        this.starting = null;
+      const starting = this.doStart(this.gen).finally(() => {
+        if (this.starting === starting) this.starting = null;
       });
+      this.starting = starting;
     }
     return this.starting;
   }
 
-  private async doStart() {
+  private async doStart(gen: number) {
     const perm = await Location.requestForegroundPermissionsAsync();
     if (perm.status !== 'granted') throw new LocationPermissionError(perm.canAskAgain);
+    if (gen !== this.gen) return;
 
-    this.positionSub = await Location.watchPositionAsync(
+    const positionSub = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 2 },
       (loc) => {
         this.emit({
@@ -56,15 +60,25 @@ export class RealLocationProvider implements LocationProvider {
         });
       },
     );
+    if (gen !== this.gen) {
+      positionSub.remove();
+      return;
+    }
+    this.positionSub = positionSub;
 
     try {
-      this.headingSub = await Location.watchHeadingAsync((h) => {
+      const headingSub = await Location.watchHeadingAsync((h) => {
         const value = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
         this.heading = Number.isFinite(value) ? value : null;
         if (this.current && Date.now() - this.lastEmit >= HEADING_THROTTLE_MS) {
           this.emit({ ...this.current, t: Date.now(), heading: this.heading });
         }
       });
+      if (gen !== this.gen) {
+        headingSub.remove();
+        return;
+      }
+      this.headingSub = headingSub;
     } catch {
       // Sin brújula (simulador): seguimos con heading del GPS.
     }
@@ -82,6 +96,8 @@ export class RealLocationProvider implements LocationProvider {
   }
 
   stop(): void {
+    this.gen++;
+    this.starting = null;
     this.positionSub?.remove();
     this.headingSub?.remove();
     if (this.heartbeat) clearInterval(this.heartbeat);

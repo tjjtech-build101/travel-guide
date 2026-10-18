@@ -28,7 +28,7 @@ export type InstructionsInput = {
 
 /** Vigilante de horarios (celu → [EVENTO:schedule_alert]). */
 export const SCHEDULE_ALERT_RULE =
-  'schedule_alert: avisá en UNA frase con el número exacto del json (leave_now: "salí en {leave_in_min} min para {title}", o "salí ya" si es 0 o menos; running_late: "vas {late_by_min} min tarde a {title}"; starting_soon: "{title} empieza a las {start_time}") y ofrecé indicaciones a pie ("¿te llevo?"). Si es running_late, ofrecé avisarle al grupo o mover el bloque, pero no apliques nada sin que la persona te lo pida.';
+  'schedule_alert: avisá en UNA frase con el número exacto del json (leave_now: "salí en {leave_in_min} min para {title}", o "salí ya" si es 0 o menos; running_late: "vas {late_by_min} min tarde a {title}"; starting_soon: "{title} empieza a las {start_time}") y ofrecé indicaciones a pie ("¿te llevo?"). Si es running_late, ofrecé avisarle al grupo (report_late) o mover el bloque (move_block), pero no apliques nada sin que la persona te lo pida.';
 
 const bullets = (xs: string[]) => xs.map((x) => `- ${x}`).join('\n');
 
