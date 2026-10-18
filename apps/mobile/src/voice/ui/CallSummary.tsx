@@ -11,11 +11,13 @@ import { Skeleton } from '../../ui/States';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore } from '../store';
 import { mmss } from './CallBar';
+import { SourcesList } from './Sources';
 
 export function CallSummary() {
   const summary = useVoiceStore((s) => s.summary);
   const status = useVoiceStore((s) => s.status);
   const dismiss = useVoiceStore((s) => s.dismissSummary);
+  const sources = useVoiceStore((s) => s.sources);
   const job = useAgentJob(summary?.jobId ?? undefined);
   const visible = status === 'summary' && !!summary;
   const result = job.data?.result as VoiceSummaryResult | null | undefined;
@@ -41,6 +43,13 @@ export function CallSummary() {
           ) : (
             <Text style={styles.summary}>{result?.summary}</Text>
           )}
+
+          {sources.length ? (
+            <>
+              <Text style={styles.section}>Fuentes</Text>
+              <SourcesList groups={sources} />
+            </>
+          ) : null}
 
           <Text style={styles.section}>Lo que se hizo</Text>
           {result?.actions?.length ? (

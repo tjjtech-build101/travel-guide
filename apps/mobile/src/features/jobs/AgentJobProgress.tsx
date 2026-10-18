@@ -1,10 +1,10 @@
 // Panel de progreso de plan_trip (PRD 01). Reutilizable: se monta arriba de Plan (PRD 02) o en "Nuevo viaje".
 // running → barra + últimas 4 líneas + contador en vivo (+ esqueleto de tramos mientras no hay bloques)
-// done → chip "Listo: …" con "Ver supuestos" y "Deshacer" · failed → banner + "Reintentar".
+// done → nada (pantalla limpia) · failed → banner + "Reintentar".
 import type { AgentJobRow, PlanTripResult, PlanTripStart } from '@build101/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import Animated, { Easing, FadeInDown, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { callTool } from '../../lib/api';
@@ -27,16 +27,12 @@ type Props = {
   showSkeleton?: boolean;
 };
 
-/** El chip de "Listo" se muestra hasta 6 h después de terminar (después ya no aporta). */
-const DONE_VISIBLE_MS = 6 * 60 * 60 * 1000;
-
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleton = true }: Props) {
   const qc = useQueryClient();
   const [retryJobId, setRetryJobId] = useState<string>();
-  const [undone, setUndone] = useState(false);
-  const [busy, setBusy] = useState<'undo' | 'retry' | null>(null);
+  const [busy, setBusy] = useState<'retry' | null>(null);
   const latest = useLatestPlanJob(tripId, !jobIdProp && !retryJobId);
   const jobId = retryJobId ?? jobIdProp ?? latest.data?.id;
   const job = useAgentJob(jobId);
@@ -73,53 +69,10 @@ export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleto
   const legCount = legs.data?.length ?? 0;
   const blockCount = blocks.data?.length ?? 0;
 
-  if (status === 'done') {
-    if (Date.now() - new Date(row.updated_at).getTime() > DONE_VISIBLE_MS && !jobIdProp) return null;
-    if (undone) {
-      return (
-        <View style={[styles.chip, styles.chipMuted]} accessibilityLiveRegion="polite">
-          <Text style={styles.chipText}>Deshiciste el plan. El viaje quedó vacío.</Text>
-        </View>
-      );
-    }
-    const undo = async () => {
-      if (!result?.undo_token) return;
-      setBusy('undo');
-      const res = await callTool('undo', { undo_token: result.undo_token });
-      setBusy(null);
-      if (res.ok || res.error.code === 'already_undone') {
-        setUndone(true);
-        void qc.invalidateQueries({ queryKey: tripKeys.all(tripId) });
-        void qc.invalidateQueries({ queryKey: tripKeys.mine() });
-      } else {
-        Alert.alert('No pude deshacer', res.error.message);
-      }
-    };
-    return (
-      <View style={styles.chip} accessibilityLiveRegion="polite">
-        <Text style={styles.chipText}>
-          Listo: {plural(result?.legs ?? legCount, 'tramo', 'tramos')}, {plural(result?.days ?? 0, 'día', 'días')},{' '}
-          {plural(result?.blocks ?? blockCount, 'bloque', 'bloques')}
-        </Text>
-        <View style={styles.chipActions}>
-          {result?.assumptions?.length ? (
-            <ChipLink label="Ver supuestos" onPress={() => Alert.alert('Lo que supuse', result.assumptions.map((a) => `• ${a}`).join('\n\n'))} />
-          ) : null}
-          {result?.undo_token ? (
-            <ChipLink
-              label={busy === 'undo' ? 'Deshaciendo…' : 'Deshacer'}
-              onPress={() =>
-                Alert.alert('¿Deshacer todo el plan?', 'Se borran los tramos, días y bloques que armó el compañero.', [
-                  { text: 'Cancelar', style: 'cancel' },
-                  { text: 'Deshacer', style: 'destructive', onPress: () => void undo() },
-                ])
-              }
-            />
-          ) : null}
-        </View>
-      </View>
-    );
-  }
+  // Pantalla más limpia: el cartel "Listo: X tramos, Y días..." (con "Deshacer"/"Ver supuestos") ya no
+  // se muestra en Ahora/Planificación una vez que plan_trip termina. Si hace falta reactivarlo, el
+  // bloque vivía acá mismo (git log de este archivo tiene el detalle: chip + undo_token + assumptions).
+  if (status === 'done') return null;
 
   if (status === 'failed') {
     const cities = result?.failed_legs?.map((f) => f.city) ?? [];
@@ -175,14 +128,6 @@ export function AgentJobProgress({ tripId, jobId: jobIdProp, onDone, showSkeleto
       </View>
       {showSkeleton && blockCount === 0 ? <LegsSkeleton tripId={tripId} /> : null}
     </View>
-  );
-}
-
-function ChipLink({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} accessibilityRole="button" hitSlop={8} style={styles.chipLink}>
-      <Text style={styles.chipLinkText}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -249,19 +194,6 @@ const styles = StyleSheet.create({
   line: { fontSize: font.small, color: colors.textMuted },
   lineLast: { color: colors.text, fontWeight: '600' },
   counter: { marginTop: space.md, fontSize: font.small, fontWeight: '700', color: colors.primary },
-  chip: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-  },
-  chipMuted: { backgroundColor: colors.surfaceMuted },
-  chipText: { fontSize: font.small, fontWeight: '600', color: colors.text },
-  chipActions: { flexDirection: 'row', gap: space.lg, marginTop: space.xs },
-  chipLink: { minHeight: 32, justifyContent: 'center' },
-  chipLinkText: { fontSize: font.small, color: colors.primary, fontWeight: '600' },
   banner: { backgroundColor: colors.dangerBg, borderRadius: radius.lg, padding: space.lg, borderWidth: 1, borderColor: colors.danger },
   bannerTitle: { fontSize: font.h3, fontWeight: '700', color: colors.danger },
   bannerDetail: { fontSize: font.small, color: colors.text, marginTop: space.xs },

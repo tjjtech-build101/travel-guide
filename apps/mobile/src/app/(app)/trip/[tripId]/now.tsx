@@ -6,12 +6,12 @@
 //   ?scout=listening|speaking|thinking|idle · estado del avatar
 //   ?tour=start|<tour_id>|end|close|skip|more|scout|clock:-30|nearby:<min>|nearby-start (solo __DEV__)
 //   ?sim=play|pause|x1|x10|stop<N>|t<seg> (simulador de GPS, solo __DEV__)
-//   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · ?do=late|planday|offline|outdoor-on|outdoor-off (solo __DEV__)
+//   ?watch=run|reset|later|notif-reset (vigilante de horarios, solo __DEV__) · ?do=late|planday|tour|offline|outdoor-on|outdoor-off (solo __DEV__)
 //   &n=<algo> repite el mismo link
 import { SCOUT, zonedParts, zonedUtc } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
@@ -69,7 +69,8 @@ import type { PlanBlock } from '../../../../features/plan/selectors';
 import { showToast } from '../../../../features/plan/store';
 import { LiveTourView } from '../../../../features/tour/LiveTourView';
 import { NearbyTourCard } from '../../../../features/tours/NearbyTourCard';
-import { NEARBY_DURATIONS, startNearbyTour, useNearbyTourAvailable, useNearbyTourJob } from '../../../../features/tours/nearbyTour';
+import { startNearbyTour, useNearbyTourAvailable, useNearbyTourJob } from '../../../../features/tours/nearbyTour';
+import { TourSetupSheet } from '../../../../features/tours/TourSetupSheet';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail, useTrip } from '../../../../features/trips/queries';
 import { callTool } from '../../../../lib/api';
@@ -122,6 +123,9 @@ export default function NowTab() {
   const moveBlock = useMoveBlock(tripId);
   const planDay = usePlanDay();
   const goToPlan = () => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } });
+  const [tourSheet, setTourSheet] = useState(false);
+  // La hoja es un Modal: si Ahora pierde el foco (p. ej. se abre Cómo llego por un link), se cierra sola.
+  useFocusEffect(useCallback(() => () => setTourSheet(false), []));
 
   const link = useLocalSearchParams<Link>();
 
@@ -297,15 +301,8 @@ export default function NowTab() {
       Alert.alert('Tour acá, ahora', `${SCOUT.name} ya te está armando un tour.`);
       return;
     }
-    // PRD 18: duración 30 / 60 / 90.
-    const go = async (duration_min: number) => {
-      const res = await startNearbyTour({ lat: here.lat, lng: here.lng, trip_id: tripId, duration_min });
-      if (!res.ok) Alert.alert('No pude armar el tour', res.message);
-    };
-    Alert.alert('Tour acá, ahora', '¿Cuánto tiempo tenés?', [
-      ...NEARBY_DURATIONS.map((m) => ({ text: m === 60 ? '1 hora' : m === 90 ? '1 h 30' : `${m} min`, onPress: () => void go(m) })),
-      { text: 'Cancelar', style: 'cancel' as const },
-    ]);
+    // Hoja con duración + la entrevista (tour_brief): 0-3 preguntas según el contexto del grupo.
+    setTourSheet(true);
   };
 
   // Tour del día (en curso o próximo) con su tour ya generado.
@@ -406,6 +403,7 @@ export default function NowTab() {
     const t = setTimeout(() => {
       if (link.do === 'late') setLateOpen(true);
       else if (link.do === 'planday') onPlanDay();
+      else if (link.do === 'tour') void onNearbyTour();
       else if (link.do === 'outdoor-on' || link.do === 'outdoor-off') setOutdoor(link.do === 'outdoor-on');
     }, 1200);
     return () => clearTimeout(t);
@@ -549,16 +547,20 @@ export default function NowTab() {
     void Promise.allSettled([overview.refetch(), blocks.refetch(), proposals.refetch()]).finally(() => setPulling(false));
   };
 
+  // El dock lleva la hoja de "Tour acá, ahora" (TourSetupSheet): así se abre también con la pantalla cargando o en error.
   const dock = (
-    <DockV2
-      scoutState={scout.state}
-      onTalk={onTalk}
-      onNearbyTour={() => void onNearbyTour()}
-      tourAvailable={tourAvailable}
-      onCamera={onCamera}
-      // "Salí para" ya tiene "Cómo llego" como botón principal: no se repite en el dock.
-      onDirections={hero.kind === 'leave' ? null : onDirections}
-    />
+    <>
+      <DockV2
+        scoutState={scout.state}
+        onTalk={onTalk}
+        onNearbyTour={() => void onNearbyTour()}
+        tourAvailable={tourAvailable}
+        onCamera={onCamera}
+        // "Salí para" ya tiene "Cómo llego" como botón principal: no se repite en el dock.
+        onDirections={hero.kind === 'leave' ? null : onDirections}
+      />
+      <TourSetupSheet visible={tourSheet} here={here} tripId={tripId} onClose={() => setTourSheet(false)} />
+    </>
   );
 
   // PRD 07: con un tour activo, Ahora se convierte en el tour.

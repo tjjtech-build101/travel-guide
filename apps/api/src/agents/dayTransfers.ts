@@ -5,7 +5,11 @@
 import { distanceMeters, type BlockVisibleRow, type ToolInput, type TransferMode } from '@build101/shared';
 import { estimateMinutes, mapsTransitUrl, computeRoute, transitPlan, type TransitPlan } from '../google/routes';
 import { fromMin, toMin } from '../schedule';
-import { add_block } from '../tools/add_block';
+import { deleteBlockRow, insertBlock } from '../blocks';
+import { dbError } from '../errors';
+import { runInBackground } from '../jobs';
+import type { Db } from '../supabase';
+import { legMemberIds } from '../tools/write';
 import type { ToolCtx } from '../tools/types';
 
 /** Hasta acá se camina sin agregar nada. */
@@ -174,15 +178,59 @@ export async function planDayTransfers(blocks: DayBlock[], date: string, deps: T
   return out;
 }
 
-// ───────── Escritura: traslados de un tramo o de un viaje (plan_trip y la herramienta plan_transfers)
+// ───────── Escritura: recálculo de los traslados automáticos de un día (plan_trip, plan_transfers y al editar el plan)
 
-
-export type TransfersResult = { days: number; added: number; skipped_existing: number; estimated: number };
+export type TransfersResult = { days: number; added: number; removed: number; estimated: number };
 
 /**
- * Calcula e inserta los traslados de los días pedidos. Con ctx.plan (dentro de plan_trip) los bloques se aplican
- * directo y entran en el undo del plan; fuera, rige la regla normal (personal aplica, compartido + agente propone).
+ * Traslados del sistema = dato derivado del día: se borran los automáticos (transfer.auto) y se calculan de nuevo
+ * sobre los bloques compartidos (los privados no generan traslados para el grupo). Uno cargado a mano no se toca, y
+ * los pares a su lado se saltean. Escribe con service role y sin fila de feed por traslado (no es una decisión de nadie;
+ * se recalcula solo). `onInserted`: plan_trip los suma a su undo.
  */
+export async function refreshDayTransfers(
+  admin: Db,
+  day: { id: string; leg_id: string; date: string; trip_id: string },
+  deps: TransferDeps = defaultTransferDeps,
+  onInserted?: (b: { id: string; leg_id: string; day_id: string; title: string; type: string }) => void,
+): Promise<{ added: number; removed: number; estimated: number }> {
+  const { data, error } = await admin
+    .from('blocks')
+    .select('id,day_id,type,title,place_name,lat,lng,start_time,end_time,duration_min,status,plan_variant,is_private,transfer')
+    .eq('day_id', day.id);
+  if (error) throw dbError(error, 'blocks');
+  const rows = (data ?? []) as (DayBlock & { is_private: boolean; transfer: { auto?: boolean } | null })[];
+  const stale = rows.filter((b) => b.type === 'transfer' && b.transfer?.auto);
+  for (const b of stale) await deleteBlockRow(admin, b.id);
+  const planned = await planDayTransfers(
+    rows.filter((b) => !b.is_private && !(b.type === 'transfer' && b.transfer?.auto)),
+    day.date,
+    deps,
+  );
+  if (!planned.length) return { added: 0, removed: stale.length, estimated: 0 };
+  const members = await legMemberIds(admin, day.leg_id);
+  let estimated = 0;
+  for (const p of planned) {
+    const block = await insertBlock(admin, {
+      ...p.input,
+      transfer: { ...p.input.transfer!, auto: true },
+      trip_id: day.trip_id,
+      leg_id: day.leg_id,
+      day_id: day.id,
+      status: 'confirmed',
+      plan_variant: 'main',
+      is_private: false,
+      created_by: null,
+      created_by_agent: true,
+      participant_ids: members,
+    });
+    if (p.input.transfer?.estimated) estimated++;
+    onInserted?.({ id: block.id, leg_id: day.leg_id, day_id: day.id, title: block.title, type: block.type });
+  }
+  return { added: planned.length, removed: stale.length, estimated };
+}
+
+/** Días de un viaje (o de un tramo / días puntuales) → recálculo de cada uno. */
 export async function addTransfers(
   ctx: ToolCtx,
   args: { trip_id: string; leg_id?: string; day_ids?: string[] },
@@ -192,27 +240,35 @@ export async function addTransfers(
   if (args.leg_id) dq = dq.eq('leg_id', args.leg_id);
   if (args.day_ids?.length) dq = dq.in('id', args.day_ids);
   const { data: days, error } = await dq;
-  if (error) throw new Error(`days: ${error.message}`);
-  const res: TransfersResult = { days: 0, added: 0, skipped_existing: 0, estimated: 0 };
+  if (error) throw dbError(error, 'days');
+  const res: TransfersResult = { days: 0, added: 0, removed: 0, estimated: 0 };
   for (const d of (days ?? []) as { id: string; leg_id: string; date: string }[]) {
-    // Lectura con el cliente del usuario (RLS / blocks_visible): no se calculan traslados hacia privados ajenos.
-    const { data: blocks } = await ctx.db
-      .from('blocks_visible')
-      .select('id,day_id,type,title,place_name,lat,lng,start_time,end_time,duration_min,status,plan_variant,masked')
-      .eq('day_id', d.id);
-    const visible = ((blocks ?? []) as (DayBlock & { masked?: boolean })[]).filter((b) => !b.masked);
-    if (visible.some((b) => b.type === 'transfer')) res.skipped_existing++;
-    const planned = await planDayTransfers(visible, d.date, deps);
+    const r = await refreshDayTransfers(ctx.admin, { ...d, trip_id: args.trip_id }, deps, ctx.plan?.onBlockAdded);
     res.days++;
-    for (const p of planned) {
-      try {
-        await add_block({ ...p.input, trip_id: args.trip_id, leg_id: d.leg_id, day_id: d.id } as ToolInput<'add_block'>, ctx);
-        res.added++;
-        if (p.input.transfer?.estimated) res.estimated++;
-      } catch (e) {
-        console.warn('[transfers] add_block:', (e as Error).message);
-      }
-    }
+    res.added += r.added;
+    res.removed += r.removed;
+    res.estimated += r.estimated;
   }
   return res;
+}
+
+/**
+ * Después de editar el plan: si el viaje ya usa traslados automáticos, recalcula los días tocados (en segundo plano).
+ * Nunca falla ni demora la respuesta de la herramienta.
+ */
+export function scheduleTransferRefresh(admin: Db, tripId: string, dayIds: (string | null | undefined)[]): void {
+  const ids = [...new Set(dayIds.filter((d): d is string => !!d))];
+  if (!ids.length) return;
+  runInBackground(
+    `transfers/${tripId}`,
+    (async () => {
+      const { data: any } = await admin.from('blocks').select('id').eq('trip_id', tripId).eq('type', 'transfer').eq('transfer->>auto', 'true').limit(1);
+      if (!any?.length) return; // el viaje no usa traslados automáticos
+      const { data: days } = await admin.from('days').select('id,leg_id,date').in('id', ids);
+      for (const d of (days ?? []) as { id: string; leg_id: string; date: string }[]) {
+        const r = await refreshDayTransfers(admin, { ...d, trip_id: tripId });
+        if (r.added || r.removed) console.log(`[transfers] ${d.date}: -${r.removed} +${r.added}`);
+      }
+    })(),
+  );
 }

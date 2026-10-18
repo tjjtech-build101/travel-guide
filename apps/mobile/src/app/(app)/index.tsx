@@ -1,129 +1,183 @@
-import { FlashList } from '@shopify/flash-list';
+// Inicio: saludo, el viaje que importa hoy (en curso → qué toca ahora; si no, cuenta regresiva al próximo),
+// accesos rápidos y todos los viajes separados en próximos y anteriores.
+// Long-press en el saludo abre el menú dev (también build101:///dev).
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { DotsIcon } from '../../features/plan/components/TypeIcon';
-import { confirm, showMenu } from '../../features/plan/menu';
-import { appNow } from '../../features/now/clock';
-import { isTripInProgress } from '../../features/now/selectors';
-import { errorDetail, useMyTrips, type TripCard } from '../../features/trips/queries';
-import { callTool } from '../../lib/api';
-import { formatDateRange } from '../../lib/format';
-import { AvatarStack } from '../../ui/Avatar';
-import { Button } from '../../ui/Button';
-import { EmptyState, ErrorState, LoadingList } from '../../ui/States';
+import { useAuth } from '../../features/auth/AuthProvider';
+import {
+  HeroLive,
+  HeroSkeleton,
+  HeroUpcoming,
+  HeroWelcome,
+  QuickAction,
+  SectionHeader,
+  TripRow,
+} from '../../features/home/components';
+import { firstName, greeting, splitTrips } from '../../features/home/selectors';
+import { useNow } from '../../features/now/clock';
+import { PlusIcon } from '../../features/plan/components/TypeIcon';
+import { useMyProfile } from '../../features/profile/queries';
+import { tripKeys } from '../../features/trips/keys';
+import { errorDetail, useMyTrips } from '../../features/trips/queries';
+import { formatDay } from '../../lib/format';
+import { localParts } from '../../features/now/selectors';
+import { Avatar } from '../../ui/Avatar';
+import { GroupIcon, PlanIcon } from '../../ui/icons';
+import { ErrorState, SkeletonCard } from '../../ui/States';
 import { Text } from '../../ui/Text';
-import { colors, font, radius, space } from '../../ui/theme';
+import { colors, font, MIN_TOUCH, space } from '../../ui/theme';
+
+const PAST_PREVIEW = 3;
 
 function openNewTrip() {
   router.push('/trips/new');
 }
 
-export default function MyTripsScreen() {
+export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
   const trips = useMyTrips();
+  const { now } = useNow();
+  const [showAllPast, setShowAllPast] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  if (trips.isPending) return <LoadingList count={3} />;
+  const onRefresh = async () => {
+    setRefreshing(true);
+    // Mis viajes + lo que muestra el héroe (plan, bloques, propuestas).
+    await Promise.all([trips.refetch(), qc.invalidateQueries({ queryKey: ['trip'] })]).catch(() => {});
+    setRefreshing(false);
+  };
 
-  if (trips.isError) {
-    return <ErrorState message="No pudimos cargar tus viajes" detail={errorDetail(trips.error)} onRetry={() => trips.refetch()} />;
-  }
-
-  if (trips.data.length === 0) {
-    return (
-      <EmptyState pose="wave" title="Todavía no tenés viajes" subtitle="Armá uno nuevo o sumate al de tu grupo con el código de invitación.">
-        {/* PRD 04 (Unirme con código) */}
-        <Button label="Nuevo viaje" onPress={openNewTrip} />
-        <Button label="Unirme con código" variant="secondary" disabled accessibilityHint="Próximamente" />
-      </EmptyState>
-    );
-  }
+  const split = trips.data ? splitTrips(trips.data, now) : null;
+  const hero = split?.live[0] ?? split?.upcoming[0] ?? null;
+  const restLive = split ? split.live.filter((t) => t.id !== hero?.id) : [];
+  const restUpcoming = split ? split.upcoming.filter((t) => t.id !== hero?.id) : [];
+  const past = split?.past ?? [];
+  const shownPast = showAllPast ? past : past.slice(0, PAST_PREVIEW);
+  const hasOthers = restLive.length + restUpcoming.length > 0;
 
   return (
-    <FlashList
-      data={trips.data}
-      keyExtractor={(t) => t.id}
-      contentContainerStyle={styles.list}
-      ItemSeparatorComponent={() => <View style={{ height: space.md }} />}
-      refreshing={trips.isRefetching}
-      onRefresh={() => trips.refetch()}
-      ListHeaderComponent={<Button label="Nuevo viaje" onPress={openNewTrip} style={styles.newTrip} />}
-      renderItem={({ item }) => <TripCardView trip={item} onDeleted={() => void trips.refetch()} />}
-    />
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.bg }}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + space.md, paddingBottom: insets.bottom + space.xxl }]}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
+      <Greeting now={now} />
+
+      {trips.isPending ? (
+        <View style={{ gap: space.md }}>
+          <HeroSkeleton />
+          <SkeletonCard />
+        </View>
+      ) : trips.isError ? (
+        <View style={styles.error}>
+          <ErrorState message="No pudimos cargar tus viajes" detail={errorDetail(trips.error)} onRetry={() => trips.refetch()} />
+        </View>
+      ) : (
+        <>
+          {hero && split?.live[0]?.id === hero.id ? (
+            <HeroLive trip={hero} now={now} />
+          ) : hero ? (
+            <HeroUpcoming trip={hero} now={now} />
+          ) : (
+            <HeroWelcome onNewTrip={openNewTrip} />
+          )}
+
+          <View style={styles.quickRow}>
+            <QuickAction label="Nuevo viaje" hint="Armalo con el Scout" icon={<PlusIcon color={colors.khakiText} size={20} />} onPress={openNewTrip} />
+            {/* PRD 04 (Unirme con código) */}
+            <QuickAction label="Unirme con código" hint="Al viaje de tu grupo" icon={<GroupIcon color={colors.khakiText} size={20} />} soon />
+            <QuickAction label="Tus gustos" hint="Para tus tours" icon={<PlanIcon color={colors.khakiText} size={20} />} onPress={() => router.push('/profile')} />
+          </View>
+
+          {hasOthers ? (
+            <>
+              <SectionHeader title={hero ? 'También por delante' : 'Próximos'} />
+              <View style={styles.list}>
+                {restLive.map((t) => (
+                  <TripRow key={t.id} trip={t} now={now} kind="live" />
+                ))}
+                {restUpcoming.map((t) => (
+                  <TripRow key={t.id} trip={t} now={now} kind="upcoming" />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {past.length ? (
+            <>
+              <SectionHeader
+                title="Viajes anteriores"
+                right={
+                  past.length > PAST_PREVIEW ? (
+                    <Pressable onPress={() => setShowAllPast((v) => !v)} hitSlop={12} accessibilityRole="button">
+                      <Text style={styles.link}>{showAllPast ? 'Ver menos' : `Ver los ${past.length}`}</Text>
+                    </Pressable>
+                  ) : null
+                }
+              />
+              <View style={styles.list}>
+                {shownPast.map((t) => (
+                  <TripRow key={t.id} trip={t} now={now} kind="past" />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {trips.data.length === 0 ? (
+            <Text style={styles.footnote}>Todavía no tenés viajes. Cuando armes uno, o te sumes al de tu grupo, aparece acá.</Text>
+          ) : null}
+        </>
+      )}
+    </ScrollView>
   );
 }
 
-function TripCardView({ trip, onDeleted }: { trip: TripCard; onDeleted: () => void }) {
-  const onMenu = () => {
-    showMenu(trip.title, [
-      {
-        label: 'Borrar viaje',
-        destructive: true,
-        onPress: () =>
-          confirm(
-            'Borrar viaje',
-            `Se borra "${trip.title}" entero: tramos, días, bloques, tours, gastos. No se puede deshacer.`,
-            'Borrar',
-            () => {
-              void (async () => {
-                const res = await callTool('delete_trip', { trip_id: trip.id });
-                if (res.ok) onDeleted();
-                else Alert.alert('No pude borrar el viaje', res.error.message);
-              })();
-            },
-          ),
-      },
-    ]);
+function Greeting({ now }: { now: number }) {
+  const { session } = useAuth();
+  const profile = useMyProfile();
+  const name = firstName(profile.data?.display_name ?? (session?.user.user_metadata?.full_name as string | undefined));
+  const person = {
+    id: session?.user.id ?? 'yo',
+    display_name: profile.data?.display_name ?? null,
+    avatar_url: profile.data?.avatar_url ?? null,
   };
-
+  const today = formatDay(localParts(now, -180).date);
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Abrir ${trip.title}`}
-      // Viaje en curso → abre en Ahora (PRD 19); si no, en Planificación.
-      onPress={() =>
-        isTripInProgress(trip, appNow())
-          ? router.push({ pathname: '/trip/[tripId]/now', params: { tripId: trip.id } })
-          : router.push({ pathname: '/trip/[tripId]', params: { tripId: trip.id } })
-      }
-      onLongPress={onMenu}
-      style={({ pressed }) => [styles.card, pressed && { opacity: 0.85 }]}
-    >
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>{trip.title}</Text>
-        <Pressable onPress={onMenu} accessibilityRole="button" accessibilityLabel={`Opciones de ${trip.title}`} hitSlop={8}>
-          <DotsIcon color={colors.textMuted} />
-        </Pressable>
-      </View>
-      <Text style={styles.dates}>{formatDateRange(trip.start_date, trip.end_date)}</Text>
-      {trip.destinations.length > 0 ? (
-        <Text style={styles.destinations} numberOfLines={2}>
-          {trip.destinations.join(' · ')}
+    <View style={styles.greeting}>
+      <Pressable onLongPress={() => router.push('/dev')} delayLongPress={600} style={{ flex: 1 }} accessibilityRole="header">
+        <Text style={styles.date}>{today.charAt(0).toUpperCase() + today.slice(1)}</Text>
+        <Text style={styles.hello} numberOfLines={1}>
+          {greeting(now)}
+          {name ? `, ${name}` : ''}
         </Text>
-      ) : null}
-      <View style={styles.footer}>
-        <AvatarStack people={trip.members} size={34} />
-        <Text style={styles.count}>
-          {trip.members.length} {trip.members.length === 1 ? 'viajero' : 'viajeros'}
-        </Text>
-      </View>
-    </Pressable>
+      </Pressable>
+      <Pressable
+        onPress={() => router.push('/profile')}
+        accessibilityRole="button"
+        accessibilityLabel="Tu perfil"
+        hitSlop={8}
+        style={styles.avatarBtn}
+      >
+        <Avatar person={person} size={44} />
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { padding: space.lg },
-  newTrip: { marginBottom: space.md },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: space.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
-  title: { fontSize: font.h2, fontWeight: '700', color: colors.text, flexShrink: 1 },
-  dates: { fontSize: font.body, color: colors.textMuted, marginTop: space.xs },
-  destinations: { fontSize: font.body, color: colors.text, marginTop: space.sm },
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space.lg },
-  count: { fontSize: font.small, color: colors.textMuted },
+  content: { paddingHorizontal: space.lg },
+  greeting: { flexDirection: 'row', alignItems: 'center', marginBottom: space.lg, gap: space.md },
+  date: { fontSize: font.small, fontWeight: '600', color: colors.textMuted },
+  hello: { fontSize: font.title, fontWeight: '700', color: colors.text },
+  avatarBtn: { minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, alignItems: 'flex-end', justifyContent: 'center' },
+  quickRow: { flexDirection: 'row', gap: space.sm, marginTop: space.md },
+  list: { gap: space.sm },
+  link: { fontSize: font.small, fontWeight: '700', color: colors.primary },
+  error: { minHeight: 360 },
+  footnote: { fontSize: font.small, color: colors.textMuted, textAlign: 'center', marginTop: space.xl, paddingHorizontal: space.lg },
 });

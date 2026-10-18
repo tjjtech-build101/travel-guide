@@ -3,6 +3,7 @@
 // nada de union/refine en la raíz: las validaciones cruzadas van en el handler.
 import { z } from 'zod';
 import { BLOCK_STATUS, BLOCK_TYPES, ROUTE_MODES, TIME_FLEX, TRANSFER_MODES } from '../constants';
+import { INTEREST_TAGS } from '../profile';
 
 // z.guid() y no z.uuid(): los IDs fijos del seed (00000000-...-0001) no son UUID v4 válidos.
 export const Id = z.guid();
@@ -43,6 +44,8 @@ export const Transfer = z.object({
   maps_url: z.string().url().optional(),
   /** true = sin Google: duración estimada por distancia, sin líneas. */
   estimated: z.boolean().optional(),
+  /** true = lo calculó el sistema: se recalcula solo cuando cambia el día (uno cargado a mano nunca se toca). */
+  auto: z.boolean().optional(),
 });
 
 export const BlockAlertInput = z.object({
@@ -183,7 +186,17 @@ export const PlanTripInput = z.object({
 // ---------- PRD 06/18 · generate_tour ----------
 
 export const TourMode = z.enum(['planned', 'spontaneous', 'explorer']);
-export const TourTheme = z.enum(['historia', 'arquitectura', 'comida', 'curiosidades', 'para_chicos']);
+/** Temas del tour: los intereses del perfil (INTEREST_TAGS) + dos propios del tour. */
+export const TOUR_THEMES = [...INTEREST_TAGS, 'curiosidades', 'para_chicos'] as const;
+export const TourTheme = z.enum(TOUR_THEMES);
+export type TourTheme = z.infer<typeof TourTheme>;
+
+// Respuestas de la entrevista previa (tour_brief). Cada pregunta de tour_brief tiene como `id` el nombre del campo.
+export const TourEnergy = z.enum(['tranqui', 'normal', 'a_full']);
+export const TourFamiliarity = z.enum(['first_time', 'returning', 'local']);
+export const TourFinish = z.enum(['view', 'food', 'start', 'any']);
+export const TourIndoor = z.enum(['outdoor', 'mixed', 'indoor']);
+export const TourKids = z.enum(['menores_5', '5_a_9', '10_a_13', 'adolescentes']);
 
 export const TourEndPoint = z.object({
   lat: z.number().min(-90).max(90),
@@ -198,7 +211,7 @@ export const GenerateTourInput = z.object({
   start_lat: z.number().min(-90).max(90),
   start_lng: z.number().min(-180).max(180),
   duration_min: z.number().int().min(15).max(240).default(60),
-  end_point: TourEndPoint.nullable().optional().describe('null/ausente = vuelve cerca del inicio (loop)'),
+  end_point: TourEndPoint.nullable().optional().describe('null/ausente = termina según finish (default: donde quede mejor)'),
   participant_ids: z.array(Id).optional().describe('Default: block_participants o el usuario del JWT'),
   storyline: z.boolean().default(false),
   start_at: z.string().optional().describe('ISO datetime, para chequear horarios; default: ahora'),
@@ -206,6 +219,30 @@ export const GenerateTourInput = z.object({
   themes: z.array(TourTheme).optional().describe('Espontáneo/explorador: temas a priorizar'),
   radius_m: z.number().int().positive().max(2000).optional().describe('Default: min(1200, duration_min*20)'),
   extend_tour_id: Id.optional().describe('Explorador: agrega paradas nuevas a un tour ya generado, sin duplicar place_id'),
+  // Respuestas de tour_brief (todas opcionales: sin respuesta se usa el perfil del grupo).
+  energy: TourEnergy.optional().describe('tranqui = menos paradas, más pausas; a_full = más paradas'),
+  familiarity: TourFamiliarity.optional().describe('first_time = lo esencial; returning/local = lo menos conocido'),
+  food_stop: z.boolean().optional().describe('true = incluir una parada para comer o tomar algo'),
+  include_paid_entries: z.boolean().optional().describe('true = se puede entrar a lugares con entrada paga'),
+  kids: z.array(TourKids).optional().describe('Edades de los chicos que van (vacío = sin chicos)'),
+  indoor: TourIndoor.optional().describe('indoor = priorizar lugares cubiertos (lluvia)'),
+  finish: TourFinish.optional().describe('Cómo terminar si no hay end_point: con vista, comiendo, volviendo al inicio o donde sea'),
+  must_include: z.array(z.string().min(1).max(120)).max(5).optional().describe('Lugares que sí o sí quieren ver (nombres)'),
+  notes: z.string().max(500).optional().describe('Pedido libre de la persona ("algo con fantasmas", "nada de iglesias")'),
+});
+
+// ---------- tour_brief · entrevista previa al tour ----------
+
+export const TourBriefInput = z.object({
+  mode: TourMode.default('spontaneous'),
+  trip_id: Id.optional(),
+  block_id: Id.optional(),
+  start_lat: z.number().min(-90).max(90),
+  start_lng: z.number().min(-180).max(180),
+  duration_min: z.number().int().min(15).max(240).default(60),
+  end_point: TourEndPoint.nullable().optional(),
+  participant_ids: z.array(Id).optional(),
+  start_at: z.string().optional().describe('ISO datetime; default: ahora'),
 });
 
 // ---------- PRD 16 · weather / events_search ----------

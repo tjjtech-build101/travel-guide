@@ -34,6 +34,7 @@ Regla de oro: **un solo protagonista** arriba; todo lo demás es una fila chica 
    `18:00 · Llamada de laburo · Salí en 1 h 10`.
 7. **Dock v2** (abajo, ≤ 22 % de la pantalla): botón **Hablar con Scout** (con el avatar adentro, estado de voz) + 3 íconos
    chicos: Tour acá · Cámara · Cómo llego. En Ahora **se oculta la burbuja flotante** del Scout (ya está el dock).
+   "Tour acá" abre la hoja `TourSetupSheet` (duración + entrevista de `tour_brief`, PRD 06 v2) y arranca `generate_tour`.
 
 Nada de textos de ayuda tipo "Mantené apretada…". Las acciones se ven (botones), la pulsación larga queda como atajo.
 

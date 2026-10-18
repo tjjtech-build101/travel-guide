@@ -141,3 +141,54 @@ describe('planDayTransfers', () => {
     expect(est[0].input.title).toBe('Traslado a B');
   });
 });
+
+import { refreshDayTransfers } from './dayTransfers';
+import type { Db } from '../supabase';
+
+/** Db falso para el recálculo: filas de blocks del día, registra deletes/inserts. */
+function fakeDb(rows: Record<string, unknown>[]) {
+  const deleted: string[] = [];
+  const inserted: Record<string, unknown>[] = [];
+  const chain = (result: unknown) => {
+    const c: Record<string, unknown> = { then: (res: (v: unknown) => unknown) => Promise.resolve(result).then(res) };
+    for (const m of ['eq', 'select', 'maybeSingle', 'single', 'in', 'order', 'limit']) c[m] = () => c;
+    return c;
+  };
+  const admin = {
+    from: (table: string) => ({
+      select: () => chain({ data: table === 'blocks' ? rows : table === 'leg_members' ? [{ user_id: 'u1' }, { user_id: 'u2' }] : [], error: null }),
+      delete: () => ({ eq: (_k: string, id: string) => (table === 'blocks' && deleted.push(id), chain({ error: null })) }),
+      insert: (v: Record<string, unknown> | Record<string, unknown>[]) => {
+        if (table === 'blocks') inserted.push(v as Record<string, unknown>);
+        return chain({ data: { ...(v as Record<string, unknown>), id: `new-${inserted.length}` }, error: null });
+      },
+    }),
+  } as unknown as Db;
+  return { admin, deleted, inserted };
+}
+
+describe('refreshDayTransfers', () => {
+  const day = { id: 'd1', leg_id: 'l1', date: '2026-10-18', trip_id: 't1' };
+  const shared = (b: DayBlock) => ({ ...b, is_private: false, transfer: null });
+
+  it('borra los automáticos viejos, recalcula y marca los nuevos como auto (sin tocar los manuales)', async () => {
+    const { admin, deleted, inserted } = fakeDb([
+      shared(block('Mercado', '13:00', '18:00', ...CV)),
+      { ...block('Viejo', '18:00', '18:20', ...CV, { type: 'transfer' }), is_private: false, transfer: { mode: 'bus', auto: true } },
+      shared(block('Rambla', '18:30', '20:00', ...POCITOS)),
+      { ...block('Manual', '21:00', '21:30', ...POCITOS, { type: 'transfer' }), is_private: false, transfer: { mode: 'car' } },
+      shared(block('Cena', '22:00', '23:00', ...CV)),
+    ]);
+    const r = await refreshDayTransfers(admin, day, deps(70, BUS));
+    expect(deleted).toEqual(['Viejo']);
+    expect(r).toEqual({ added: 1, removed: 1, estimated: 0 });
+    expect(inserted[0]).toMatchObject({ type: 'transfer', title: 'Bus 121 a Rambla', created_by_agent: true, day_id: 'd1', is_private: false });
+    expect((inserted[0].transfer as { auto: boolean }).auto).toBe(true);
+  });
+
+  it('los bloques privados no generan traslados para el grupo', async () => {
+    const { admin, inserted } = fakeDb([shared(block('A', '10:00', '11:00', ...CV)), { ...block('B', '11:40', '12:00', ...POCITOS), is_private: true, transfer: null }]);
+    expect((await refreshDayTransfers(admin, day, deps(70, BUS))).added).toBe(0);
+    expect(inserted).toHaveLength(0);
+  });
+});

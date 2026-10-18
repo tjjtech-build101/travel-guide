@@ -93,3 +93,26 @@ export function affinityScore(placeInterests: InterestTag[], weights: Record<str
   const scores = placeInterests.map((i) => (weights[i] ?? 0) / 5); // peso declarado es 1-5
   return Math.max(...scores, 0.3);
 }
+
+/** Palabras del nombre → intereses (para candidatos sin tipos: Wikipedia, place_library). Español e inglés. */
+const NAME_INTERESTS: [RegExp, InterestTag[]][] = [
+  [/\b(iglesia|catedral|parroquia|capilla|bas[ií]lica|convento|templo|sinagoga|mezquita|church|cathedral|chapel)\b/i, ['religion', 'arquitectura', 'historia']],
+  [/\b(museo|museum|galer[ií]a|gallery)\b/i, ['museos', 'arte', 'historia']],
+  [/\b(teatro|theatre|theater|auditorio|[oó]pera)\b/i, ['arte', 'musica', 'arquitectura']],
+  [/\b(palacio|palace|edificio|building|torre|tower|casa|mansi[oó]n|castillo|castle|fortaleza|ciudadela|fort)\b/i, ['arquitectura', 'historia']],
+  [/\b(monumento|monument|estatua|statue|memorial|mausoleo|obelisco|busto)\b/i, ['historia']],
+  [/\b(plaza|square|piazza|place)\b/i, ['historia', 'arquitectura']],
+  [/\b(parque|park|jard[ií]n|garden|bosque)\b/i, ['naturaleza']],
+  [/\b(mercado|market|feria)\b/i, ['mercados', 'comida']],
+  [/\b(playa|beach|rambla)\b/i, ['playa', 'naturaleza']],
+  [/\b(mirador|viewpoint|lookout)\b/i, ['naturaleza', 'fotografia']],
+  [/\b(estadio|stadium)\b/i, ['deporte']],
+  [/\b(cabildo|ayuntamiento|municipio|aduana|puerto|port|puerta|gate|muralla|wall)\b/i, ['historia', 'arquitectura']],
+  [/\b(mural|escultura|sculpture|arte|art)\b/i, ['arte']],
+];
+
+export function interestsForName(name: string): InterestTag[] {
+  const out = new Set<InterestTag>();
+  for (const [re, tags] of NAME_INTERESTS) if (re.test(name)) tags.forEach((t) => out.add(t));
+  return [...out];
+}

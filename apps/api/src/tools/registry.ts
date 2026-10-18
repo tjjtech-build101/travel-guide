@@ -22,8 +22,10 @@ import { report_late } from './report_late';
 import { route_eta } from './route_eta';
 import { search_places } from './search_places';
 import { should_generate_tour } from './should_generate_tour';
+import { tour_brief } from './tour_brief';
 import { get_stop_content, next_stop, skip_stop, start_tour, tour_status } from './tour_live';
-import type { Handler, ToolCtx } from './types';
+import { scheduleTransferRefresh } from '../agents/dayTransfers';
+import type { Handler, ToolCtx, ToolOk } from './types';
 import { undo } from './undo';
 import { update_block } from './update_block';
 import { weather } from './weather';
@@ -44,6 +46,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   plan_transfers,
   look_at_photo,
   research,
+  tour_brief,
   generate_tour,
   weather,
   events_search,
@@ -63,11 +66,43 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
 
 export type ToolRun = { status: number; body: ToolResponse };
 
+const PLAN_WRITES = new Set<ToolName>(['add_block', 'update_block', 'move_block', 'remove_block']);
+
+/** Día, viaje y tipo del bloque ANTES de editarlo (move/remove: el día de origen también se recalcula). */
+async function blockBefore(ctx: ToolCtx, input: unknown): Promise<{ day_id: string | null; trip_id: string; type: string } | null> {
+  const blockId = (input as { block_id?: string }).block_id;
+  if (!blockId) return null;
+  const { data } = await ctx.admin.from('blocks').select('day_id,trip_id,type').eq('id', blockId).maybeSingle();
+  return (data as { day_id: string | null; trip_id: string; type: string } | null) ?? null;
+}
+
+/** Traslados automáticos: después de un cambio aplicado en el plan, se recalculan los días tocados (de fondo). */
+function refreshTransfersAfter(ctx: ToolCtx, input: unknown, body: ToolOk, before: Awaited<ReturnType<typeof blockBefore>>) {
+  const data = body.data as { mode?: string; block?: { day_id?: string | null; trip_id?: string; type?: string } } | undefined;
+  if (data?.mode !== 'applied') return; // una propuesta no cambia el plan todavía
+  const i = input as { trip_id?: string; day_id?: string | null; type?: string };
+  const type = data.block?.type ?? before?.type ?? i.type;
+  if (type === 'transfer') return; // editar un traslado no recalcula (sería un loop)
+  const tripId = data.block?.trip_id ?? before?.trip_id ?? i.trip_id;
+  if (!tripId) return;
+  scheduleTransferRefresh(ctx.admin, tripId, [before?.day_id, data.block?.day_id, i.day_id]);
+}
+
 /** Ejecuta un handler con input YA validado. Nunca tira: errores → { ok:false }. */
 export async function executeTool<N extends ToolName>(name: N, input: unknown, ctx: ToolCtx): Promise<ToolRun> {
   try {
     const handler = handlers[name] as Handler<ToolName>;
+    // Dentro de plan_trip no: el job calcula los traslados al terminar cada tramo.
+    const watch = PLAN_WRITES.has(name) && !ctx.plan;
+    const before = watch ? await blockBefore(ctx, input).catch(() => null) : null;
     const body = await handler(input as never, ctx);
+    if (watch) {
+      try {
+        refreshTransfersAfter(ctx, input, body, before);
+      } catch (e) {
+        console.warn('[transfers] refresh:', (e as Error).message);
+      }
+    }
     return { status: 200, body };
   } catch (err) {
     if (err instanceof ToolFailure) return { status: err.status, body: { ok: false, error: err.toError() } };

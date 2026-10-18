@@ -32,7 +32,8 @@ export type ResearchResult = {
   question: string;
   /** ≤60 palabras, armada SOLO con facts verificados. Vacía si no se encontró nada respaldado. */
   answer: string;
-  facts: { text: string; source_url: string }[];
+  /** quote = frase textual de la fuente que respalda el dato (la muestra la hoja de Fuentes). */
+  facts: { text: string; source_url: string; quote?: string }[];
   /** Datos investigados que no pasaron la verificación (para la mini-evaluación). */
   rejected: number;
   place_id: string | null;
@@ -55,6 +56,13 @@ export type GenerateTourResult = {
     places_new: number;
     facts_verified: number;
     facts_rejected: number;
+    /** Director/escritores (tour director): datos citados en narraciones y oraciones borradas por no tener respaldo. */
+    facts_cited?: number;
+    sentences_dropped?: number;
+    critic_rewrites?: number;
+    duration_ms?: number;
   };
+  title?: string | null;
+  thesis?: string | null;
   usage?: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
 };
