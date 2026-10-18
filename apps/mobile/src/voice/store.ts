@@ -642,7 +642,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       lastNudgeAt = 0;
       lastToolAt = 0;
       jobsWatching = 0;
-      set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args });
+      // Al llamar queda la vista de llamada abierta también cuando atiende; la llamada de fondo para narrar una foto
+      // (silentOpen) no la abre.
+      set({ ...initial, speaker: get().speaker, turnTaking: get().turnTaking, captions: get().captions, status: 'connecting', args, expanded: !args.silentOpen });
       try {
         startCallAudio(get().speaker);
         const s = await connect(args, false);
