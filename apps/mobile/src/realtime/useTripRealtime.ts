@@ -10,13 +10,14 @@ import { AppState } from 'react-native';
 
 import { supabase } from '../lib/supabase';
 import { tripKeys } from '../features/trips/keys';
+import { useVoiceStore } from '../voice/store';
 import { useConnectionStore } from './connectionStore';
 
 /** Tablas sin trip_id: se escuchan sin filtro y RLS recorta. */
 const UNFILTERED: readonly RealtimeTable[] = ['block_participants'];
 
 /** Invalidaciones derivadas: days / trip_members / leg_members no se publican (Contratos). */
-function invalidateFor(qc: QueryClient, tripId: string, table: RealtimeTable, payload: { new?: unknown }) {
+function invalidateFor(qc: QueryClient, tripId: string, table: RealtimeTable, payload: { new?: unknown }, me: string | null = null) {
   void qc.invalidateQueries({ queryKey: tripKeys.table(tripId, table) });
   switch (table) {
     case 'block_participants':
@@ -36,9 +37,19 @@ function invalidateFor(qc: QueryClient, tripId: string, table: RealtimeTable, pa
         kind === 'undo' ||
         kind === 'trip_planned' ||
         kind === 'days_composed' ||
-        kind === 'option_chosen'
+        kind === 'option_chosen' ||
+        kind.startsWith('proposal_') // PRD 11: aceptar una propuesta aplica bloques
       ) {
         void qc.invalidateQueries({ queryKey: tripKeys.table(tripId, 'blocks') });
+      }
+      if (kind.startsWith('proposal_')) void qc.invalidateQueries({ queryKey: tripKeys.table(tripId, 'agent_proposals') });
+      // Si decidió otra persona y estoy en llamada con el Scout sobre este viaje, que lo cuente (PRD 11).
+      const row = payload.new as { actor_user_id?: string | null; payload?: { summary?: string } } | undefined;
+      if ((kind === 'proposal_accepted' || kind === 'proposal_rejected') && row?.actor_user_id && row.actor_user_id !== me) {
+        const voice = useVoiceStore.getState();
+        if (voice.status === 'live' && voice.args?.tripId === tripId) {
+          voice.injectEvent('proposal_decided', { decision: kind === 'proposal_accepted' ? 'accepted' : 'rejected', summary: row.payload?.summary ?? '' });
+        }
       }
       if (kind.startsWith('member_') || kind === 'trip_planned') {
         void qc.invalidateQueries({ queryKey: tripKeys.table(tripId, 'trip_members') });
@@ -87,6 +98,7 @@ export function useTripRealtime(tripId: string | undefined) {
       // El socket tiene que tener el JWT actual antes de suscribirse (RLS en postgres_changes).
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
+      const me = data.session?.user.id ?? null;
       await supabase.realtime.setAuth(data.session?.access_token ?? null);
       if (cancelled) return;
 
@@ -100,7 +112,7 @@ export function useTripRealtime(tripId: string | undefined) {
           UNFILTERED.includes(table)
             ? { event: '*', schema: 'public', table }
             : { event: '*', schema: 'public', table, filter: `trip_id=eq.${tripId}` },
-          (payload) => invalidateFor(qc, tripId, table, payload as { new?: unknown }),
+          (payload) => invalidateFor(qc, tripId, table, payload as { new?: unknown }, me),
         );
       }
       // Canal del menú (PRD 31): best effort, su estado no cambia el indicador de conexión.

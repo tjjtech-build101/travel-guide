@@ -4,6 +4,4 @@ export const FEATURES = {
   expenses: false,
   /** Tab Diario (PRD de diario). */
   diary: false,
-  /** Aceptar / rechazar propuestas desde el Plan (PRD 11, herramienta decide_proposal). */
-  decideProposal: false,
 } as const;

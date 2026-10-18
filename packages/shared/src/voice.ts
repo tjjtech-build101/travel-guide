@@ -1,5 +1,6 @@
 // Voz 1 a 1 (PRD 05): contratos de POST /voice/session y /voice/session/:id/end, eventos del mundo y resumen.
 import { z } from 'zod';
+import type { TourPlanLink } from './jobs';
 
 const Id = z.guid();
 
@@ -148,6 +149,8 @@ export type TourReadyEvent = {
   est_duration_min: number;
   total_walk_m: number;
   stops: { sort_order: number; name: string }[];
+  /** Cómo quedó en el plan (para que el Scout lo cuente: "te lo dejé a las 15:40" / "quedó propuesto al grupo"). */
+  plan?: TourPlanLink;
 };
 export type VoiceEventType = (typeof VOICE_EVENT_TYPES)[number];
 

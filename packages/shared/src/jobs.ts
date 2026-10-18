@@ -60,8 +60,18 @@ export type ResearchResult = {
 export type GenerateTourStart = { job_id: string; tour_id: string };
 
 /** agent_jobs.result de un job kind='generate_tour' (PRD 06/18). */
+/**
+ * Cómo quedó un tour en el plan (generate_tour): se enlazó al bloque desde el que se pidió, se agregó como bloque
+ * `tour` de hoy (personal → aplicado; compartido y lo pidió el Scout → propuesta al grupo), o no se agregó.
+ */
+export type TourPlanLink =
+  | { mode: 'linked' | 'applied'; block_id: string; start_time: string | null }
+  | { mode: 'proposed'; proposal_id: string; start_time: string | null }
+  | { mode: 'none'; reason: string };
+
 export type GenerateTourResult = {
   tour_id: string;
+  plan?: TourPlanLink;
   stop_count: number;
   total_walk_m: number;
   est_duration_min: number;
