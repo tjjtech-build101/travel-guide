@@ -522,3 +522,25 @@ describe('trip_shapes', () => {
     await expect(p).rejects.toMatchObject({ code: 'shapes_failed' });
   });
 });
+
+describe('trip_shapes con understanding de mobile (regresión prod: "object is not iterable")', () => {
+  it('interests como {tag: peso} y anclas de la entrevista: se normaliza sin romper', async () => {
+    const { understandingFromInput } = await import('./briefLlm');
+    const u = understandingFromInput(
+      {
+        destinations: [{ city: 'Sydney', country: 'Australia' }],
+        interests: { deporte: 5, vida_nocturna: 4, inventado: 3 },
+        first_time: true,
+        travelers: 5,
+        trip_kind: 'event',
+        anchors: [{ id: 'mundial', name: 'Mundial de Rugby 2027', kind: 'sports', tickets: 'want', researched: false, sources: [], date: null }],
+      } as never,
+      {},
+    );
+    expect(u.interests).toEqual({ deporte: 5, vida_nocturna: 4 });
+    expect(u.first_time).toBe(true);
+    expect(u.travelers).toBe(5);
+    expect(u.trip_kind).toBe('event');
+    expect(u.anchors).toEqual([expect.objectContaining({ id: 'mundial', researched: false, date: null, tickets: 'want' })]);
+  });
+});
