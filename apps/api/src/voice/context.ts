@@ -1,6 +1,6 @@
 // Contexto para las instrucciones de voz: perfil, viaje (resumen + lo que sigue hoy), memoria y foco.
 // Todo en paralelo y tolerante a fallas: si algo no carga, el scout atiende igual con menos contexto.
-import type { BlockVisibleRow } from '@build101/shared';
+import { PROPOSAL_TTL_MS, type BlockVisibleRow } from '@build101/shared';
 import { todayIso } from '../agents/dates';
 import { dbError, notFound } from '../errors';
 import { get_day_plan } from '../tools/get_day_plan';
@@ -66,6 +66,20 @@ async function personaId(ctx: ToolCtx): Promise<string | null> {
   return companionPersonaId;
 }
 
+/** Propuestas pendientes (las más nuevas primero, ≤ 5) para que el Scout pueda contarlas y decidirlas con un sí explícito. */
+export async function pendingProposalLines(ctx: ToolCtx, tripId: string, now: Date): Promise<string[]> {
+  const { data } = await ctx.db
+    .from('agent_proposals')
+    .select('id,summary,created_at')
+    .eq('trip_id', tripId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(5);
+  return ((data ?? []) as { id: string; summary: string | null; created_at: string }[])
+    .filter((p) => now.getTime() - Date.parse(p.created_at) <= PROPOSAL_TTL_MS)
+    .map((p) => `propuesta pendiente «${p.summary ?? 'cambios en el plan'}»: proposal_id=${p.id}`);
+}
+
 async function loadTrip(ctx: ToolCtx, tripId: string, now: Date) {
   const overview = await get_trip_overview({ trip_id: tripId }, ctx); // tira notFound si no es miembro
   const ov = overview.data as {
@@ -90,11 +104,13 @@ async function loadTrip(ctx: ToolCtx, tripId: string, now: Date) {
     // hoy no es un día del viaje: sin "lo que sigue"
   }
   const myLegs = ov.legs.filter((l) => l.member_ids.includes(ctx.userId));
+  const pending = await pendingProposalLines(ctx, tripId, now);
   const toolData = [
     `trip_id=${tripId}`,
     dayId && legId ? `hoy ${today}: day_id=${dayId}, leg_id=${legId}` : `hoy ${today}: no es un día del viaje`,
     ...myLegs.map((l) => `tramo ${l.city} ${l.start_date}→${l.end_date}: leg_id=${l.id}`),
     ...todayBlocks.map((b) => `bloque «${b.title}» de hoy: block_id=${b.id}`),
+    ...pending,
   ];
   const leg = ov.legs.find((l) => l.id === legId);
   const companions = (leg?.member_ids ?? [])

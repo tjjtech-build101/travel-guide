@@ -43,7 +43,7 @@ function Card({ card }: { card: ActionCard }) {
           <Text style={styles.btnText}>Ver</Text>
         </Pressable>
       ) : null}
-      {card.tripId ? (
+      {card.tripId && card.undoToken ? (
         <Pressable
           style={styles.btn}
           accessibilityRole="button"

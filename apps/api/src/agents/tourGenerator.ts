@@ -18,9 +18,11 @@ import {
   type GenerateTourResult,
   type InterestTag,
   type ToolInput,
+  type TourPlanLink,
 } from '@build101/shared';
 import { dbError, notFound } from '../errors';
 import { insertFeed } from '../feed';
+import { attachTourToPlan } from './tourPlan';
 import { tourWeather } from '../google/openMeteo';
 import { reverseGeocode } from '../google/osm';
 import { overpassCandidates } from '../google/overpass';
@@ -1236,6 +1238,7 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   let fatal: string | null = null;
   let composed: ComposedTour | null = null;
   let stopCount = 0;
+  let planLink: TourPlanLink | undefined;
 
   try {
     const brief = await loadTourBrief(
@@ -1361,6 +1364,18 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
         payload: { summary: `El Scout armó «${composed.title}», un tour de ${stopRows.length} paradas`, tour_id: tourId },
         undoable: false,
       });
+      // El tour queda en el plan del día (bloque `tour` con tour_id): Plan, mapa y Ahora lo muestran y lo arrancan.
+      planLink = await attachTourToPlan(ctx, {
+        tourId,
+        tripId,
+        blockId: input.block_id ?? null,
+        title: composed.title,
+        durationMin: composed.estDurationMin || input.duration_min,
+        start: resolveStart(deps.now(), args.startAt),
+        participantIds: args.participantIds,
+        lat: input.start_lat,
+        lng: input.start_lng,
+      });
     }
     stopCount = stopRows.length;
   } catch (err) {
@@ -1373,6 +1388,7 @@ export async function runGenerateTour(args: RunArgs, deps: TourDeps): Promise<vo
   const usage = composed?.usage ?? emptyUsage();
   const result: GenerateTourResult = {
     tour_id: tourId,
+    ...(planLink ? { plan: planLink } : {}),
     stop_count: stopCount,
     total_walk_m: composed?.totalWalkM ?? 0,
     est_duration_min: composed?.estDurationMin ?? 0,

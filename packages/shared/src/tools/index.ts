@@ -6,6 +6,7 @@ import {
   DeleteTripInput,
   ChooseOptionInput,
   ComposeDaysInput,
+  DecideProposalInput,
   EventsSearchInput,
   GenerateIndoorTourInput,
   GenerateTourInput,
@@ -94,6 +95,11 @@ export const toolDefs = {
     description:
       'Investiga en la web una pregunta que no podés responder con lo que tenés (año, origen, quién, curiosidad) y verifica cada dato contra su fuente. Si ya lo teníamos guardado devuelve al toque { cached: true, answer, facts }; si no, es un trabajo en segundo plano (~30-60 s): devuelve { job_id } y la respuesta llega después. Nunca inventes mientras tanto.',
     input: ResearchInput,
+  },
+  decide_proposal: {
+    description:
+      'Acepta o rechaza una propuesta pendiente del grupo (agent_proposals). Aceptar aplica todos sus cambios juntos (o ninguno) y devuelve undo_token. Solo con un sí o no explícito de la persona.',
+    input: DecideProposalInput,
   },
   look_at_photo: {
     description:

@@ -23,6 +23,8 @@ export type LocationSharing = (typeof LOCATION_SHARING)[number];
 
 export const PROPOSAL_STATUS = ['pending', 'accepted', 'rejected', 'expired', 'applied_urgent'] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUS)[number];
+/** Una propuesta pendiente vence a las 24 h (PRD 11). La API la marca expired al decidirla; la app la muestra gris. */
+export const PROPOSAL_TTL_MS = 24 * 3600_000;
 
 export const ROUTE_MODES = ['walk', 'transit', 'car'] as const;
 export type RouteMode = (typeof ROUTE_MODES)[number];
@@ -34,6 +36,9 @@ export const FEED_KINDS = [
   'block_moved',
   'block_removed',
   'proposal_created',
+  'proposal_accepted', // PRD 11
+  'proposal_rejected', // PRD 11
+  'proposal_expired', // PRD 11
   'undo',
   'busy_changed',
   'trip_planned',

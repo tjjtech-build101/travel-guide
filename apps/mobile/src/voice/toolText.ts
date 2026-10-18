@@ -50,6 +50,7 @@ const FRIENDLY: Record<string, string> = {
   react_option: 'Anotando tu voto',
   compose_days: 'Armando los días',
   choose_option: 'Eligiendo',
+  decide_proposal: 'Decidiendo la propuesta',
 };
 
 const REACTION_TEXT: Record<string, string> = { love: 'Me copa', no: 'Paso', must: 'Sí o sí' };
@@ -85,6 +86,12 @@ type BlockLike = { title?: string; start_time?: string | null };
 /** Texto de la tarjeta de acción ("Agregué «Café» · 17:00"). null = la herramienta no deja tarjeta. */
 export function actionText(name: string, res: ToolResponse): { text: string; proposed: boolean } | null {
   if (!res.ok) return null;
+  if (name === 'decide_proposal') {
+    const status = (res.data as { status?: string } | undefined)?.status;
+    if (status === 'accepted') return { text: 'Acepté la propuesta: ya está en el plan', proposed: false };
+    if (status === 'rejected') return { text: 'Rechacé la propuesta', proposed: false };
+    return { text: 'La propuesta venció: algo del plan cambió', proposed: false };
+  }
   const planner = plannerText(name, (res.data ?? {}) as Record<string, unknown>);
   if (planner) return { text: planner, proposed: false };
   if (!res.undo_token) return null;
