@@ -21,7 +21,9 @@ const get = () => useNewTripStore.getState();
 
 export function friendlyError(e: Pick<ToolError, 'code' | 'message'>): string {
   if (e.code === 'network_error') return 'No me pude conectar. Revisá la conexión y probamos de nuevo.';
-  if (e.code === 'http_501' || e.code === 'not_implemented') return 'Esta parte todavía no está lista.';
+  // La API deployada todavía no tiene la entrevista/las formas (unknown_tool = 404 de /tools/:name).
+  if (e.code === 'http_501' || e.code === 'not_implemented' || e.code === 'unknown_tool' || e.code === 'http_404')
+    return 'Esta versión del servidor todavía no tiene las preguntas. Lo puedo armar igual con lo que me contaste.';
   if (e.code === 'unauthenticated') return 'Se cerró tu sesión. Volvé a entrar.';
   return 'No me salió esta vez.';
 }
