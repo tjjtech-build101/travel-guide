@@ -403,7 +403,7 @@ implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDe
 
 ## Cambios PRD 31 (planificador colaborativo) — en código
 
-- **Migración `20261017000010_planner_colaborativo.sql`** (aditiva):
+- **Migración `20261017000011_planner_colaborativo.sql`** (aditiva):
   - `destination_catalog` (global por ciudad, escribe solo la API): `city_key` único (`"buenos aires|argentina"`), `city`, `country`, `lat`, `lng`, `items jsonb` (`CatalogItem[]`), `lodging_zones jsonb`, `model`, timestamps. Lectura para cualquier autenticado. TTL lógico 30 días.
   - `leg_options` (menú del tramo): `trip_id`, `leg_id`, `item jsonb` (`CatalogItem`), `section` ∈ `must|for_you|gems|food|day_trips|events`, `score`, `for_user_ids uuid[]`, `reason`, `preselected`, `sort_order`. Cae en cascada con el tramo.
   - `leg_option_reactions`: PK `(option_id, user_id)`, `trip_id`, `reaction` ∈ `love|no|must`. Escribe solo la API (`react_option`).
