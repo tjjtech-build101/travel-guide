@@ -9,6 +9,7 @@ import {
   type LegOptionReactionRow,
   type LegOptionRow,
   type PlanCoverage,
+  type TripAnchor,
   type TripUnderstanding,
 } from '@build101/shared';
 import { insertBlock } from '../../blocks';
@@ -29,6 +30,7 @@ import type {
   ComposeInput,
   ComposeLeg,
   ComposeOutput,
+  DayWindow,
   LegOptionDraft,
   PickedItem,
   PlanIssue,
@@ -193,14 +195,22 @@ export function picksFromReactions(
 const START_BY_CHRONO = { early: 8 * 60, normal: 9 * 60, night: 10 * 60 + 30 } as const;
 const DAY_END = 23 * 60 + 30;
 
+/** Llegada internacional (vuelo largo): el primer día rinde ~35 % y se cena temprano. */
+export const LONG_HAUL_CAP = 0.35;
+export const LONG_HAUL_DINNER = 19 * 60 + 30;
+export const JETLAG_NOTE =
+  'Llegan de un vuelo largo: día liviano para acomodarse (algo cerca del alojamiento y cena temprano). Tomen luz natural y aguanten despiertos hasta la noche local: así el jet lag dura menos.';
+
 /**
- * Ventanas por día: arranque según cronotipo; el día de llegada arranca después del traslado
- * (hora real si la tiene; si no, "a la mañana" = 9:00) + duración + 30 min para acomodarse.
+ * Ventanas por fecha (YYYY-MM-DD): arranque según cronotipo; el día de llegada arranca después del traslado
+ * (hora real si la tiene; si no, "a la mañana" = 9:00) + duración + 30 min para acomodarse. Con `longHaulArrival`
+ * (primer tramo de un viaje que llega de otro continente) el primer día rinde ~35 % y cena temprano, con aviso.
  */
 export function dayWindows(
   days: { id: string; date: string }[],
   transfers: { day_id: string | null; start_time: string | null; duration_min: number | null }[],
   chronotype: PlannerGroup['chronotype'],
+  opts: { longHaulArrival?: boolean } = {},
 ): ComposeLeg['dayWindows'] {
   const out: ComposeLeg['dayWindows'] = {};
   for (const d of days) {
@@ -209,7 +219,134 @@ export function dayWindows(
       const from = toMin(t.start_time) ?? 9 * 60;
       start = Math.max(start, from + (t.duration_min ?? 60) + 30);
     }
-    out[d.id] = { start_min: Math.min(start, DAY_END - 60), end_min: DAY_END };
+    out[d.date] = { start_min: Math.min(start, DAY_END - 60), end_min: DAY_END };
+  }
+  const first = [...days].sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (opts.longHaulArrival && first) {
+    const w: DayWindow = out[first.date];
+    out[first.date] = { ...w, cap_factor: LONG_HAUL_CAP, dinner_min: Math.max(LONG_HAUL_DINNER, w.start_min + 60), note: JETLAG_NOTE };
+  }
+  return out;
+}
+
+// ───────────────────────── Llegada internacional
+
+const CONTINENT: Record<string, string> = {};
+const addCountries = (continent: string, names: string) => names.split(',').forEach((n) => (CONTINENT[normText(n)] = continent));
+addCountries('sa', 'argentina,uruguay,chile,brasil,brazil,paraguay,bolivia,peru,perú,ecuador,colombia,venezuela,guyana,surinam');
+addCountries('na', 'mexico,méxico,estados unidos,usa,eeuu,ee uu,united states,canada,canadá,cuba,guatemala,costa rica,panama,panamá,republica dominicana,puerto rico,honduras,el salvador,nicaragua,jamaica');
+addCountries('eu', 'españa,spain,francia,france,italia,italy,portugal,alemania,germany,reino unido,united kingdom,uk,inglaterra,england,escocia,scotland,gales,wales,irlanda,ireland,paises bajos,holanda,netherlands,belgica,bélgica,belgium,suiza,switzerland,austria,grecia,greece,croacia,croatia,polonia,poland,republica checa,chequia,czechia,hungria,hungría,suecia,sweden,noruega,norway,dinamarca,denmark,finlandia,finland,islandia,iceland,turquia,turquía,turkey,rusia,russia');
+addCountries('oc', 'australia,nueva zelanda,new zealand,fiyi,fiji,samoa,tonga');
+addCountries('as', 'japon,japón,japan,china,corea del sur,south korea,corea,tailandia,thailand,vietnam,india,indonesia,singapur,singapore,malasia,malaysia,filipinas,philippines,emiratos arabes unidos,emiratos,uae,israel,qatar,jordania');
+addCountries('af', 'marruecos,morocco,egipto,egypt,sudafrica,sudáfrica,south africa,kenia,kenya,tanzania,tunez,túnez');
+/** Orígenes frecuentes sin país ("Buenos Aires") → país. */
+const CITY_COUNTRY: Record<string, string> = {};
+const addCities = (country: string, names: string) => names.split(',').forEach((n) => (CITY_COUNTRY[normText(n)] = country));
+addCities('argentina', 'buenos aires,caba,cordoba,córdoba,rosario,mendoza,la plata,mar del plata,tucuman,tucumán,salta,neuquen,neuquén,bariloche,santa fe,ezeiza');
+addCities('uruguay', 'montevideo,punta del este,colonia,salto,paysandu,paysandú');
+addCities('chile', 'santiago,santiago de chile,valparaiso,valparaíso');
+addCities('brasil', 'sao paulo,são paulo,rio de janeiro,río de janeiro');
+addCities('peru', 'lima,cusco');
+addCities('colombia', 'bogota,bogotá,medellin,medellín');
+addCities('mexico', 'ciudad de mexico,ciudad de méxico,cdmx,guadalajara,monterrey');
+addCities('españa', 'madrid,barcelona,valencia,sevilla');
+
+/** País (normalizado) de un origen libre ("Buenos Aires", "Rosario, Argentina", "Uruguay"). null si no sé. */
+export function originCountry(origin: string | null | undefined): string | null {
+  const t = normText(origin ?? '');
+  if (!t) return null;
+  const parts = t.split(/[,(]/).map((x) => x.replace(/\)/g, '').trim()).filter(Boolean);
+  for (const p of [...parts].reverse()) if (CONTINENT[p]) return p;
+  for (const p of parts) if (CITY_COUNTRY[p]) return CITY_COUNTRY[p];
+  for (const k of Object.keys(CONTINENT)) if (k.length >= 5 && ` ${t} `.includes(` ${k} `)) return k;
+  return null;
+}
+
+const LONG_HAUL_RE = /jet ?lag|vuelo (largo|internacional|transoceanico|de \d+ ?h)|\d{2} ?(h|horas) de vuelo|llegada internacional|cruzan el (oceano|pacifico|atlantico)/;
+
+/**
+ * ¿El grupo llega de otro continente al primer tramo? Heurística: país de origen distinto al del tramo y en otro
+ * continente (Buenos Aires → Montevideo no es jet lag; Buenos Aires → Melbourne sí), o el esqueleto lo dice en
+ * assumptions ("vuelo largo", "jet lag"). Si no sé el continente de alguno, alcanza con que el país sea distinto.
+ */
+export function isLongHaulArrival(origin: string | null | undefined, legCountry: string | null | undefined, assumptions: string[] = []): boolean {
+  if (LONG_HAUL_RE.test(normText(assumptions.join(' ')))) return true;
+  const from = originCountry(origin);
+  const to = originCountry(legCountry);
+  if (!from || !to || from === to) return false;
+  const [ca, cb] = [CONTINENT[from], CONTINENT[to]];
+  if (ca && cb) return ca !== cb;
+  return true;
+}
+
+// ───────────────────────── Anclas del viaje
+
+type AnchorLike = Partial<Omit<TripAnchor, 'id' | 'name'>> & { id: string; name: string };
+
+/**
+ * Anclas de trip_shapes (skeleton, investigadas) + de la entrevista (understanding) → lista única. Si la misma ancla
+ * viene de las dos (mismo id, o mismo nombre y fecha), gana la investigada.
+ */
+export function mergeAnchors(...lists: (AnchorLike[] | null | undefined)[]): TripAnchor[] {
+  const out: TripAnchor[] = [];
+  const keyOf = (a: TripAnchor) => `${normText(a.name)}|${a.date ?? ''}`;
+  for (const list of lists)
+    for (const raw of list ?? []) {
+      if (!raw?.name?.trim()) continue;
+      const a: TripAnchor = {
+        id: (raw.id || normText(raw.name)).slice(0, 60),
+        name: raw.name.trim().slice(0, 200),
+        kind: raw.kind ?? 'other',
+        city: raw.city?.trim() || null,
+        country: raw.country?.trim() || null,
+        date: raw.date ?? null,
+        time: raw.time ?? null,
+        venue: raw.venue?.trim() || null,
+        tickets: raw.tickets ?? 'unknown',
+        researched: raw.researched === true,
+        sources: (raw.sources ?? []).filter((s) => s && typeof s.url === 'string').map((s) => ({ url: s.url, title: s.title ?? null })),
+        note: raw.note?.trim() || null,
+      };
+      const i = out.findIndex((x) => x.id === a.id || keyOf(x) === keyOf(a));
+      if (i < 0) out.push(a);
+      else if (a.researched && !out[i].researched) out[i] = a;
+    }
+  return out.slice(0, 12);
+}
+
+const cityMatch = (a: Pick<TripAnchor, 'city'>, legCity: string) => {
+  if (!a.city) return false;
+  const [x, y] = [normText(a.city), normText(legCity)];
+  return x === y || (x.length >= 4 && y.includes(x)) || (y.length >= 4 && x.includes(y));
+};
+
+type LegSpan = { id?: string; city: string; start_date: string; end_date: string };
+
+/**
+ * Anclas que le tocan a un tramo. Con fecha: la fecha cae en el tramo y la ciudad coincide (o no dice ciudad, o
+ * ningún tramo de ese día está en esa ciudad → lo ven desde acá, con nota). Sin fecha confirmada: el tramo de su
+ * ciudad (o el primero si no coincide ninguno) — van como idea al banco.
+ */
+export function anchorsForLeg(anchors: TripAnchor[], leg: LegSpan, allLegs: LegSpan[] = [leg]): TripAnchor[] {
+  const legs = allLegs.length ? allLegs : [leg];
+  const inSpan = (d: string, l: LegSpan) => d >= l.start_date && d <= l.end_date;
+  const first = [...legs].sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+  const same = (a: LegSpan, b: LegSpan) => (a.id && b.id ? a.id === b.id : a.city === b.city && a.start_date === b.start_date);
+  const out: TripAnchor[] = [];
+  for (const a of anchors) {
+    if (a.date) {
+      if (!inSpan(a.date, leg)) continue;
+      if (!a.city || cityMatch(a, leg.city)) {
+        out.push(a);
+        continue;
+      }
+      const other = legs.some((l) => inSpan(a.date!, l) && cityMatch(a, l.city));
+      if (!other)
+        out.push({ ...a, note: [a.note, `Es en ${a.city} y ese día están en ${leg.city}: si no llegan, véanlo en un bar o fan zone.`].filter(Boolean).join(' ') });
+      continue;
+    }
+    const home = legs.find((l) => cityMatch(a, l.city)) ?? first;
+    if (home && same(home, leg)) out.push(a);
   }
   return out;
 }

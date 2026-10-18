@@ -44,6 +44,10 @@ export type DayFrame = {
   sunset: number | null;
   /** Día entero: sirve para una escapada (no es llegada ni salida recortada). */
   full: boolean;
+  /** Aviso del día para el grupo (llegada internacional: jet lag), de dayWindows. */
+  note: string | null;
+  /** Capacidad recortada a propósito (llegada larga, día después del partido): solo lo cercano y liviano. */
+  light: boolean;
 };
 
 export const normProb = (p: number | null | undefined) => (p == null ? 0 : p > 1 ? p / 100 : p);
@@ -54,14 +58,17 @@ export function dayFrame(leg: ComposeLeg, group: PlannerGroup, date: string, cap
   const start = Math.max(chrono, w?.start_min ?? 0);
   const end = Math.min(DAY_END_DEFAULT, w?.end_min ?? DAY_END_DEFAULT);
   const lunchAt = MEALS.lunch[group.chronotype] ?? MEALS.lunch.normal;
-  const dinnerAt = MEALS.dinner[group.chronotype] ?? MEALS.dinner.normal;
+  // dinner_min: la ventana del día adelanta la cena (llegada internacional: cena temprano y a dormir).
+  const dinnerAt = w?.dinner_min ?? MEALS.dinner[group.chronotype] ?? MEALS.dinner.normal;
   // Una comida "entra" si el día la cubre entera (con 30 min de tolerancia para arrancar antes).
-  const lunch = start <= lunchAt + 30 && end >= lunchAt + MEALS.lunch.dur ? Math.max(lunchAt, start) : null;
-  const dinner = start <= dinnerAt + 30 && end >= dinnerAt + MEALS.dinner.dur ? Math.max(dinnerAt, start) : null;
+  // skip_lunch / skip_dinner: el día de un ancla, la comida que choca con el evento la cubren la previa o el tercer tiempo.
+  const lunch = !w?.skip_lunch && start <= lunchAt + 30 && end >= lunchAt + MEALS.lunch.dur ? Math.max(lunchAt, start) : null;
+  const dinner = !w?.skip_dinner && start <= dinnerAt + 30 && end >= dinnerAt + MEALS.dinner.dur ? Math.max(dinnerAt, start) : null;
   const meals = (lunch != null ? MEALS.lunch.dur : 0) + (dinner != null ? MEALS.dinner.dur : 0);
   // 60 min de margen para traslados y respiro entre paradas.
   const span = Math.max(0, end - start - meals - 60);
-  let cap = Math.round(PACE_CAPACITY[group.pace] * capFactor * (group.hasKids ? 0.9 : 1));
+  const windowFactor = w?.cap_factor != null && w.cap_factor > 0 ? Math.min(1, w.cap_factor) : 1;
+  let cap = Math.round(PACE_CAPACITY[group.pace] * capFactor * windowFactor * (group.hasKids ? 0.9 : 1));
   cap = Math.min(cap, span);
   const wx = leg.weather[date];
   return {
@@ -74,7 +81,9 @@ export function dayFrame(leg: ComposeLeg, group: PlannerGroup, date: string, cap
     dinner,
     rain: normProb(wx?.precip_prob),
     sunset: wx?.sunset_min ?? null,
-    full: start <= chrono + 60 && end >= 20 * 60,
+    full: windowFactor >= 1 && start <= chrono + 60 && end >= 20 * 60,
+    note: w?.note ?? null,
+    light: windowFactor < 0.9,
   };
 }
 
@@ -92,6 +101,75 @@ export function isOpenOn(item: Pick<CatalogItem, 'closed_days' | 'periods'>, dat
   }
   return true;
 }
+
+// ───────────────────────── Diversidad (topes por tipo de lugar)
+
+/** Tipos de lugar que no queremos repetir: un día con 3 iglesias o 3 museos seguidos no es un buen día. */
+export type DiversityKind = 'religious' | 'museum' | 'market' | 'shopping' | 'nightlife' | 'park' | 'beach' | 'viewpoint' | 'neighborhood';
+
+/**
+ * Tope por tipo: por día y por tramo (null = sin tope de tramo). `interests` = gustos que, si el grupo los tiene
+ * fuertes (≥ 4 o dichos en la conversación), relajan el tope (+1 por día y sin tope de tramo). Un pedido explícito
+ * (sí o sí) nunca cuenta contra el tope ni lo bloquea.
+ */
+export const DIVERSITY_CAPS: Record<DiversityKind, { perDay: number; perLeg: number | null; interests: string[] }> = {
+  religious: { perDay: 1, perLeg: 2, interests: ['religion'] },
+  museum: { perDay: 2, perLeg: null, interests: ['museos', 'arte'] },
+  market: { perDay: 1, perLeg: null, interests: ['mercados'] },
+  shopping: { perDay: 1, perLeg: 2, interests: ['compras'] },
+  nightlife: { perDay: 1, perLeg: null, interests: ['vida_nocturna'] },
+  park: { perDay: 2, perLeg: null, interests: ['naturaleza'] },
+  beach: { perDay: 1, perLeg: null, interests: ['playa'] },
+  viewpoint: { perDay: 2, perLeg: null, interests: ['fotografia', 'naturaleza'] },
+  neighborhood: { perDay: 2, perLeg: null, interests: [] },
+};
+
+const RELIGIOUS_RE =
+  /\b(iglesia|catedral|parroquia|capilla|basilica|convento|monasterio|abadia|templo|sinagoga|mezquita|misa|church|cathedral|chapel|abbey|synagogue|mosque|temple|minster)\b/;
+const deacc = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** Tipo de diversidad de un ítem (null = sin tope: landmark, experiencia, comida, evento, escapada). */
+export function diversityKind(item: Pick<CatalogItem, 'name' | 'category' | 'interests'>): DiversityKind | null {
+  if (item.category === 'event' || item.category === 'day_trip' || item.category === 'food') return null;
+  if (item.interests.includes('religion') || RELIGIOUS_RE.test(deacc(item.name))) return 'religious';
+  switch (item.category) {
+    case 'museum':
+    case 'market':
+    case 'shopping':
+    case 'nightlife':
+    case 'park':
+    case 'beach':
+    case 'viewpoint':
+    case 'neighborhood':
+      return item.category;
+    default:
+      return null;
+  }
+}
+
+/** Topes efectivos para este grupo (los gustos fuertes los relajan). */
+export function diversityCaps(group: Pick<PlannerGroup, 'weights' | 'spoken'>): Record<DiversityKind, { perDay: number; perLeg: number | null }> {
+  const spoken = new Set(group.spoken ?? []);
+  const out = {} as Record<DiversityKind, { perDay: number; perLeg: number | null }>;
+  for (const [k, c] of Object.entries(DIVERSITY_CAPS) as [DiversityKind, (typeof DIVERSITY_CAPS)[DiversityKind]][]) {
+    const strong = c.interests.some((i) => (group.weights[i] ?? 0) >= 4 || (spoken.has(i) && (group.weights[i] ?? 0) >= 3));
+    out[k] = strong ? { perDay: c.perDay + 1, perLeg: null } : { perDay: c.perDay, perLeg: c.perLeg };
+  }
+  return out;
+}
+
+const KIND_LABEL: Record<DiversityKind, [string, string]> = {
+  religious: ['lugar religioso', 'lugares religiosos'],
+  museum: ['museo', 'museos'],
+  market: ['mercado', 'mercados'],
+  shopping: ['lugar de compras', 'lugares de compras'],
+  nightlife: ['salida de noche', 'salidas de noche'],
+  park: ['parque', 'parques'],
+  beach: ['playa', 'playas'],
+  viewpoint: ['mirador', 'miradores'],
+  neighborhood: ['barrio para caminar', 'barrios para caminar'],
+};
+export const kindLabel = (k: DiversityKind, n: number) => KIND_LABEL[k][n === 1 ? 0 : 1];
 
 type LL = { lat: number; lng: number };
 export const hasLL = (x: { lat?: number | null; lng?: number | null } | null | undefined): x is LL =>

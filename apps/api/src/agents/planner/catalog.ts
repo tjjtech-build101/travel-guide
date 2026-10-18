@@ -33,6 +33,7 @@ import { captureViaTool } from '../tourLlm';
 import { normalizeNotability } from '../tourRoute';
 import type { Db } from '../../supabase';
 import { research } from './catalogLlm';
+import { diversityCaps, diversityKind, type DiversityKind } from './check';
 import type {
   CatalogDeps,
   CatalogResult,
@@ -566,11 +567,20 @@ function adjust(item: CatalogItem, c: AdjustCtx): number {
 const isGroupMust = (item: CatalogItem, must: string[]) => must.some((m) => namesMatch(m, item.name) || nameKey(m) === nameKey(item.name));
 const round3 = (x: number) => Math.round(clamp(x, 0, 1) * 1000) / 1000;
 
+/**
+ * Pesos que cuentan para la afinidad: un interés flojo (< 3) solo suma si salió de la conversación / la entrevista
+ * (group.spoken). Así un {religion: 2} del perfil no tira 7 iglesias arriba de todo lo demás.
+ */
+export function effectiveWeights(group: Pick<PlannerGroup, 'weights' | 'spoken'>): Record<string, number> {
+  const spoken = new Set(group.spoken ?? []);
+  return Object.fromEntries(Object.entries(group.weights).filter(([k, w]) => w >= 3 || spoken.has(k)));
+}
+
 /** Afinidad 0-1 de un ítem con el grupo: gustos × notoriedad (primera vez: pesa lo canónico) × ajustes. */
 export function scoreItem(item: CatalogItem, group: PlannerGroup): number {
   const m = adjust(item, group);
   if (m === 0) return 0;
-  const affinity = affinityScore(item.interests, group.weights);
+  const affinity = affinityScore(item.interests, effectiveWeights(group));
   const n = item.notability;
   // Igual que scoreForGroup: primera vez → lo esencial; conocedores → lo menos obvio sube.
   const fame = group.firstTime ? 0.3 + 0.7 * n : 0.55 + 0.45 * (1 - Math.abs(n - 0.45));
@@ -695,16 +705,27 @@ export function buildLegOptions(args: {
     kept.push(c);
   }
 
-  // Preselección: imperdibles + forzados siempre; después lo mejor por gustos hasta ~85% de la capacidad.
+  // Preselección: forzados siempre; imperdibles salvo que pasen el tope de su tipo (2 iglesias por tramo, 2 museos
+  // por día…); después lo mejor por gustos hasta ~85% de la capacidad, con los mismos topes.
   const budget = legCapacityMin(days, group.pace) * PRESELECT_SHARE;
   const pre = new Set<Cand>();
   let used = 0;
-  for (const c of kept) {
-    if (c.forced || c.section === 'must') {
-      pre.add(c);
-      used += c.item.duration_min;
-    }
-  }
+  const caps = diversityCaps(group);
+  const kindCount = new Map<DiversityKind, number>();
+  const kindOf = (c: Cand) => diversityKind(c.item);
+  const legCap = (k: DiversityKind) => caps[k].perLeg ?? caps[k].perDay * Math.max(1, days);
+  const overCap = (c: Cand) => {
+    const k = kindOf(c);
+    return !!k && (kindCount.get(k) ?? 0) >= legCap(k);
+  };
+  const take = (c: Cand) => {
+    pre.add(c);
+    used += c.item.duration_min;
+    const k = kindOf(c);
+    if (k) kindCount.set(k, (kindCount.get(k) ?? 0) + 1);
+  };
+  for (const c of kept) if (c.forced) take(c);
+  for (const c of kept.filter((x) => !x.forced && x.section === 'must').sort((a, b) => b.score - a.score)) if (!overCap(c)) take(c);
   let foodPre = 0;
   let tripPre = 0;
   const rest = kept.filter((c) => !pre.has(c)).sort((a, b) => b.score - a.score);
@@ -712,9 +733,8 @@ export function buildLegOptions(args: {
     if (c.score < 0.3) break;
     if (c.section === 'food' && foodPre >= days) continue; // las comidas las pone el armado; acá solo las míticas
     if (c.section === 'day_trips' && (days < 4 || tripPre >= 1 || c.score < 0.5)) continue;
-    if (used + c.item.duration_min > budget) continue;
-    pre.add(c);
-    used += c.item.duration_min;
+    if (used + c.item.duration_min > budget || overCap(c)) continue;
+    take(c);
     if (c.section === 'food') foodPre++;
     if (c.section === 'day_trips') tripPre++;
   }

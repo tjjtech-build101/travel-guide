@@ -1,6 +1,7 @@
 // Piezas comunes de las fases de "Nuevo viaje": marco con atrás + pie fijo, burbuja del compañero,
-// fila de fechas, aviso de error con reintento y el ícono de modo de traslado.
-import type { TransferMode } from '@build101/shared';
+// fila de fechas, aviso de error con reintento, el ícono de modo de traslado y la tarjetita de un ancla del viaje.
+import type { TransferMode, TripAnchor } from '@build101/shared';
+import * as WebBrowser from 'expo-web-browser';
 import type { ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ColorValue } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
@@ -13,6 +14,7 @@ import { BackIcon } from '../../ui/icons';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { Chip } from '../plan/components/Controls';
+import { anchorWhen, TICKETS_LABEL } from './model';
 
 export function isoIn(days: number): string {
   const d = new Date();
@@ -163,8 +165,88 @@ export function ModeIcon({ mode, color = colors.textMuted, size = 16 }: { mode: 
   }
 }
 
+/** Ícono de evento (entrada con estrella). */
+export function AnchorIcon({ color = colors.bronzeText, size = 18 }: { color?: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z" />
+      <Path d="M12 8.5l1 2 2.2.3-1.6 1.5.4 2.2-2-1.1-2 1.1.4-2.2-1.6-1.5 2.2-.3z" />
+    </Svg>
+  );
+}
+
+function openSource(url: string) {
+  if (!/^https?:\/\//i.test(url)) return;
+  void WebBrowser.openBrowserAsync(url).catch(() => undefined);
+}
+
+/**
+ * Ancla del viaje (partido, recital, casamiento): nombre, cuándo, dónde, entradas, nota y fuentes tocables.
+ * `researched:false` → "a confirmar" (sale de lo que contó la persona o de la memoria del modelo).
+ */
+export function AnchorCard({ anchor, compact = false }: { anchor: TripAnchor; compact?: boolean }) {
+  const where = [anchor.venue, anchor.city].filter(Boolean).join(' · ');
+  const sources = (anchor.sources ?? []).filter((src) => /^https?:\/\//i.test(src.url));
+  return (
+    <View
+      style={[styles.anchor, compact && styles.anchorCompact]}
+      accessible={!sources.length}
+      accessibilityLabel={`${anchor.name}. ${anchorWhen(anchor)}${where ? `, ${where}` : ''}. ${TICKETS_LABEL[anchor.tickets]}${anchor.researched ? '' : '. A confirmar'}`}
+    >
+      <View style={styles.anchorHead}>
+        <AnchorIcon />
+        <Text style={styles.anchorName} numberOfLines={2}>
+          {anchor.name}
+        </Text>
+        {!anchor.researched ? (
+          <View style={styles.confirm}>
+            <Text style={styles.confirmText}>a confirmar</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.anchorWhen}>
+        {anchorWhen(anchor)}
+        {where ? ` · ${where}` : ''}
+      </Text>
+      {anchor.tickets !== 'unknown' || !compact ? <Text style={styles.anchorMeta}>{TICKETS_LABEL[anchor.tickets]}</Text> : null}
+      {anchor.note ? <Text style={styles.anchorNote}>{anchor.note}</Text> : null}
+      {sources.length ? (
+        <View style={styles.sources}>
+          {sources.slice(0, 3).map((src, i) => (
+            <Pressable
+              key={`${src.url}-${i}`}
+              onPress={() => openSource(src.url)}
+              accessibilityRole="link"
+              accessibilityLabel={`Fuente: ${src.title ?? src.url}`}
+              hitSlop={8}
+              style={({ pressed }) => [styles.source, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {sources.length > 1 ? `Fuente ${i + 1}` : 'Fuente'}
+                {src.title ? `: ${src.title}` : ''} ↗
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  anchor: { backgroundColor: colors.khakiLight, borderRadius: radius.md, padding: space.md, gap: 4, borderWidth: 1, borderColor: colors.bronze },
+  anchorCompact: { padding: space.sm },
+  anchorHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  anchorName: { fontSize: font.small, fontWeight: '800', color: colors.text, flexShrink: 1 },
+  anchorWhen: { fontSize: font.tiny, fontWeight: '700', color: colors.bronzeText },
+  anchorMeta: { fontSize: font.tiny, color: colors.textMuted },
+  anchorNote: { fontSize: font.tiny, color: colors.text, lineHeight: 18 },
+  confirm: { marginLeft: 'auto', borderRadius: radius.pill, borderWidth: 1, borderColor: colors.bronze, paddingHorizontal: space.sm, paddingVertical: 1 },
+  confirmText: { fontSize: font.tiny, fontWeight: '700', color: colors.bronzeText },
+  sources: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  source: { minHeight: 32, justifyContent: 'center', maxWidth: '100%' },
+  sourceText: { fontSize: font.tiny, fontWeight: '700', color: colors.primary },
   body: { padding: space.lg, gap: space.md, paddingBottom: space.xxl, backgroundColor: colors.bg, flexGrow: 1 },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   back: { width: MIN_TOUCH, height: MIN_TOUCH, alignItems: 'center', justifyContent: 'center', marginLeft: -space.md },

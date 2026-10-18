@@ -1,4 +1,4 @@
-// Flujo "Nuevo viaje" (PRD 01 + PRD 31): contame → lo que entendí (trip_brief) → formas (trip_shapes) →
+// Flujo "Nuevo viaje" (PRD 01 + PRD 31): contame → lo que entendí (trip_brief, 1-3 rondas) → formas (trip_shapes) →
 // ¿cómo lo armamos? → plan_trip. Persistido con zustand + AsyncStorage: si falla algo o se cierra la app,
 // no se pierde lo escrito ni lo que ya devolvió la API. Las llamadas viven en flow.ts.
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -12,16 +12,20 @@ export type Phase = 'tell' | 'brief' | 'shapes' | 'build';
 
 export const PHASE_ORDER: Phase[] = ['tell', 'brief', 'shapes', 'build'];
 
-type Loadable = 'brief' | 'shapes' | 'plan';
+type Loadable = 'brief' | 'round' | 'shapes' | 'plan';
 
 type NewTripState = {
   phase: Phase;
   /** Lo que contó la persona (texto libre). */
   story: string;
   startDate: string | null;
-  brief: TripBriefResult | null;
-  /** inputKey con el que se pidió `brief` (si cambia lo contado, se vuelve a pedir). */
-  briefKey: string | null;
+  /** Rondas de la entrevista (trip_brief round 1..3), en orden. */
+  rounds: TripBriefResult[];
+  /** inputKey con el que se pidió cada ronda (si cambia lo anterior, se vuelve a pedir). */
+  roundKeys: string[];
+  /** Ronda que se está mostrando (0-based). Atrás/adelante entre rondas no pierde respuestas. */
+  roundIndex: number;
+  /** Respuestas de TODAS las rondas, por id de pregunta. */
   answers: Answers;
   shapes: TripShape[] | null;
   shapesKey: string | null;
@@ -37,7 +41,9 @@ type NewTripState = {
   back: () => void;
   setStory: (story: string) => void;
   setStartDate: (date: string | null) => void;
-  setBrief: (brief: TripBriefResult, key: string, answers: Answers) => void;
+  /** Guarda la ronda `index` (descarta las posteriores: se pidieron con otras respuestas) y la muestra. */
+  setRound: (index: number, brief: TripBriefResult, key: string, answers: Answers) => void;
+  setRoundIndex: (index: number) => void;
   setAnswer: (id: string, value: AnswerValue) => void;
   setAnswers: (answers: Answers) => void;
   setShapes: (shapes: TripShape[], key: string) => void;
@@ -52,8 +58,9 @@ const initial = {
   phase: 'tell' as Phase,
   story: '',
   startDate: null,
-  brief: null,
-  briefKey: null,
+  rounds: [] as TripBriefResult[],
+  roundKeys: [] as string[],
+  roundIndex: 0,
   answers: {},
   shapes: null,
   shapesKey: null,
@@ -70,12 +77,24 @@ export const useNewTripStore = create<NewTripState>()(
       ...initial,
       setPhase: (phase) => set({ phase }),
       back: () => {
-        const i = PHASE_ORDER.indexOf(get().phase);
+        const s = get();
+        if (s.phase === 'brief' && s.roundIndex > 0) {
+          set({ roundIndex: s.roundIndex - 1, loading: null });
+          return;
+        }
+        const i = PHASE_ORDER.indexOf(s.phase);
         if (i > 0) set({ phase: PHASE_ORDER[i - 1]!, loading: null });
       },
       setStory: (story) => set({ story }),
       setStartDate: (startDate) => set({ startDate }),
-      setBrief: (brief, briefKey, answers) => set({ brief, briefKey, answers }),
+      setRound: (index, brief, key, answers) =>
+        set((s) => ({
+          rounds: [...s.rounds.slice(0, index), brief],
+          roundKeys: [...s.roundKeys.slice(0, index), key],
+          roundIndex: index,
+          answers,
+        })),
+      setRoundIndex: (roundIndex) => set((s) => ({ roundIndex: Math.max(0, Math.min(roundIndex, s.rounds.length - 1)) })),
       setAnswer: (id, value) => set((s) => ({ answers: { ...s.answers, [id]: value } })),
       setAnswers: (answers) => set({ answers }),
       setShapes: (shapes, shapesKey) =>
@@ -93,14 +112,15 @@ export const useNewTripStore = create<NewTripState>()(
       reset: () => set({ ...initial }),
     }),
     {
-      name: 'build101.new-trip.v2',
+      name: 'build101.new-trip.v3',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({
         phase: s.phase,
         story: s.story,
         startDate: s.startDate,
-        brief: s.brief,
-        briefKey: s.briefKey,
+        rounds: s.rounds,
+        roundKeys: s.roundKeys,
+        roundIndex: s.roundIndex,
         answers: s.answers,
         shapes: s.shapes,
         shapesKey: s.shapesKey,
@@ -115,4 +135,9 @@ export const useNewTripStore = create<NewTripState>()(
 /** La forma elegida (o null). */
 export function chosenShape(s: Pick<NewTripState, 'shapes' | 'chosenShapeId'>): TripShape | null {
   return s.shapes?.find((v) => v.id === s.chosenShapeId) ?? null;
+}
+
+/** La ronda que se está mostrando (o null si todavía no hay entrevista). */
+export function currentBrief(s: Pick<NewTripState, 'rounds' | 'roundIndex'>): TripBriefResult | null {
+  return s.rounds[s.roundIndex] ?? s.rounds[s.rounds.length - 1] ?? null;
 }

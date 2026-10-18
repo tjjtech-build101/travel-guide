@@ -7,7 +7,7 @@ import type { Db } from '../../supabase';
 import type { ToolCtx } from '../../tools/types';
 import { emptyUsage } from '../schemas';
 import type { PlannerModules } from './runtime';
-import type { ComposedBlock, PlannerGroup } from './types';
+import type { ComposedBlock, ComposeInput, PlannerGroup } from './types';
 
 type Row = Record<string, unknown>;
 type Filter = (r: Row) => boolean;
@@ -334,7 +334,16 @@ export function fakeGroup(): PlannerGroup {
   };
 }
 
-export type ModuleCalls = { getCatalog: string[]; compose: { leg: string; picks: string[]; instruction: string | null | undefined }[] };
+export type ModuleCalls = {
+  getCatalog: string[];
+  compose: {
+    leg: string;
+    picks: string[];
+    instruction: string | null | undefined;
+    anchors?: string[];
+    dayWindows?: ComposeInput['leg']['dayWindows'];
+  }[];
+};
 
 /**
  * Módulos falsos: catálogo fijo (o error por ciudad), menú = must (preseleccionados) + recomendados, armado = 1
@@ -372,7 +381,13 @@ export function fakeModules(opts: { failCity?: string; smallCity?: string } = {}
       now: () => new Date(),
     }),
     async composeLeg(input) {
-      calls.compose.push({ leg: input.leg.city, picks: input.picks.map((p) => p.item.id), instruction: input.instruction });
+      calls.compose.push({
+        leg: input.leg.city,
+        picks: input.picks.map((p) => p.item.id),
+        instruction: input.instruction,
+        anchors: (input.anchors ?? []).map((a) => a.id),
+        dayWindows: input.leg.dayWindows,
+      });
       const days = input.leg.days;
       const blocks: ComposedBlock[] = input.picks.map((p, i) => ({
         type: 'activity',

@@ -283,6 +283,7 @@ export const TripShapesInput = z.object({
   conversation: PlannerConversation,
   start_date: IsoDate.optional(),
   end_date: IsoDate.optional(),
+  understanding: TripUnderstandingInput.optional().describe('v2: lo entendido en la última ronda de trip_brief (evita re-extraerlo)'),
 });
 
 export const ReactOptionInput = z.object({

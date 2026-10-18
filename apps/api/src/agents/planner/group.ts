@@ -52,6 +52,41 @@ function weightMap(v: unknown): Record<string, number> {
   return out;
 }
 
+/**
+ * Confianza del perfil guardado: todos tibios (≤ 2) o pocos (< 3) sin ninguno fuerte es un perfil "flojo" (lo llenó a
+ * las apuradas o es el demo): sus pesos valen ×0,35. Lo que dijo para este viaje (trip_prefs) y en la conversación
+ * no se toca: eso pesa más que el perfil.
+ */
+export const WEAK_PROFILE_FACTOR = 0.35;
+export function profileConfidence(interests: Record<string, number>): 'weak' | 'ok' {
+  const ws = Object.values(interests);
+  if (!ws.length || ws.every((w) => w <= 2)) return 'weak';
+  // Pocos intereses y ninguno fuerte: tampoco alcanza para armar un viaje alrededor.
+  if (ws.length < 3 && Math.max(...ws) <= 3) return 'weak';
+  return 'ok';
+}
+function scaleWeak(interests: Record<string, number>): Record<string, number> {
+  if (profileConfidence(interests) === 'ok') return interests;
+  return Object.fromEntries(Object.entries(interests).map(([k, w]) => [k, Math.round(w * WEAK_PROFILE_FACTOR * 100) / 100]));
+}
+
+/** "Sí o sí" en texto libre → intereses que dijo ("ver el mundial de rugby" → deporte). */
+const MUST_INTERESTS: [RegExp, string][] = [
+  [/rugby|futbol|football|soccer|partido|mundial|copa|estadio|tenis|formula ?1|\bf1\b|nba|basquet|cricket|deporte|maraton/, 'deporte'],
+  [/recital|concierto|show|festival|banda|musica|opera|jazz|tango/, 'musica'],
+  [/museo|museum/, 'museos'],
+  [/playa|beach|surf/, 'playa'],
+  [/vino|bodega|comer|gastronom|restaurant|food/, 'comida'],
+  [/boliche|\bbar(es)?\b|fiesta|salir de noche|\bpubs?\b/, 'vida_nocturna'],
+  [/iglesia|catedral|misa|templo|sinagoga|mezquita/, 'religion'],
+  [/trekking|montan|naturaleza|parque nacional|glaciar|selva|ballena/, 'naturaleza'],
+];
+const plain = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+export function interestsFromMust(must: string[]): string[] {
+  const t = plain(must.join(' · '));
+  return [...new Set(MUST_INTERESTS.filter(([re]) => re.test(t)).map(([, tag]) => tag))];
+}
+
 const oneOf = <T extends string>(v: unknown, values: readonly T[]): T | null => (values.includes(v as T) ? (v as T) : null);
 const uniq = (xs: string[]) => [...new Map(xs.map((x) => [x.toLowerCase(), x])).values()];
 
@@ -63,8 +98,9 @@ function memberOf(m: GroupMemberInput): PlannerMember & { kids: boolean } {
   return {
     user_id: m.user_id,
     name: (m.display_name ?? '').trim().split(/\s+/)[0] || 'Alguien',
-    // Lo del viaje pisa al perfil (si para este viaje dijo "arte 5", vale 5 aunque el perfil diga 3).
-    interests: { ...weightMap(m.interests), ...weightMap(prefs.interests) },
+    // Lo del viaje pisa al perfil (si para este viaje dijo "arte 5", vale 5 aunque el perfil diga 3). Un perfil
+    // flojo pesa ×0,35 (un {religion: 2} del demo no puede llenar el viaje de iglesias).
+    interests: { ...scaleWeak(weightMap(m.interests)), ...weightMap(prefs.interests) },
     avoid: uniq([...strList(m.avoid), ...strList(prefs.avoid)]),
     must: uniq(strList(prefs.must)),
     dietary: uniq(strList(m.dietary)),
@@ -86,7 +122,18 @@ export function buildPlannerGroup(args: { members: GroupMemberInput[]; understan
 
   const weights = combineInterestWeights(members.map((m) => m.interests));
   // La conversación habla por el grupo: un interés que salió ahí vale al menos lo que se dijo.
-  for (const [k, w] of Object.entries(weightMap(u?.interests ?? null))) weights[k] = Math.max(weights[k] ?? 0, w);
+  const said = weightMap(u?.interests ?? null);
+  for (const [k, w] of Object.entries(said)) weights[k] = Math.max(weights[k] ?? 0, w);
+  // Los "sí o sí" también dicen gustos ("el mundial de rugby" = deporte fuerte), salvo que lo eviten.
+  const mustTexts = [...members.flatMap((m) => m.must), ...strList(u?.must)];
+  const fromMust = interestsFromMust(mustTexts);
+  for (const k of fromMust) weights[k] = Math.max(weights[k] ?? 0, 5);
+  // Dicho = conversación/entrevista + trip_prefs de algún miembro + sí o sí.
+  const spoken = new Set<string>([...Object.keys(said), ...fromMust]);
+  for (const m of args.members) {
+    const prefs = isObj(m.trip_prefs) ? m.trip_prefs : {};
+    for (const k of Object.keys(weightMap(prefs.interests))) spoken.add(k);
+  }
 
   const paces = members.map((m) => m.pace).filter((p): p is NonNullable<PlannerMember['pace']> => !!p);
   const slowest = paces.length ? paces.reduce((a, b) => (PACE_RANK[a] <= PACE_RANK[b] ? a : b)) : 'balanced';
@@ -115,5 +162,6 @@ export function buildPlannerGroup(args: { members: GroupMemberInput[]; understan
       parsed.some((m) => m.kids),
     firstTime: u?.first_time !== false,
     stepFree: members.some((m) => m.step_free),
+    spoken: [...spoken],
   };
 }

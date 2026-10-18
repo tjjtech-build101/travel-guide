@@ -12,7 +12,7 @@ export async function assertPlannerMember(ctx: ToolCtx, tripId: string | undefin
   if (role === 'follower') throw forbidden('Los seguidores no pueden planificar el viaje.');
 }
 
-/** PRD 31 · entrevista antes de plan_trip: lo que entendí + 0-4 preguntas. Síncrona (tope 15 s). */
+/** PRD 31 · entrevista adaptativa antes de plan_trip (input.round 1-3): lo que entendí + coverage + 0-4 preguntas + done. Síncrona (tope 15 s en la ronda 1, 30 s en 2-3). */
 export async function trip_brief(input: ToolInput<'trip_brief'>, ctx: ToolCtx): Promise<ToolOk<TripBriefResult>> {
   await assertPlannerMember(ctx, input.trip_id);
   return { ok: true, data: await tripBrief(input, ctx) };

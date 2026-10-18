@@ -19,14 +19,27 @@
 //     estar. La cena siempre es "elegí 1 de 3". Lugares exactos del resultado: nunca inventados.
 //  7. Alojamiento si no hay: "elegí 1 de N" hoteles en las zonas recomendadas, el primer día.
 //  8. Chequeo + arreglo mínimo (check.ts). Lo que no entró vuelve en `unplaced` con el motivo.
-import { distanceMeters, type CatalogItem } from '@build101/shared';
+//
+// Anclas del viaje (input.anchors: el partido, el recital, el casamiento): bloque fijo en su día con la nota de
+// entradas. Si es deporte/recital con hora: mañana liviana, "previa" cerca de la sede, el evento y "tercer tiempo"
+// (cena o bar cerca); nada que choque con el horario, y la mañana siguiente arranca 1 h más tarde y rinde menos.
+// Sin fecha confirmada → idea en el banco del tramo.
+// Diversidad: topes por tipo de lugar (check.ts → DIVERSITY_CAPS: 1 lugar religioso por día y 2 por tramo, 2 museos
+// por día…) y nunca dos del mismo tipo seguidos. Comida local primero: las búsquedas salen de la cocina del lugar,
+// nunca "parrilla" fuera del Río de la Plata salvo pedido, y la misma cocina como mucho 1 vez cada 3 días.
+import { distanceMeters, type CatalogItem, type TripAnchor } from '@build101/shared';
 import type { PlaceSummary } from '../../google/places';
 import {
+  CHRONO_START,
   checkPlan,
+  DAY_END_DEFAULT,
   dayFrame,
+  diversityCaps,
+  diversityKind,
   fmtMin,
   hasLL,
   isOpenOn,
+  kindLabel,
   MEALS,
   RAIN_PROB,
   repairPlan,
@@ -36,8 +49,9 @@ import {
   weekdayName,
   weekdayOf,
   type DayFrame,
+  type DiversityKind,
 } from './check';
-import type { ComposeDeps, ComposedBlock, ComposeInput, ComposeOutput, PickedItem, PlannerGroup } from './types';
+import type { ComposeDeps, ComposedBlock, ComposeInput, ComposeLeg, ComposeOutput, PickedItem, PlannerGroup } from './types';
 
 type LL = { lat: number; lng: number };
 
@@ -54,6 +68,25 @@ type Prep = {
 /** Un lugar del día: una actividad, o una elección entre varias (la primera es la mejor). */
 type Unit = { main: Prep; alts: Prep[]; fixedStart: number | null; dayTrip: boolean };
 
+/** El día de un ancla: el evento fijo y lo que se arma alrededor (minutos del día). */
+type AnchorDay = {
+  anchor: TripAnchor;
+  unit: Unit;
+  start: number | null;
+  end: number | null;
+  /** Dónde es (sede, o el bar/fan zone si lo ven afuera). */
+  ll: LL | null;
+  near: string;
+  /** Inicio de la previa (null = sin previa). */
+  previa: number | null;
+  /** Tercer tiempo en un bar (cuando el evento termina temprano y la cena queda lejos). */
+  post: number | null;
+  /** La cena es el tercer tiempo (cerca de la sede, después del evento). */
+  dinnerAfter: boolean;
+  /** Hasta qué minuto puede haber actividades del resto del día. */
+  latest: number;
+};
+
 type DayState = {
   id: string;
   date: string;
@@ -64,6 +97,7 @@ type DayState = {
   used: number;
   dayTrip: boolean;
   hasEvent: boolean;
+  anchor: AnchorDay | null;
 };
 
 /** Costo "día vacío" en metros: abrir un día nuevo equivale a caminar 2 km. Así las zonas vecinas se juntan. */
@@ -281,11 +315,76 @@ export function routeOrder(home: LL | null, pts: LL[]): number[] {
 
 type Step =
   | { kind: 'unit'; unit: Unit; t: number; flex: 'morning' | 'afternoon' | 'evening' | 'fixed' }
-  | { kind: 'lunch' | 'dinner'; t: number; anchor: LL | null; near: string | null };
+  | { kind: 'lunch' | 'dinner'; t: number; anchor: LL | null; near: string | null; after?: TripAnchor }
+  /** Previa antes del evento / tercer tiempo en un bar después (día de ancla). */
+  | { kind: 'previa' | 'post'; t: number; anchor: LL | null; near: string | null; after: TripAnchor };
+
+type MealStep = Extract<Step, { kind: 'lunch' | 'dinner' | 'previa' | 'post' }>;
+
+/**
+ * Nunca dos del mismo tipo seguidos (dos iglesias, dos museos): si pasa, trae adelante lo siguiente de otro tipo
+ * de la misma franja. Lo de hora fija no se mueve.
+ */
+export function spreadKinds<T>(line: T[], kindOf: (x: T) => string | null, swappable: (a: T, b: T) => boolean): T[] {
+  const out = [...line];
+  for (let i = 1; i < out.length; i++) {
+    const k = kindOf(out[i]);
+    if (!k || k !== kindOf(out[i - 1])) continue;
+    const j = out.findIndex((x, n) => n > i && kindOf(x) !== k && swappable(out[i], x));
+    if (j < 0) continue;
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+const unitKind = (u: Unit): DiversityKind | null => (u.fixedStart != null || u.dayTrip ? null : diversityKind(u.main.item));
+
+/**
+ * Día de un ancla con hora: lo liviano del día (en orden de ruta, con almuerzo si entra antes), la previa cerca de
+ * la sede, el evento fijo y el tercer tiempo (bar y/o cena cerca). Nada se cruza con el horario del evento.
+ */
+function sequenceAnchorDay(d: DayState, home: LL | null): Step[] {
+  const f = d.frame;
+  const A = d.anchor!;
+  const flex = d.units.filter((u) => u !== A.unit);
+  const located = flex.filter((u) => u.main.ll);
+  const order = routeOrder(home, located.map((u) => u.main.ll!));
+  const seq = spreadKinds([...order.map((i) => located[i]), ...flex.filter((u) => !u.main.ll)], unitKind, () => true);
+  const steps: Step[] = [];
+  let t = f.start;
+  let prev = home;
+  let lunchDone = f.lunch == null;
+  const lunch = () => {
+    const at = Math.max(t, f.lunch! - 30);
+    const last = [...steps].reverse().find((x) => x.kind === 'unit') as Extract<Step, { kind: 'unit' }> | undefined;
+    steps.push({ kind: 'lunch', t: at, anchor: prev ?? A.ll, near: last?.unit.main.item.name ?? null });
+    t = at + MEALS.lunch.dur;
+    lunchDone = true;
+  };
+  for (const u of seq) {
+    if (!lunchDone && t + u.main.item.duration_min > f.lunch! + 30) lunch();
+    if (u.main.ll && prev) t += travelMin(prev, u.main.ll);
+    steps.push({ kind: 'unit', unit: u, t, flex: t < 13 * 60 ? 'morning' : 'afternoon' });
+    t += u.main.item.duration_min;
+    if (u.main.ll) prev = u.main.ll;
+  }
+  if (!lunchDone) lunch();
+  if (A.previa != null) steps.push({ kind: 'previa', t: A.previa, anchor: A.ll, near: A.near, after: A.anchor });
+  steps.push({ kind: 'unit', unit: A.unit, t: A.start ?? Math.max(t, f.start), flex: 'fixed' });
+  if (A.post != null) steps.push({ kind: 'post', t: A.post, anchor: A.ll, near: A.near, after: A.anchor });
+  if (f.dinner != null)
+    steps.push(
+      A.dinnerAfter
+        ? { kind: 'dinner', t: f.dinner, anchor: A.ll, near: A.near, after: A.anchor }
+        : { kind: 'dinner', t: f.dinner, anchor: home ?? A.ll, near: null },
+    );
+  return steps;
+}
 
 /** Ordena los lugares del día y les intercala almuerzo y cena según la hora. */
 function sequenceDay(d: DayState, home: LL | null): Step[] {
   const f = d.frame;
+  if (d.anchor && d.anchor.start != null) return sequenceAnchorDay(d, home);
   if (d.dayTrip) {
     const u = d.units.find((x) => x.dayTrip)!;
     const steps: Step[] = [{ kind: 'unit', unit: u, t: f.start, flex: 'morning' }];
@@ -322,7 +421,12 @@ function sequenceDay(d: DayState, home: LL | null): Step[] {
     const r = pos > 0 ? Math.min(line[pos - 1].r, 2) : 0;
     line.splice(pos, 0, { u, r });
   }
-  const ranked = line;
+  // Nada del mismo tipo dos veces seguidas (dentro de la misma franja: no traemos la noche a la mañana).
+  const ranked = spreadKinds(
+    line,
+    (x) => unitKind(x.u),
+    (a, b) => a.u.fixedStart == null && b.u.fixedStart == null && Math.abs(a.r - b.r) <= 1,
+  );
 
   const steps: Step[] = [];
   let t = f.start;
@@ -457,17 +561,90 @@ function geo(x: { google_place_id?: string | null; lat?: number | null; lng?: nu
 const RIOPLATENSE = /argentin|urugu/i;
 const RIOPLATENSE_CITIES = /buenos aires|montevideo|cordoba|rosario|mendoza|punta del este|colonia|mar del plata|bariloche|salta/;
 
-function mealQueries(kind: 'lunch' | 'dinner', dayIdx: number, country: string | null, city: string, group: PlannerGroup): string[] {
-  const diet = norm(group.dietary.join(' '));
-  if (/vegan/.test(diet)) return ['restaurante vegano', 'restaurante vegetariano'];
-  if (/veget/.test(diet)) return ['restaurante vegetariano', 'restaurante'];
-  if (/celi|gluten|tacc/.test(diet)) return ['restaurante sin TACC', 'restaurante'];
-  if (/kosher/.test(diet)) return ['restaurante kosher', 'restaurante'];
-  const local = RIOPLATENSE.test(country ?? '') || RIOPLATENSE_CITIES.test(norm(city));
-  if (!local) return ['restaurante'];
-  const rot = kind === 'dinner' ? ['parrilla', 'restaurante', 'bodegón'] : ['bodegón', 'restaurante'];
-  const q = rot[dayIdx % rot.length];
-  return [q, ...rot.filter((x) => x !== q)].slice(0, 2);
+/** Una búsqueda de comida y su cocina (null = genérica, sin tope). */
+export type FoodQuery = { q: string; cuisine: string | null };
+type FoodTable = { lunch: FoodQuery[]; dinner: FoodQuery[]; generic: string };
+
+const fq = (q: string, cuisine: string | null = q): FoodQuery => ({ q, cuisine });
+/**
+ * Cocina del lugar primero: los clásicos de cada país (en el idioma en que Google los encuentra mejor). Lo que no
+ * está en la tabla busca "restaurant" genérico, nunca la comida del país de origen del grupo.
+ */
+const LOCAL_FOOD: [RegExp, FoodTable][] = [
+  [RIOPLATENSE, { lunch: [fq('bodegón', 'bodegon'), fq('restaurante', null)], dinner: [fq('parrilla', 'carne'), fq('restaurante', null), fq('bodegón', 'bodegon')], generic: 'restaurante' }],
+  [/australia/, { lunch: [fq('brunch'), fq('café', 'cafe'), fq('seafood', 'mar')], dinner: [fq('seafood restaurant', 'mar'), fq('modern australian restaurant', 'aus'), fq('restaurant', null), fq('wine bar', 'vino')], generic: 'restaurant' }],
+  [/nueva zelanda|new zealand/, { lunch: [fq('café', 'cafe'), fq('brunch'), fq('fish and chips', 'mar')], dinner: [fq('seafood restaurant', 'mar'), fq('restaurant', null), fq('gastropub', 'pub')], generic: 'restaurant' }],
+  [/espana|spain/, { lunch: [fq('tapas'), fq('menú del día', 'menu'), fq('restaurante', null)], dinner: [fq('tapas'), fq('restaurante', null), fq('marisquería', 'mar')], generic: 'restaurante' }],
+  [/italia|italy/, { lunch: [fq('trattoria'), fq('pizzeria', 'pizza'), fq('ristorante', null)], dinner: [fq('trattoria'), fq('osteria'), fq('ristorante', null)], generic: 'ristorante' }],
+  [/francia|france/, { lunch: [fq('bistrot', 'bistro'), fq('boulangerie', 'cafe'), fq('restaurant', null)], dinner: [fq('bistrot', 'bistro'), fq('brasserie'), fq('restaurant', null)], generic: 'restaurant' }],
+  [/portugal/, { lunch: [fq('tasca'), fq('restaurante', null)], dinner: [fq('marisqueira', 'mar'), fq('tasca'), fq('restaurante', null)], generic: 'restaurante' }],
+  [/japon|japan/, { lunch: [fq('ramen'), fq('udon'), fq('restaurant', null)], dinner: [fq('izakaya'), fq('sushi'), fq('restaurant', null)], generic: 'restaurant' }],
+  [/mexico/, { lunch: [fq('taquería', 'tacos'), fq('fonda'), fq('restaurante', null)], dinner: [fq('restaurante mexicano', 'mexicana'), fq('cantina'), fq('restaurante', null)], generic: 'restaurante' }],
+  [/peru/, { lunch: [fq('cevichería', 'ceviche'), fq('restaurante', null)], dinner: [fq('restaurante peruano', 'peruana'), fq('restaurante', null)], generic: 'restaurante' }],
+  [/chile/, { lunch: [fq('picada'), fq('restaurante', null)], dinner: [fq('marisquería', 'mar'), fq('restaurante', null)], generic: 'restaurante' }],
+  [/brasil|brazil/, { lunch: [fq('boteco'), fq('restaurante', null)], dinner: [fq('churrascaria', 'carne'), fq('restaurante', null), fq('frutos do mar', 'mar')], generic: 'restaurante' }],
+  [/reino unido|united kingdom|inglaterra|england|escocia|scotland|irlanda|ireland/, { lunch: [fq('pub'), fq('café', 'cafe'), fq('restaurant', null)], dinner: [fq('gastropub', 'pub'), fq('restaurant', null)], generic: 'restaurant' }],
+  [/estados unidos|usa|eeuu|united states|canada/, { lunch: [fq('diner'), fq('deli'), fq('restaurant', null)], dinner: [fq('restaurant', null), fq('local restaurant', 'local')], generic: 'restaurant' }],
+];
+const DEFAULT_FOOD: FoodTable = { lunch: [fq('restaurant', null)], dinner: [fq('restaurant', null)], generic: 'restaurant' };
+const MEAT_ASK = /parrilla|asado|steak|carne|bife/;
+
+export function isRioplatense(country: string | null, city: string): boolean {
+  return RIOPLATENSE.test(norm(country)) || RIOPLATENSE_CITIES.test(norm(city));
+}
+
+/** Cocina de un lugar elegido del catálogo (por nombre/por qué), para no repetirla. */
+const CUISINE_RE: [RegExp, string][] = [
+  [/parrilla|asado|steak|churrasc|bife|asador/, 'carne'],
+  [/seafood|marisc|pescad|fish|ostra|oyster|ceviche/, 'mar'],
+  [/pizza/, 'pizza'],
+  [/sushi|izakaya|ramen|japo/, 'japonesa'],
+  [/tapas/, 'tapas'],
+  [/brunch/, 'brunch'],
+  [/cafe|coffee|bakery|panader/, 'cafe'],
+  [/bodegon/, 'bodegon'],
+  [/pub\b|gastropub/, 'pub'],
+];
+export function cuisineOf(text: string): string | null {
+  const t = norm(text);
+  return CUISINE_RE.find(([re]) => re.test(t))?.[1] ?? null;
+}
+
+/**
+ * Plan de búsquedas de comida del tramo, en orden: por cada comida, [búsqueda de la cocina local, genérica]. La
+ * misma cocina entra como mucho 1 vez cada 3 días del tramo (la genérica no tiene tope); "parrilla"/carne fuera del
+ * Río de la Plata solo si el grupo lo pidió. Dieta especial manda sobre todo.
+ */
+export function planMealQueries(
+  slots: { kind: 'lunch' | 'dinner'; dayIdx: number }[],
+  ctx: { country: string | null; city: string; group: PlannerGroup; nDays: number; taken?: (string | null)[] },
+): FoodQuery[][] {
+  const diet = norm(ctx.group.dietary.join(' '));
+  const dietQ = /vegan/.test(diet)
+    ? [fq('restaurante vegano', null), fq('restaurante vegetariano', null)]
+    : /veget/.test(diet)
+      ? [fq('restaurante vegetariano', null), fq('restaurante', null)]
+      : /celi|gluten|tacc/.test(diet)
+        ? [fq('restaurante sin TACC', null), fq('restaurante', null)]
+        : /kosher/.test(diet)
+          ? [fq('restaurante kosher', null), fq('restaurante', null)]
+          : null;
+  if (dietQ) return slots.map(() => dietQ);
+  const local = isRioplatense(ctx.country, ctx.city);
+  const table = local ? LOCAL_FOOD[0][1] : (LOCAL_FOOD.slice(1).find(([re]) => re.test(norm(ctx.country)))?.[1] ?? DEFAULT_FOOD);
+  const askedMeat = !local && MEAT_ASK.test(norm(ctx.group.must.join(' ')));
+  const allowed = Math.max(1, Math.ceil(ctx.nDays / 3));
+  const count = new Map<string, number>();
+  for (const c of ctx.taken ?? []) if (c) count.set(c, (count.get(c) ?? 0) + 1);
+  const generic = fq(table.generic, null);
+  return slots.map((s) => {
+    const list = [...(askedMeat && s.kind === 'dinner' ? [fq('steakhouse', 'carne')] : []), ...table[s.kind]];
+    const rot = list.length ? (s.dayIdx + (s.kind === 'dinner' ? 0 : 1)) % list.length : 0;
+    const ordered = [...list.slice(rot), ...list.slice(0, rot)];
+    const main = ordered.find((q) => !q.cuisine || (count.get(q.cuisine) ?? 0) < allowed) ?? generic;
+    if (main.cuisine) count.set(main.cuisine, (count.get(main.cuisine) ?? 0) + 1);
+    return main.q === generic.q ? [main] : [main, generic];
+  });
 }
 
 function priceOk(p: PlaceSummary, budget: PlannerGroup['budget']): boolean {
@@ -498,6 +675,110 @@ function pickPlaces(results: PlaceSummary[], n: number, used: Set<string>, ancho
   return out;
 }
 
+// ───────────────────────── Anclas
+
+/** Permanencia típica de un ancla (con llegada y salida de la sede). */
+const ANCHOR_DUR: Record<TripAnchor['kind'], number> = { sports: 150, concert: 180, festival: 360, wedding: 360, conference: 480, other: 150 };
+/** Anclas que terminan tarde y cansan: la mañana siguiente arranca 1 h después y rinde menos. */
+const LATE_KINDS = new Set<TripAnchor['kind']>(['sports', 'concert', 'festival']);
+/** Anclas con previa y tercer tiempo. */
+const SOCIAL_KINDS = new Set<TripAnchor['kind']>(['sports', 'concert']);
+const PREVIA_MIN = 90;
+const POST_MIN = 75;
+/** Lo que entra antes de un ancla: una mañana liviana. */
+const LIGHT_MORNING_MIN = 150;
+const DAY_AFTER_CAP = 0.75;
+
+const slug = (s: string) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'ancla';
+const sigTokens = (s: string) => new Set(norm(s).split(/[^a-z0-9]+/).filter((t) => t.length >= 4));
+
+/** ¿Un evento del catálogo es el mismo que el ancla? (misma fecha y ≥ 2 palabras en común: "Argentina", "Zealand"). */
+function sameAsAnchor(it: CatalogItem, a: TripAnchor): boolean {
+  if (!a.date || !(it.event_dates ?? []).includes(a.date)) return false;
+  const x = sigTokens(it.name);
+  return [...sigTokens(a.name)].filter((t) => x.has(t)).length >= 2;
+}
+
+/** Nota de entradas del ancla. */
+export function ticketsNote(a: Pick<TripAnchor, 'tickets' | 'note' | 'researched'>): string {
+  const confirm = a.researched ? '' : ' Fecha y hora a confirmar con el calendario oficial.';
+  switch (a.tickets) {
+    case 'have':
+      return `Ya tienen entradas: llévenlas en el celu (con batería) y lleguen con tiempo.${confirm}`;
+    case 'want':
+      return `Conseguir entradas: ${a.note?.trim() || 'por la venta oficial (mirá la fuente) y evitá la reventa.'}${confirm}`;
+    case 'watch_out':
+      return `Para verlo en una fan zone o bar: lleguen temprano para conseguir lugar.${confirm}`;
+    default:
+      return `Entradas a confirmar: ¿las tienen, las quieren conseguir o lo ven en una fan zone?${confirm}`;
+  }
+}
+
+function anchorItem(a: TripAnchor, place: PlaceSummary | null): CatalogItem {
+  const tm = toMin(a.time);
+  return {
+    id: `ancla-${slug(a.id || a.name)}`,
+    name: a.name,
+    category: 'event',
+    tier: 'must',
+    zone: null,
+    google_place_id: place?.google_place_id || null,
+    lat: place?.lat ?? null,
+    lng: place?.lng ?? null,
+    duration_min: ANCHOR_DUR[a.kind] ?? 150,
+    best_time: tm == null ? 'any' : tm < 12 * 60 ? 'morning' : tm < 14 * 60 ? 'midday' : tm < 18 * 60 ? 'afternoon' : tm < 21 * 60 ? 'evening' : 'night',
+    indoor: false,
+    booking: 'none',
+    cost_hint: null,
+    interests: a.kind === 'sports' ? ['deporte'] : a.kind === 'concert' || a.kind === 'festival' ? ['musica'] : [],
+    why: [a.venue ? `En ${a.venue}.` : '', a.tickets === 'want' ? '' : (a.note?.trim() ?? '')].filter(Boolean).join(' ') || 'El motivo del viaje.',
+    tip: null,
+    closed_days: [],
+    periods: null,
+    event_dates: a.date ? [a.date] : null,
+    event_time: tm != null ? toHHMM(tm) : null,
+    sources: a.sources ?? [],
+    notability: 1,
+    rating: null,
+    rating_count: null,
+  };
+}
+
+/** Lo que se arma alrededor de un ancla con hora: previa, tercer tiempo y qué comidas chocan con el evento. */
+function anchorAround(a: TripAnchor, f: DayFrame, defaultDinner: number) {
+  const tm = toMin(a.time);
+  const dur = ANCHOR_DUR[a.kind] ?? 150;
+  const out = { start: tm, end: tm != null ? tm + dur : null, previa: null as number | null, post: null as number | null, dinnerAfter: false, skipLunch: false, skipDinner: false, dinnerMin: null as number | null, latest: f.end };
+  if (tm == null) return out;
+  const end = tm + dur;
+  const social = SOCIAL_KINDS.has(a.kind);
+  // Previa cerca de la sede (si la ven en un bar, el bar ya es la previa).
+  if (social && a.tickets !== 'watch_out' && tm - PREVIA_MIN - 20 >= f.start + 15) out.previa = tm - PREVIA_MIN - 20;
+  const busyFrom = out.previa ?? tm - 30;
+  out.latest = busyFrom - 15;
+  if (f.lunch != null && f.lunch + MEALS.lunch.dur > busyFrom - 10 && f.lunch < end) out.skipLunch = true;
+  const D = f.dinner ?? defaultDinner;
+  if (social) {
+    if (end + 20 >= D - 60) {
+      // Termina a la hora de cenar o después: la cena es el tercer tiempo, cerca de la sede (si todavía hay cocina).
+      if (end + 20 + MEALS.dinner.dur <= f.end + 30) {
+        out.dinnerAfter = true;
+        out.dinnerMin = Math.max(D, end + 20);
+      } else {
+        out.skipDinner = true;
+        out.post = end + 15;
+      }
+    } else {
+      // Termina temprano: tercer tiempo en un bar cerca y la cena después, donde paran.
+      out.post = end + 15;
+      if (D < out.post + POST_MIN + 15) out.dinnerMin = out.post + POST_MIN + 15;
+    }
+  } else if (f.dinner != null && f.dinner < end && f.dinner + MEALS.dinner.dur > tm) {
+    out.skipDinner = true; // un casamiento o una conferencia ya tienen su comida
+  }
+  return out;
+}
+
 // ───────────────────────── Armado
 
 export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promise<ComposeOutput> {
@@ -507,12 +788,38 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
   const unplaced: ComposeOutput['unplaced'] = [];
   const nDays = leg.days.length;
 
+  // ── 0. Anclas: con fecha del tramo → bloque fijo en su día; sin fecha confirmada → idea del banco.
+  const anchorsIn = (input.anchors ?? []).filter((a) => a?.name?.trim());
+  const dated = anchorsIn.filter((a) => a.date && dates.includes(a.date)).sort((a, b) => a.date!.localeCompare(b.date!) || (a.time ?? '').localeCompare(b.time ?? ''));
+  const undated = anchorsIn.filter((a) => !a.date);
+  // Ventanas del día ajustadas por las anclas (las usa también el chequeo, así los dos miden igual).
+  const chrono = CHRONO_START[group.chronotype] ?? CHRONO_START.normal;
+  const windows: ComposeLeg['dayWindows'] = { ...leg.dayWindows };
+  const baseWin = (date: string) => windows[date] ?? { start_min: 0, end_min: DAY_END_DEFAULT };
+  for (const a of dated) {
+    if (!LATE_KINDS.has(a.kind)) continue;
+    const next = dates[dates.indexOf(a.date!) + 1];
+    if (!next) continue;
+    const w = baseWin(next);
+    windows[next] = { ...w, start_min: Math.max(w.start_min, chrono + 60), cap_factor: Math.min(w.cap_factor ?? 1, DAY_AFTER_CAP) };
+  }
+  const around = new Map<string, ReturnType<typeof anchorAround>>();
+  for (const a of dated) {
+    if (around.has(a.date!)) continue; // dos anclas el mismo día: la primera arma el día, la otra va fija y listo
+    const f = dayFrame({ ...leg, dayWindows: windows }, group, a.date!, capFactor);
+    const r = anchorAround(a, f, MEALS.dinner[group.chronotype] ?? MEALS.dinner.normal);
+    around.set(a.date!, r);
+    const w = baseWin(a.date!);
+    windows[a.date!] = { ...w, ...(r.skipLunch ? { skip_lunch: true } : {}), ...(r.skipDinner ? { skip_dinner: true } : {}), ...(r.dinnerMin != null ? { dinner_min: r.dinnerMin } : {}) };
+  }
+  const legX: ComposeLeg = { ...leg, dayWindows: windows };
+
   const days: DayState[] = leg.days.map((d) => {
-    const frame = dayFrame(leg, group, d.date, capFactor);
+    const frame = dayFrame(legX, group, d.date, capFactor);
     const off = pmOff.has(d.date);
     // Tarde libre: solo entra la mañana.
     if (off) frame.cap = Math.max(0, Math.min(frame.cap, (frame.lunch ?? 13 * 60) - frame.start - 15));
-    return { id: d.id, date: d.date, frame, pmOff: off, units: [], used: 0, dayTrip: false, hasEvent: false };
+    return { id: d.id, date: d.date, frame, pmOff: off, units: [], used: 0, dayTrip: false, hasEvent: false, anchor: null };
   });
 
   const zoneLL = leg.lodgingZones.find((z) => z.lat != null && z.lng != null);
@@ -536,9 +843,47 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
   }
   const isEvent = (p: Prep) => !!p.item.event_dates?.length;
   const food = preps.filter((p) => p.item.category === 'food' && !isEvent(p)).sort(prio);
-  const events = preps.filter(isEvent).sort(prio);
+  // Un evento del catálogo que es el mismo partido que un ancla no entra dos veces.
+  const events = preps.filter((p) => isEvent(p) && !dated.some((a) => sameAsAnchor(p.item, a))).sort(prio);
   const trips = preps.filter((p) => p.item.category === 'day_trip' && !isEvent(p)).sort(prio);
-  const regular = preps.filter((p) => !isEvent(p) && p.item.category !== 'food' && p.item.category !== 'day_trip');
+  let regular = preps.filter((p) => !isEvent(p) && p.item.category !== 'food' && p.item.category !== 'day_trip');
+
+  // Anclas → ítems (sede resuelta en Places: nunca inventada; si la ven afuera, un bar deportivo cerca del centro).
+  const anchorByItem = new Map<string, TripAnchor>();
+  const anchorPreps: Prep[] = await Promise.all(
+    dated.map(async (a) => {
+      const watch = a.tickets === 'watch_out';
+      const query = watch ? (a.kind === 'sports' ? 'sports bar' : 'bar') : a.venue ? `${a.venue}, ${a.city ?? leg.city}` : null;
+      let place: PlaceSummary | null = null;
+      if (query) {
+        const [r] = await deps
+          .searchPlaces({ query: watch && !leg.center ? `${query} ${leg.city}` : query, near: leg.center ?? undefined, radius_m: watch ? 3000 : 30_000, max_results: 1 })
+          .catch(() => [] as PlaceSummary[]);
+        if (r && r.google_place_id && hasLL(r) && (!leg.center || distanceMeters(leg.center, r) <= 60_000)) place = r;
+      }
+      const it = anchorItem(a, place);
+      anchorByItem.set(it.id, { ...a, venue: watch ? (place?.name ?? null) : (a.venue ?? place?.name ?? null) });
+      const pick: PickedItem = { option_id: null, item: it, section: 'events', must: true, score: 1, for_user_ids: [], reason: null, reactions: [] };
+      return { pick, item: it, rank: 3, ll: hasLL(it) ? { lat: it.lat, lng: it.lng } : null, cluster: -1 };
+    }),
+  );
+  preps.push(...anchorPreps);
+
+  // Topes por tramo (2 lugares religiosos…): lo de más prioridad queda; lo pedido sí o sí nunca se corta.
+  const caps = diversityCaps(group);
+  const legKinds = new Map<DiversityKind, number>();
+  regular = [...regular].sort(prio).filter((p) => {
+    const k = diversityKind(p.item);
+    if (!k) return true;
+    const n = legKinds.get(k) ?? 0;
+    const cap = caps[k].perLeg;
+    if (p.rank < 3 && cap != null && n >= cap) {
+      unplaced.push({ item: p.item, option_id: p.pick.option_id, reason: `ya hay ${n} ${kindLabel(k, n)} en ${leg.city}: para no repetir quedó afuera (si lo querés, marcalo sí o sí)` });
+      return false;
+    }
+    legKinds.set(k, n + 1);
+    return true;
+  });
 
   // Los eventos entran al clustering para que su zona tire hacia su día (el partido en La Boca atrae a La Boca).
   const clusters = clusterItems([...regular, ...events].map((p) => ({ id: p.item.id, zone: p.item.zone, ll: p.ll })));
@@ -559,7 +904,26 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
   };
   const unitOf = (p: Prep, fixedStart: number | null = null, dayTrip = false): Unit => ({ main: p, alts: [], fixedStart, dayTrip });
 
-  // ── 2a. Eventos con fecha: a su día (el menos cargado si hay varias fechas).
+  // ── 2a. Anclas: a su día sí o sí (aunque sea la llegada: es el motivo del viaje), con hora fija si la hay. El resto
+  // del día queda liviano: lo que entra antes de la previa, nada de tarde/noche.
+  for (const p of anchorPreps) {
+    const a = anchorByItem.get(p.item.id)!;
+    const d = days.find((x) => x.date === a.date)!;
+    const tm = toMin(a.time);
+    const u = unitOf(p, tm);
+    place(d, u);
+    d.hasEvent = true;
+    if (d.anchor) continue;
+    const r = around.get(d.date)!;
+    const f = d.frame;
+    const room = f.cap - p.item.duration_min - (r.previa != null ? PREVIA_MIN : 0) - (r.post != null ? POST_MIN : 0);
+    const window = r.start != null ? r.latest - f.start - (f.lunch != null && f.lunch < r.latest ? MEALS.lunch.dur : 0) - 30 : LIGHT_MORNING_MIN;
+    f.cap = d.used + Math.max(0, Math.min(LIGHT_MORNING_MIN, room, window));
+    const venue = a.venue ?? (a.tickets === 'watch_out' ? 'el bar' : a.name);
+    d.anchor = { anchor: a, unit: u, start: r.start, end: r.end, ll: p.ll, near: venue, previa: r.previa, post: r.post, dinnerAfter: r.dinnerAfter, latest: r.latest };
+  }
+
+  // ── 2b. Eventos con fecha: a su día (el menos cargado si hay varias fechas).
   for (const p of events) {
     const inLeg = (p.item.event_dates ?? []).filter((d) => dates.includes(d));
     if (!inLeg.length) {
@@ -582,10 +946,10 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
     cands[0].hasEvent = true;
   }
 
-  // ── 2b. Escapadas: día entero, nunca llegada/salida, mejor sin lluvia. Si no es imperdible, solo si quedan ≥2 días
+  // ── 2c. Escapadas: día entero, nunca llegada/salida, mejor sin lluvia. Si no es imperdible, solo si quedan ≥2 días
   // enteros (para no comerse la ciudad).
   // El primero y el último del tramo son de llegada/salida (traslado de por medio): nunca escapada.
-  const fullDays = days.filter((d, k) => d.frame.full && ((k > 0 && k < days.length - 1) || !leg.dayWindows[d.date]));
+  const fullDays = days.filter((d, k) => d.frame.full && ((k > 0 && k < days.length - 1) || !legX.dayWindows[d.date]));
   let tripsPlaced = 0;
   for (const p of trips) {
     const maxTrips = Math.floor(fullDays.length / 2) + (p.rank >= 2 && fullDays.length === 1 ? 1 : 0);
@@ -618,15 +982,32 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
     const tot = g.reduce((s, p) => s + p.item.duration_min, 0) || 1;
     return g.filter((p) => !p.item.indoor).reduce((s, p) => s + p.item.duration_min, 0) / tot;
   };
-  const eligible = (d: DayState, g: Prep[], allowRain: boolean) => {
+  const DAYTIME_BEST = ['morning', 'midday', 'any'];
+  /** Cuántos del mismo tipo ya tiene el día (+ los que se están sumando). */
+  const kindsIn = (d: DayState, extra: Prep[]) => {
+    const m = new Map<DiversityKind, number>();
+    for (const p of [...d.units.map((u) => u.main), ...extra]) {
+      const k = p.rank >= 3 ? null : diversityKind(p.item); // lo pedido sí o sí no cuenta para el tope
+      if (k) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  };
+  const eligible = (d: DayState, g: Prep[], allowRain: boolean, extra: Prep[] = []) => {
     if (d.dayTrip) return false;
     const mins = g.reduce((s, p) => s + p.item.duration_min, 0);
     if (d.used + mins > d.frame.cap) return false;
+    // Llegada de un vuelo largo: una sola cosa y cerca del alojamiento.
+    if (d.frame.note && d.frame.light && d.units.length + extra.length + g.length > 1) return false;
+    const kinds = kindsIn(d, [...extra, ...g]);
+    for (const [k, n] of kinds) if (n > caps[k].perDay) return false;
     for (const p of g) {
       if (!openOn(p, d) || !fitsTime(p.item, d.frame)) return false;
       if (!allowRain && !p.item.indoor && d.frame.rain >= RAIN_PROB) return false;
       // Tarde libre: nada que sea de tarde/noche.
       if (d.pmOff && ['afternoon', 'sunset', 'evening', 'night'].includes(p.item.best_time)) return false;
+      // Día de ancla con hora: solo lo de día que termina antes de la previa.
+      if (d.anchor?.start != null && !DAYTIME_BEST.includes(p.item.best_time) && !(p.item.best_time === 'afternoon' && d.anchor.latest >= 17 * 60)) return false;
+      if (d.frame.note && d.frame.light && homeLL && p.ll && p.rank < 3 && distanceMeters(homeLL, p.ll) > 2500) return false;
     }
     return true;
   };
@@ -698,7 +1079,7 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
         const sub: Prep[] = [];
         let used = d.used;
         for (const p of g) {
-          if (!eligible(free, [p], false) || used + p.item.duration_min > d.frame.cap) continue;
+          if (!eligible(free, [p], false, sub) || used + p.item.duration_min > d.frame.cap) continue;
           sub.push(p);
           used += p.item.duration_min;
         }
@@ -757,7 +1138,8 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
     ((a.cluster >= 0 && a.cluster === b.cluster) || (!!a.ll && !!b.ll && distanceMeters(a.ll, b.ll) <= 1200));
   const choosable = (p: Prep) => p.rank === 1 && p.item.tier !== 'must' && p.item.category !== 'event' && p.item.category !== 'day_trip';
   for (const d of days) {
-    if (d.dayTrip) continue;
+    // Escapada o llegada de un vuelo largo: sin alternativas (lo cercano y listo).
+    if (d.dayTrip || (d.frame.note && d.frame.light)) continue;
     const mains = d.units.filter((u) => u.fixedStart == null && !u.dayTrip && choosable(u.main)).sort((a, b) => prio(a.main, b.main));
     for (const u of mains) {
       const alts = leftovers
@@ -784,19 +1166,21 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
   // ── 5. Orden de cada día.
   const plans = days.map((d) => ({ d, steps: sequenceDay(d, homeLL) }));
 
-  // ── 6. Comidas: primero lo de comida que eligió el grupo, después búsqueda.
-  type MealSlot = { d: DayState; dayIdx: number; step: Extract<Step, { kind: 'lunch' | 'dinner' }>; food: Prep | null; places: PlaceSummary[] };
+  // ── 6. Comidas: primero lo de comida que eligió el grupo, después búsqueda (cocina local primero). En el día de un
+  // ancla también la previa y el tercer tiempo (bares cerca de la sede).
+  type MealSlot = { d: DayState; dayIdx: number; step: MealStep; food: Prep | null; places: PlaceSummary[]; queries: FoodQuery[] };
   const slots: MealSlot[] = [];
   plans.forEach(({ d, steps }, dayIdx) => {
-    for (const s of steps) if (s.kind !== 'unit') slots.push({ d, dayIdx, step: s, food: null, places: [] });
+    for (const s of steps) if (s.kind !== 'unit') slots.push({ d, dayIdx, step: s, food: null, places: [], queries: [] });
   });
+  const isMeal = (s: MealSlot) => s.step.kind === 'lunch' || s.step.kind === 'dinner';
   for (const p of food) {
     const wantsDinner = ['evening', 'night', 'sunset'].includes(p.item.best_time);
     const wantsLunch = ['morning', 'midday'].includes(p.item.best_time);
     let bs: MealSlot | null = null;
     let bd = Infinity;
     for (const s of slots) {
-      if (s.food) continue;
+      if (s.food || !isMeal(s)) continue;
       if ((wantsDinner && s.step.kind !== 'dinner') || (wantsLunch && s.step.kind !== 'lunch')) continue;
       if (!isOpenOn(p.item, s.d.date, s.step.t, s.step.t + 120)) continue;
       const dist = p.ll && s.step.anchor ? distanceMeters(p.ll, s.step.anchor) : 1e7;
@@ -831,15 +1215,25 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
   };
   const used = new Set<string>(food.map((p) => p.item.google_place_id).filter((x): x is string => !!x));
   const need = (s: MealSlot) => {
+    if (s.step.kind === 'previa' || s.step.kind === 'post') return 3;
     if (s.step.kind === 'lunch') return s.food ? 0 : 1;
     if (s.food) return s.food.rank >= 2 || s.food.item.tier === 'must' ? 0 : 2;
     return 3;
   };
+  // Plan de cocinas del tramo: lo del catálogo que ya entró cuenta para el tope de "misma cocina".
+  const searchSlots = slots.filter((s) => isMeal(s) && need(s) > 0);
+  const plan = planMealQueries(
+    searchSlots.map((s) => ({ kind: s.step.kind as 'lunch' | 'dinner', dayIdx: s.dayIdx })),
+    { country: leg.country, city: leg.city, group, nDays, taken: slots.filter((s) => s.food).map((s) => cuisineOf(`${s.food!.item.name} ${s.food!.item.why}`)) },
+  );
+  searchSlots.forEach((s, i) => (s.queries = plan[i]));
+  for (const s of slots)
+    if (s.step.kind === 'previa' || s.step.kind === 'post')
+      s.queries = s.step.after.kind === 'sports' ? [fq('sports bar', null), fq('pub', null)] : [fq('bar', null), fq('pub', null)];
   const results = await Promise.all(
     slots.map(async (s) => {
       if (!need(s)) return [] as PlaceSummary[];
-      const qs = mealQueries(s.step.kind, s.dayIdx, leg.country, leg.city, group);
-      const lists = await Promise.all(qs.map((q) => search(q, s.step.anchor ?? leg.center)));
+      const lists = await Promise.all(s.queries.map((q) => search(q.q, s.step.anchor ?? leg.center)));
       return lists.flat();
     }),
   );
@@ -923,6 +1317,15 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
           };
           if (u.fixedStart != null) b.start_time = toHHMM(u.fixedStart);
           if (it.booking !== 'none') b.notes = it.booking === 'required' ? 'Conviene reservar: sin reserva no se entra.' : 'Conviene reservar.';
+          const a = anchorByItem.get(it.id);
+          if (a) {
+            // El ancla: sede (o el bar donde lo ven), la nota de entradas y las fuentes del fixture.
+            b.status = 'confirmed';
+            if (a.venue) b.place_name = a.venue;
+            b.description = [a.venue ? `En ${a.venue}.` : '', a.tickets === 'want' ? '' : (a.note ?? '')].filter(Boolean).join(' ') || undefined;
+            b.notes = ticketsNote(a);
+            if (u.fixedStart == null) b.time_flex = 'any';
+          }
           const src = sourcesFor(it);
           if (src) b.sources = src;
           if (rainAlert.has(it.id)) b.alerts = [{ kind: 'rain', text: 'Pronóstico de lluvia: es al aire libre, tené un plan B bajo techo.' }];
@@ -933,20 +1336,70 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
         continue;
       }
       const slot = slotByStep.get(s)!;
-      const lunch = s.kind === 'lunch';
-      const flex = lunch ? 'afternoon' : 'evening';
-      const dur = lunch ? MEALS.lunch.dur : MEALS.dinner.dur;
       const nearTxt = (pl: LL) => {
         if (!s.anchor || !s.near) return '';
         const m = Math.round(distanceMeters(s.anchor, pl) / 50) * 50;
         return m <= 1500 ? `A ${m < 1000 ? `${Math.max(50, m)} m` : `${(m / 1000).toFixed(1).replace('.', ',')} km`} de ${s.near}.` : '';
       };
+      if (s.kind === 'previa' || s.kind === 'post') {
+        // Previa / tercer tiempo: bares reales cerca de la sede, "elegí 1 de 3", a la hora que corresponde.
+        const sports = s.after.kind === 'sports';
+        const label = s.kind === 'previa' ? 'Previa' : sports ? 'Tercer tiempo' : 'Después del show';
+        const why = s.kind === 'previa' ? `Antes de ${s.after.name}.` : `Después de ${s.after.name}.`;
+        const dur = s.kind === 'previa' ? PREVIA_MIN : POST_MIN;
+        const flex = s.t < 13 * 60 ? 'morning' : s.t < 19 * 60 ? 'afternoon' : 'evening';
+        const opts: ComposedBlock[] = slot.places.map((pl) => ({
+          type: 'activity',
+          title: `${label} en ${pl.name}`.slice(0, 200),
+          description: [why, nearTxt(pl as LL), pl.rating ? `${pl.rating.toFixed(1).replace('.', ',')} ★ en Google.` : ''].filter(Boolean).join(' '),
+          place_name: pl.name,
+          ...geo(pl),
+          time_flex: flex,
+          start_time: toHHMM(s.t),
+          duration_min: dur,
+          status: 'confirmed',
+          sort_order: order,
+          day_id: d.id,
+          choice_key: null,
+          item_id: null,
+          option_id: null,
+        }));
+        if (!opts.length)
+          opts.push({
+            type: 'activity',
+            title: `${label} por la zona`,
+            description: `${why} Buscá un bar cerca de ${s.near ?? 'la sede'}.`,
+            time_flex: flex,
+            start_time: toHHMM(s.t),
+            duration_min: dur,
+            status: 'idea',
+            sort_order: order,
+            day_id: d.id,
+            choice_key: null,
+            item_id: null,
+            option_id: null,
+          });
+        if (opts.length > 1)
+          for (const o of opts) {
+            o.choice_key = `${s.kind}:${d.id}`;
+            o.status = 'proposed';
+          }
+        for (const o of opts) blocks.push({ ...o, ...(hasLL(o) ? withTransfer({ lat: o.lat, lng: o.lng }) : {}) });
+        if (hasLL(opts[0])) prev = { lat: opts[0].lat, lng: opts[0].lng };
+        order++;
+        continue;
+      }
+      const lunch = s.kind === 'lunch';
+      const flex = lunch ? 'afternoon' : 'evening';
+      const dur = lunch ? MEALS.lunch.dur : MEALS.dinner.dur;
+      // La cena después del partido es el tercer tiempo (cerca de la sede).
+      const mealName = lunch ? 'Almuerzo' : s.after ? (s.after.kind === 'sports' ? 'Tercer tiempo: cena' : 'Cena después del show') : 'Cena';
       const opts: ComposedBlock[] = [];
       if (slot.food) {
         const p = slot.food;
         opts.push({
           type: 'meal',
-          title: `${lunch ? 'Almuerzo' : 'Cena'} en ${p.item.name}`.slice(0, 200),
+          title: `${mealName} en ${p.item.name}`.slice(0, 200),
           description: descriptionFor(p, group),
           place_name: p.item.name,
           ...geo(p.item),
@@ -966,7 +1419,7 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
         const rating = pl.rating ? `${pl.rating.toFixed(1).replace('.', ',')} ★ en Google.` : '';
         opts.push({
           type: 'meal',
-          title: `${lunch ? 'Almuerzo' : 'Cena'} en ${pl.name}`.slice(0, 200),
+          title: `${mealName} en ${pl.name}`.slice(0, 200),
           description: [nearTxt(pl as LL), rating].filter(Boolean).join(' ') || undefined,
           place_name: pl.name,
           ...geo(pl),
@@ -1003,11 +1456,43 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
           o.status = 'proposed';
         }
       }
+      // Tercer tiempo y cena temprano de la llegada larga: con hora, para que se vea en el día.
+      if (s.after || (!lunch && d.frame.note)) for (const o of opts) o.start_time = toHHMM(s.t);
       const first = opts[0];
       for (const o of opts) blocks.push({ ...o, ...(hasLL(o) ? withTransfer({ lat: o.lat, lng: o.lng }) : {}) });
       if (hasLL(first)) prev = { lat: first.lat, lng: first.lng };
       order++;
     }
+  }
+
+  // Aviso del día (llegada de un vuelo largo): en el primer bloque del día que no es el alojamiento.
+  for (const d of days) {
+    if (!d.frame.note) continue;
+    const first = blocks
+      .filter((b) => b.day_id === d.id && b.type !== 'lodging')
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
+    if (first) for (const b of blocks.filter((x) => x === first || (first.choice_key && x.choice_key === first.choice_key)))
+      b.notes = [d.frame.note, b.notes].filter(Boolean).join(' ').slice(0, 4000);
+  }
+
+  // Anclas sin fecha confirmada: al banco de ideas del tramo, con la nota (cuando salga el fixture se agendan).
+  for (const a of undated) {
+    const it = anchorItem(a, null);
+    blocks.push({
+      type: 'activity',
+      title: a.name.slice(0, 200),
+      description: [a.city ? `En ${a.city}${a.venue ? `, ${a.venue}` : ''}.` : a.venue ? `En ${a.venue}.` : '', a.note ?? 'Fecha a confirmar.'].filter(Boolean).join(' ').slice(0, 4000),
+      ...(a.venue ? { place_name: a.venue } : {}),
+      time_flex: 'any',
+      duration_min: it.duration_min,
+      status: 'idea',
+      notes: ticketsNote(a),
+      ...(sourcesFor(it) ? { sources: sourcesFor(it) } : {}),
+      day_id: null,
+      choice_key: null,
+      item_id: it.id,
+      option_id: null,
+    });
   }
 
   // ── 8. Chequeo + arreglo mínimo.
@@ -1016,8 +1501,8 @@ export async function composeLeg(input: ComposeInput, deps: ComposeDeps): Promis
     scores: Object.fromEntries(preps.map((p) => [p.item.id, p.pick.score])),
     mustIds: preps.filter((p) => p.rank >= 2).map((p) => p.item.id).filter((id) => !unplaced.some((u) => u.item.id === id)),
   };
-  const issues = checkPlan(leg, blocks, group, ctx);
-  const fixed = repairPlan(leg, blocks, issues, group, ctx);
+  const issues = checkPlan(legX, blocks, group, ctx);
+  const fixed = repairPlan(legX, blocks, issues, group, ctx);
   // Lo que el arreglo tuvo que sacar también es "no entró".
   const after = new Set(fixed.blocks.map((b) => b.item_id));
   for (const p of preps)

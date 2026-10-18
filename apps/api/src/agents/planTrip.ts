@@ -13,6 +13,7 @@ import { addTransfers } from './dayTransfers';
 import { randomUUID } from 'node:crypto';
 import {
   SCOUT,
+  type TripAnchor,
   type TripUnderstanding,
   type CatalogItem,
   type LegOptionRow,
@@ -45,9 +46,12 @@ import {
   type PlannerProfile,
 } from './prompts';
 import {
+  anchorsForLeg,
   autoPicks,
   composeAndCheck,
   dayWindows,
+  isLongHaulArrival,
+  mergeAnchors,
   legWeather,
   loadLegGroup,
   loadPlannerModules,
@@ -455,6 +459,9 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
   let conversation = input.conversation;
   // PRD 31: lo que entendió trip_brief (gustos, ritmo, presupuesto); en un reintento, el del job anterior.
   let understanding = (input.understanding ?? null) as TripUnderstanding | null;
+  // PRD 31 v2: anclas del viaje (investigadas en trip_shapes y/o dichas en la entrevista) y llegada internacional.
+  let anchors: TripAnchor[] = [];
+  let longHaulLegId: string | null = null;
   const failedLegs: { leg_id: string; city: string; error: string }[] = [];
   const t0 = Date.now();
   // PRD 31
@@ -512,7 +519,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         const today = deps.today();
         const sk = await deps.llm.skeleton({
           system: SKELETON_SYSTEM,
-          user: renderSkeletonRequest({ input, today, organizerId: userId, profiles }),
+          user: renderSkeletonRequest({ input, today, organizerId: userId, profiles, anchors: mergeAnchors(understanding?.anchors) }),
           config: deps.config,
         });
         addUsage(usage, sk.usage);
@@ -615,6 +622,9 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         transfers: transferTimes.get(l.id) ?? [],
       }));
       legsForCount = plan.legs;
+      anchors = mergeAnchors(input.skeleton?.anchors, understanding?.anchors);
+      const first = plan.legs[0];
+      if (first && isLongHaulArrival(understanding?.origin, first.country, plan.assumptions)) longHaulLegId = first.id;
     } else {
       // ── Reintento: solo tramos sin bloques
       const ids = existing.map((l) => l.id);
@@ -634,8 +644,12 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       const withBlocks = new Set((blocks ?? []).map((b) => b.leg_id as string));
       const prevHints = ((prevJobs?.[0]?.result as PlanTripResult | undefined)?.participants_hint ?? []).filter((h) => ids.includes(h.leg_id));
       hints = prevHints;
-      const prevRequest = (prevJobs?.[0]?.result as PlanTripResult | undefined)?.request;
+      const prevResult = prevJobs?.[0]?.result as PlanTripResult | undefined;
+      const prevRequest = prevResult?.request;
       understanding ??= (prevRequest?.understanding ?? null) as TripUnderstanding | null;
+      anchors = mergeAnchors(input.skeleton?.anchors, understanding?.anchors, prevRequest?.understanding?.anchors);
+      const first = [...existing].sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+      if (first && isLongHaulArrival(understanding?.origin, first.country, [...(prevResult?.assumptions ?? []), ...(input.skeleton?.assumptions ?? [])])) longHaulLegId = first.id;
       if (prevRequest?.conversation?.length) {
         conversation = [...prevRequest.conversation, ...input.conversation.filter((m) => !prevRequest.conversation.some((p) => p.text === m.text))];
       }
@@ -656,6 +670,8 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
 
     // ── Por tramo (hasta 3 en paralelo): catálogo → menú → (auto) armado; si el catálogo no sirve, relleno por LLM.
     const emptyLegIds = new Set(legsToFill.map((l) => l.id));
+    const allLegs = (existing.length ? existing : legsToFill).map((l) => ({ id: l.id, city: l.city, start_date: l.start_date, end_date: l.end_date }));
+    const legAnchors = (leg: LegToFill) => anchorsForLeg(anchors, leg, allLegs);
     const { data: saved } = await admin.from('saved_places').select('name,google_place_id,note,city').eq('user_id', userId).limit(200);
     const savedFor = (city: string) =>
       (saved ?? [])
@@ -732,13 +748,13 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         country: leg.country,
         center,
         days: leg.days,
-        dayWindows: dayWindows(leg.days, leg.transfers, group.chronotype),
+        dayWindows: dayWindows(leg.days, leg.transfers, group.chronotype, { longHaulArrival: leg.id === longHaulLegId }),
         weather: await legWeather(center, leg.days.map((d) => d.date), deps.forecast),
         lodging: null,
         lodgingZones: menu.lodgingZones,
       };
       void progress.push(`Armando los días de ${leg.city} por zonas…`);
-      const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: null }, deps.composeDeps(), {
+      const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: null, anchors: legAnchors(leg) }, deps.composeDeps(), {
         items: menu.items,
         mustOptions: mustOptions(menu.options),
         excludedReason: 'no estaba preseleccionado',
@@ -796,6 +812,9 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
                 arrivals: leg.arrivals,
                 savedPlaces: savedFor(leg.city),
                 webSearch: deps.config.webSearch,
+                anchors: legAnchors(leg),
+                longHaulArrival: leg.id === longHaulLegId,
+                origin: understanding?.origin ?? null,
               }),
             },
           ],
@@ -909,7 +928,8 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       conversation,
       ...(input.start_date ? { start_date: input.start_date } : {}),
       ...(input.end_date ? { end_date: input.end_date } : {}),
-      ...(understanding ? { understanding } : {}),
+      // Las anclas viajan dentro de understanding: compose_days y los reintentos las reusan.
+      ...(understanding || anchors.length ? { understanding: { ...(understanding ?? {}), ...(anchors.length ? { anchors } : {}) } } : {}),
     },
     usage: {
       input_tokens: usage.input_tokens,

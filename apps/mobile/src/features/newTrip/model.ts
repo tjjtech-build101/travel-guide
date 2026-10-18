@@ -1,6 +1,16 @@
 // Lógica pura del flujo "Nuevo viaje" (PRD 31): conversación con respuestas, defaults de las preguntas y
 // el esqueleto que va a plan_trip desde la forma elegida. Sin React ni red: se testea con tsx (model.test.ts).
-import type { ToolInput, TripQuestion, TripShape, TripShapeLeg, TripUnderstanding } from '@build101/shared';
+import type {
+  TripAnchor,
+  TripBriefResult,
+  TripDimension,
+  TripKind,
+  ToolInput,
+  TripQuestion,
+  TripShape,
+  TripShapeLeg,
+  TripUnderstanding,
+} from '@build101/shared';
 
 import { formatDay } from '../../lib/format';
 
@@ -69,16 +79,128 @@ export function answerText(q: TripQuestion, v: AnswerValue | undefined): string 
   return q.kind === 'text' ? v!.trim() : label(v!);
 }
 
-/** Conversación + cada pregunta (assistant) y su respuesta (user). Las que quedan sin contestar no van. */
+/**
+ * Conversación + cada pregunta (assistant) y su respuesta (user). Las que quedan sin contestar no van.
+ * Si un id se repite (otra ronda volvió a preguntar lo mismo), va una sola vez: la primera.
+ */
 export function conversationWithAnswers(base: Turn[], questions: TripQuestion[], answers: Answers): Turn[] {
   const conv = [...base];
-  for (const q of questions) {
+  for (const q of uniqueQuestions(questions)) {
     const text = answerText(q, answers[q.id]);
     if (!text) continue;
-    conv.push({ role: 'assistant', text: q.text.slice(0, MAX_TEXT) });
+    // Marca [q:id/dimensión]: la API reconoce lo ya preguntado sin depender de memoria del servidor (briefPrompts.questionMessage).
+    conv.push({ role: 'assistant', text: `[q:${q.id}/${q.dimension}] ${q.text}`.slice(0, MAX_TEXT) });
     conv.push({ role: 'user', text: text.slice(0, MAX_TEXT) });
   }
   return clampConversation(conv);
+}
+
+// ───────────────────────── Entrevista en rondas (trip_brief v2)
+
+/** Máximo de rondas de la entrevista (TripBriefInput.round 1-3). */
+export const MAX_ROUNDS = 3;
+
+/** Preguntas sin repetir id (gana la primera aparición). */
+export function uniqueQuestions(questions: TripQuestion[]): TripQuestion[] {
+  const seen = new Set<string>();
+  return questions.filter((q) => (seen.has(q.id) ? false : (seen.add(q.id), true)));
+}
+
+/** Todas las preguntas de las rondas 1..upTo (índice 0-based incluido), en orden y sin duplicar. */
+export function roundQuestions(rounds: Pick<TripBriefResult, 'questions'>[], upTo = rounds.length - 1): TripQuestion[] {
+  return uniqueQuestions(rounds.slice(0, upTo + 1).flatMap((r) => r.questions));
+}
+
+/**
+ * Respuestas al llegar una ronda nueva: lo ya contestado en las rondas que quedan (`keep`) no se toca; las
+ * preguntas nuevas arrancan con su default. Se descartan respuestas a preguntas que ya no están en ninguna ronda.
+ */
+export function mergeRoundAnswers(prev: Answers, keep: TripQuestion[], incoming: TripQuestion[]): Answers {
+  const ids = new Set([...keep, ...incoming].map((q) => q.id));
+  const kept = Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)));
+  return { ...defaultAnswers(incoming), ...kept };
+}
+
+/** ¿Después de esta ronda (1-based) va otra o ya pasamos a las formas? */
+export function wantsAnotherRound(brief: Pick<TripBriefResult, 'done' | 'questions'>, round: number): boolean {
+  return !brief.done && round < MAX_ROUNDS && brief.questions.length > 0;
+}
+
+/** Ronda que llegó sin nada para preguntar (o done sin preguntas): se salta directo a las formas. */
+export function skipRound(brief: Pick<TripBriefResult, 'done' | 'questions'>): boolean {
+  return brief.questions.length === 0;
+}
+
+/** Indicador sutil arriba de las preguntas. */
+export function roundLabel(round: number, brief: Pick<TripBriefResult, 'done'>): string {
+  if (round <= 1) return brief.done ? 'Con esto ya casi lo tengo' : `Ronda 1 de ${MAX_ROUNDS} · lo básico`;
+  return brief.done || round >= MAX_ROUNDS ? 'Últimas preguntas para afinar' : `Ronda ${round} de ${MAX_ROUNDS} · unas preguntas más para afinar`;
+}
+
+export const TRIP_KIND_LABEL: Record<TripKind, string> = {
+  event: 'Viaje a un evento',
+  city: 'Viaje de ciudad',
+  road_trip: 'Road trip',
+  beach: 'Playa',
+  nature: 'Naturaleza',
+  family: 'En familia',
+  couple: 'En pareja',
+  backpacking: 'Mochilero',
+  mixed: 'Un poco de todo',
+};
+
+export const DIMENSION_LABEL: Record<TripDimension, string> = {
+  anchor: 'el evento',
+  dates: 'fechas',
+  duration: 'duración',
+  travelers: 'el grupo',
+  origin: 'desde dónde salen',
+  arrival: 'llegada',
+  departure: 'vuelta',
+  lodging: 'alojamiento',
+  budget: 'presupuesto',
+  pace: 'ritmo',
+  first_time: 'si ya fueron',
+  interests: 'gustos',
+  extras: 'extras',
+  transport: 'transporte',
+  food: 'comida',
+  kids: 'chicos',
+  mobility: 'movilidad',
+  must: 'imperdibles',
+  avoid: 'lo que no',
+  other: 'otros',
+};
+
+/** coverage → "Sé" (known + assumed, con las supuestas marcadas) y "Me falta". Score 0-1 para la barrita. */
+export function coverageSummary(coverage: TripBriefResult['coverage']): { known: string[]; assumed: string[]; missing: string[]; score: number } | null {
+  if (!coverage) return null;
+  const known: string[] = [];
+  const assumed: string[] = [];
+  const missing: string[] = [];
+  for (const [dim, v] of Object.entries(coverage) as [TripDimension, 'known' | 'assumed' | 'unknown' | undefined][]) {
+    const label = DIMENSION_LABEL[dim] ?? dim;
+    if (v === 'known') known.push(label);
+    else if (v === 'assumed') assumed.push(label);
+    else if (v === 'unknown') missing.push(label);
+  }
+  const total = known.length + assumed.length + missing.length;
+  if (!total) return null;
+  return { known, assumed, missing, score: (known.length + assumed.length * 0.5) / total };
+}
+
+export const TICKETS_LABEL: Record<TripAnchor['tickets'], string> = {
+  have: 'Ya tienen entradas',
+  want: 'Quieren conseguir entradas',
+  watch_out: 'Lo ven afuera',
+  unknown: 'Entradas: a definir',
+};
+
+/** "sáb 9 oct · 16:45" / "a confirmar". */
+export function anchorWhen(a: Pick<TripAnchor, 'date' | 'time'>): string {
+  if (!a.date) return a.time ? a.time : 'Fecha a confirmar';
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(a.date) ? formatDay(a.date) : a.date;
+  return a.time ? `${d} · ${a.time}` : d;
 }
 
 /** Las herramientas aceptan hasta 40 mensajes de hasta 2000 caracteres: nos quedamos con los últimos. */
@@ -124,7 +246,31 @@ export function skeletonFromShape(shape: TripShape): Skeleton {
       participant_names: t.participant_names,
     })),
     assumptions: shape.assumptions.slice(0, 12),
+    ...(shape.anchors?.length ? { anchors: shape.anchors.slice(0, 12).map(anchorForSkeleton) } : {}),
   };
+}
+
+/** TripAnchor recortado a los límites de TripAnchorInput. */
+function anchorForSkeleton(a: TripAnchor): TripAnchor {
+  return {
+    id: a.id.slice(0, 60),
+    name: a.name.slice(0, 200),
+    kind: a.kind,
+    city: a.city?.slice(0, 120) ?? null,
+    country: a.country?.slice(0, 80) ?? null,
+    date: a.date ?? null,
+    time: a.time ?? null,
+    venue: a.venue?.slice(0, 200) ?? null,
+    tickets: a.tickets,
+    researched: a.researched,
+    sources: (a.sources ?? []).slice(0, 6).map((src) => ({ url: src.url.slice(0, 500), title: src.title?.slice(0, 200) ?? null })),
+    note: a.note?.slice(0, 400) ?? null,
+  };
+}
+
+/** Lo entendido tal como va a plan_trip: anclas recortadas a los límites del contrato. */
+export function understandingForPlan(u: TripUnderstanding): TripUnderstanding {
+  return u.anchors ? { ...u, anchors: u.anchors.slice(0, 12).map(anchorForSkeleton) } : u;
 }
 
 export function planTripInput(opts: {
@@ -132,12 +278,12 @@ export function planTripInput(opts: {
   startDate: string | null;
   shape: TripShape | null;
   mode: PlanMode;
-  /** Lo que entendió trip_brief: el armado lo usa para los gustos del grupo. */
+  /** Lo que entendió trip_brief en la ÚLTIMA ronda (gustos, anclas, tipo de viaje, origen). */
   understanding?: TripUnderstanding | null;
 }): ToolInput<'plan_trip'> {
   return {
     conversation: clampConversation(opts.conversation),
-    ...(opts.understanding ? { understanding: opts.understanding } : {}),
+    ...(opts.understanding ? { understanding: understandingForPlan(opts.understanding) } : {}),
     ...(opts.startDate ? { start_date: opts.startDate } : {}),
     ...(opts.shape ? { skeleton: skeletonFromShape(opts.shape), ...(opts.shape.title ? { title: opts.shape.title.slice(0, 80) } : {}) } : {}),
     mode: opts.mode,

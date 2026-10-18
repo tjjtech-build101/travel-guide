@@ -1,4 +1,4 @@
-// "Nuevo viaje" (PRD 01 + PRD 31 · planificador colaborativo): Contame → Lo que entendí (trip_brief) →
+// "Nuevo viaje" (PRD 01 + PRD 31 · planificador colaborativo): Contame → Lo que entendí (trip_brief, 1-3 rondas) →
 // Elegí la forma (trip_shapes) → ¿Cómo lo armamos? → plan_trip (menu | auto) → progreso en vivo.
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef } from 'react';
@@ -7,8 +7,8 @@ import { BackHandler } from 'react-native';
 import { Building } from '../../../features/newTrip/Building';
 import { BriefStep } from '../../../features/newTrip/BriefStep';
 import { BuildStep } from '../../../features/newTrip/BuildStep';
-import { requestBrief, requestShapes, startPlan } from '../../../features/newTrip/flow';
-import { DEMO_STORY, defaultAnswers, recommendedShape } from '../../../features/newTrip/model';
+import { requestBrief, requestNextRound, requestShapes, startPlan } from '../../../features/newTrip/flow';
+import { DEMO_STORY, recommendedShape } from '../../../features/newTrip/model';
 import { isoIn } from '../../../features/newTrip/parts';
 import { ShapesStep } from '../../../features/newTrip/ShapesStep';
 import { useNewTripStore } from '../../../features/newTrip/store';
@@ -61,7 +61,7 @@ export default function NewTripScreen() {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Solo dev: build101:///trips/new?demo=1 escribe la frase de prueba, pasa por "Lo que entendí" con los
+ * Solo dev: build101:///trips/new?demo=1 escribe la frase de prueba, pasa por las rondas de "Lo que entendí" con los
  * defaults y elige la forma recomendada; con &go=1 además toca "Armémoslo juntos".
  */
 function useDemo(demo: string | undefined, go: string | undefined) {
@@ -86,9 +86,12 @@ function useDemo(demo: string | undefined, go: string | undefined) {
       await wait(600);
       if (!(await requestBrief())) return;
       await wait(1200);
-      const brief = useNewTripStore.getState().brief;
-      useNewTripStore.getState().setAnswers(defaultAnswers(brief?.questions ?? []));
-      if (!(await requestShapes())) return;
+      // Defaults preseleccionados en cada ronda; "Seguir" hasta que la entrevista diga done (máx. 3 rondas).
+      for (let i = 0; i < 3 && useNewTripStore.getState().phase === 'brief'; i++) {
+        if (!(await requestNextRound())) return;
+        await wait(1200);
+      }
+      if (useNewTripStore.getState().phase !== 'shapes' && !(await requestShapes())) return;
       await wait(1200);
       const shape = recommendedShape(useNewTripStore.getState().shapes ?? []);
       if (!shape) return;

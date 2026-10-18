@@ -1,5 +1,6 @@
-// Paso 2 · Lo que entendí: resumen + "lo que tengo en cuenta" + preguntas de trip_brief con el default
-// preseleccionado (patrón de TourSetupSheet). "Seguir" → trip_shapes; "Saltar preguntas" usa los defaults.
+// Paso 2 · Lo que entendí: resumen + tipo de viaje + anclas + "qué tan bien te conozco" + preguntas de
+// trip_brief en rondas (1-3) con el default preseleccionado. "Seguir" → ronda siguiente (o formas si ya está);
+// "Ya está, armalo" → formas con lo que haya. Atrás vuelve de ronda sin perder respuestas.
 import type { TripBriefResult, TripQuestion } from '@build101/shared';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -10,18 +11,18 @@ import { Skeleton } from '../../ui/States';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { Chip } from '../plan/components/Controls';
-import { requestBrief, requestShapes, startPlan } from './flow';
-import { answerText, defaultAnswers, isAnswered, toggleAnswer, type AnswerValue } from './model';
-import { DateRow, ErrorBox, InlineError, StepShell } from './parts';
-import { useNewTripStore } from './store';
+import { finishInterview, requestBrief, requestNextRound, startPlan } from './flow';
+import { answerText, coverageSummary, isAnswered, roundLabel, toggleAnswer, TRIP_KIND_LABEL, wantsAnotherRound, type AnswerValue } from './model';
+import { AnchorCard, DateRow, ErrorBox, InlineError, StepShell } from './parts';
+import { currentBrief, useNewTripStore } from './store';
 
 const PARTY: Record<string, string> = { solo: 'Solo', couple: 'En pareja', friends: 'Con amigos', family: 'En familia' };
 
 export function BriefStep() {
-  const brief = useNewTripStore((s) => s.brief);
+  const brief = useNewTripStore(currentBrief);
+  const roundIndex = useNewTripStore((s) => s.roundIndex);
   const answers = useNewTripStore((s) => s.answers);
   const setAnswer = useNewTripStore((s) => s.setAnswer);
-  const setAnswers = useNewTripStore((s) => s.setAnswers);
   const back = useNewTripStore((s) => s.back);
   const loading = useNewTripStore((s) => s.loading);
   const error = useNewTripStore((s) => s.error);
@@ -29,35 +30,43 @@ export function BriefStep() {
   // Volvió de un cierre de la app a mitad de la carga: se pide de nuevo.
   useEffect(() => {
     const s = useNewTripStore.getState();
-    if (!s.brief && !s.loading && !s.error.brief) void requestBrief();
+    if (!s.rounds.length && !s.loading && !s.error.brief) void requestBrief();
   }, []);
 
   const fallback = { label: 'Armalo igual', onPress: () => void startPlan('auto', false), loading: loading === 'plan' };
   const ready = brief?.ready !== false;
+  const round = roundIndex + 1;
+  const more = brief ? wantsAnotherRound(brief, round) : false;
+  const busy = loading === 'round' || loading === 'shapes';
 
   return (
     <StepShell
       step={2}
-      title="Lo que entendí"
+      title={round > 1 ? 'Afinemos un poco más' : 'Lo que entendí'}
       onBack={back}
       footer={
         brief && ready ? (
           <>
-            <Button label="Seguir" onPress={() => void requestShapes()} loading={loading === 'shapes'} />
-            {brief.questions.length ? (
+            <Button
+              label={more ? 'Seguir' : 'Ver formas del viaje'}
+              onPress={() => void requestNextRound()}
+              loading={more ? loading === 'round' : loading === 'shapes'}
+              disabled={busy}
+              accessibilityHint={more ? 'Te hago unas preguntas más para afinar' : 'Te muestro formas de armar el viaje'}
+            />
+            {more ? (
               <Button
-                label="Saltar preguntas"
+                label="Ya está, armalo"
                 variant="ghost"
-                onPress={() => {
-                  setAnswers(defaultAnswers(brief.questions));
-                  void requestShapes();
-                }}
-                accessibilityHint="Sigue con las respuestas sugeridas"
+                onPress={() => void finishInterview()}
+                loading={loading === 'shapes'}
+                disabled={busy}
+                accessibilityHint="Sigue a las formas del viaje con lo que ya me contaste"
               />
             ) : null}
           </>
         ) : brief ? (
-          <Button label="Contame más" onPress={back} />
+          <Button label="Contame más" onPress={() => useNewTripStore.getState().setPhase('tell')} />
         ) : null
       }
     >
@@ -78,9 +87,28 @@ export function BriefStep() {
           {!ready ? (
             <Text style={styles.warn}>Me falta saber al menos a dónde van. Contame un poco más y seguimos.</Text>
           ) : null}
+          {brief.questions.length ? (
+            <Text style={styles.roundLabel} accessibilityRole="text">
+              {roundLabel(round, brief)}
+            </Text>
+          ) : null}
           {brief.questions.map((q) => (
-            <QuestionCard key={q.id} q={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
+            <QuestionCard key={`${round}-${q.id}`} q={q} value={answers[q.id]} onChange={(v) => setAnswer(q.id, v)} />
           ))}
+          {loading === 'round' ? (
+            <View style={styles.loading} accessibilityLabel="Pensando unas preguntas más">
+              <Text style={styles.muted}>Pensando unas preguntas más con lo que me contestaste…</Text>
+              <Skeleton height={110} />
+              <Skeleton height={110} />
+            </View>
+          ) : null}
+          {error.round ? (
+            <ErrorBox
+              message={`${error.round} Podés seguir igual con lo que ya sé.`}
+              onRetry={() => void requestNextRound(true)}
+              fallback={{ label: 'Ya está, armalo', onPress: () => void finishInterview(), loading: loading === 'shapes' }}
+            />
+          ) : null}
           {error.shapes ? <InlineError message={error.shapes} /> : null}
           {error.plan ? <InlineError message={`${error.plan} Probá de nuevo.`} /> : null}
         </>
@@ -98,9 +126,17 @@ function Understood({ brief }: { brief: TripBriefResult }) {
     ...(u.start_date || u.end_date ? [formatDateRange(u.start_date, u.end_date)] : []),
     ...(u.days ? [`${u.days} días`] : []),
     ...(u.travelers ? [`${u.travelers} ${u.travelers === 1 ? 'viajero' : 'viajeros'}`] : u.party ? [PARTY[u.party] ?? ''] : []),
+    ...(u.origin ? [`Desde ${u.origin}`] : []),
   ].filter(Boolean);
+  const kind = u.trip_kind ? TRIP_KIND_LABEL[u.trip_kind] : null;
+  const anchors = u.anchors ?? [];
   return (
     <View style={styles.card}>
+      {kind ? (
+        <View style={styles.kind}>
+          <Text style={styles.kindText}>{kind}</Text>
+        </View>
+      ) : null}
       <Text style={styles.summary}>{brief.summary}</Text>
       {chips.length ? (
         <View style={styles.chips}>
@@ -108,6 +144,14 @@ function Understood({ brief }: { brief: TripBriefResult }) {
             <View key={c} style={styles.tag}>
               <Text style={styles.tagText}>{c}</Text>
             </View>
+          ))}
+        </View>
+      ) : null}
+      {anchors.length ? (
+        <View style={styles.anchors}>
+          <Text style={styles.contextTitle}>Lo que manda en el viaje</Text>
+          {anchors.map((a) => (
+            <AnchorCard key={a.id} anchor={a} compact />
           ))}
         </View>
       ) : null}
@@ -121,6 +165,35 @@ function Understood({ brief }: { brief: TripBriefResult }) {
           ))}
         </View>
       ) : null}
+      <Coverage coverage={brief.coverage} />
+    </View>
+  );
+}
+
+/** "Qué tan bien te conozco": barrita + Sé / Supongo / Me falta. */
+function Coverage({ coverage }: { coverage: TripBriefResult['coverage'] }) {
+  const c = coverageSummary(coverage);
+  if (!c) return null;
+  const pct = Math.round(c.score * 100);
+  const lines = [
+    c.known.length ? `Sé: ${c.known.join(', ')}` : null,
+    c.assumed.length ? `Supongo: ${c.assumed.join(', ')}` : null,
+    c.missing.length ? `Me falta: ${c.missing.join(', ')}` : null,
+  ].filter(Boolean) as string[];
+  return (
+    <View style={styles.coverage} accessible accessibilityLabel={`Qué tan bien te conozco: ${pct} por ciento. ${lines.join('. ')}`}>
+      <View style={styles.coverageHead}>
+        <Text style={styles.contextTitle}>Qué tan bien te conozco</Text>
+        <Text style={styles.coveragePct}>{pct}%</Text>
+      </View>
+      <View style={styles.bar}>
+        <View style={[styles.barFill, { width: `${Math.max(4, pct)}%` }]} />
+      </View>
+      {lines.map((l) => (
+        <Text key={l} style={styles.coverageLine}>
+          {l}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -236,4 +309,14 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   listo: { alignSelf: 'flex-start' },
+  roundLabel: { fontSize: font.tiny, fontWeight: '800', letterSpacing: 0.5, color: colors.textMuted, marginTop: space.xs },
+  kind: { alignSelf: 'flex-start', backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: space.sm, paddingVertical: 2 },
+  kindText: { fontSize: font.tiny, fontWeight: '800', color: colors.primaryText },
+  anchors: { gap: space.sm, marginTop: space.xs },
+  coverage: { gap: 4, marginTop: space.xs, paddingTop: space.sm, borderTopWidth: 1, borderTopColor: colors.border },
+  coverageHead: { flexDirection: 'row', alignItems: 'center' },
+  coveragePct: { marginLeft: 'auto', fontSize: font.tiny, fontWeight: '800', color: colors.textMuted },
+  bar: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceMuted, overflow: 'hidden' },
+  barFill: { height: 6, borderRadius: 3, backgroundColor: colors.success },
+  coverageLine: { fontSize: font.tiny, color: colors.textMuted, lineHeight: 18 },
 });

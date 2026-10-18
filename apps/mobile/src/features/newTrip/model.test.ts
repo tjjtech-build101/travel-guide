@@ -1,9 +1,16 @@
 // Tests del modelo de "Nuevo viaje" (PRD 31). `npx tsx src/features/newTrip/model.test.ts` desde apps/mobile.
-import { PlanTripInput, type TripQuestion, type TripShape } from '@build101/shared';
+import { PlanTripInput, TripBriefInput, type TripAnchor, type TripQuestion, type TripShape } from '@build101/shared';
 
 import {
+  anchorWhen,
   answerText,
   baseConversation,
+  coverageSummary,
+  MAX_ROUNDS,
+  mergeRoundAnswers,
+  roundQuestions,
+  skipRound,
+  wantsAnotherRound,
   clampConversation,
   conversationWithAnswers,
   defaultAnswers,
@@ -38,6 +45,7 @@ function eq(a: unknown, b: unknown) {
 
 const q = (over: Partial<TripQuestion>): TripQuestion => ({
   id: 'pace',
+  dimension: 'pace',
   text: '¿Qué ritmo?',
   why: 'Para no matarlos',
   kind: 'single',
@@ -52,6 +60,7 @@ const q = (over: Partial<TripQuestion>): TripQuestion => ({
 
 const interests = q({
   id: 'interests',
+  dimension: 'interests',
   text: '¿Qué les copa?',
   kind: 'multi',
   options: [
@@ -61,8 +70,8 @@ const interests = q({
   ],
   default: ['food'],
 });
-const must = q({ id: 'must', text: '¿Algo sí o sí?', kind: 'text', options: [], default: null, optional: true });
-const dates = q({ id: 'dates', text: '¿Cuándo arrancan?', kind: 'date', options: [], default: null });
+const must = q({ id: 'must', dimension: 'must', text: '¿Algo sí o sí?', kind: 'text', options: [], default: null, optional: true });
+const dates = q({ id: 'dates', dimension: 'dates', text: '¿Cuándo arrancan?', kind: 'date', options: [], default: null });
 
 const shape: TripShape = {
   id: 'a',
@@ -79,6 +88,55 @@ const shape: TripShape = {
   ],
   transfers: [{ from_key: 'mvd', to_key: 'bue', date: '2026-10-28', mode: 'ferry', duration_min: 135, participant_names: [] }],
   assumptions: ['Llegan a Montevideo en avión'],
+};
+
+// Caso Mundial de Rugby 2027: ronda 1 (lo básico) y ronda 2 (afinar).
+const team = q({
+  id: 'team',
+  dimension: 'anchor',
+  text: '¿A quién siguen?',
+  options: [
+    { value: 'arg', label: 'Los Pumas' },
+    { value: 'nz', label: 'All Blacks' },
+  ],
+  default: 'arg',
+});
+const phase = q({
+  id: 'phase',
+  dimension: 'anchor',
+  text: '¿Qué fase quieren ver?',
+  kind: 'multi',
+  options: [
+    { value: 'groups', label: 'Fase de grupos' },
+    { value: 'final', label: 'La final' },
+  ],
+  default: ['groups'],
+});
+const budget = q({
+  id: 'budget',
+  dimension: 'budget',
+  text: '¿Qué presupuesto manejan?',
+  options: [
+    { value: 'mid', label: 'Medio' },
+    { value: 'high', label: 'Alto' },
+  ],
+  default: 'mid',
+});
+const origin = q({ id: 'origin', dimension: 'origin', text: '¿Desde dónde salen?', kind: 'text', options: [], default: null });
+
+const anchor: TripAnchor = {
+  id: 'arg-nz',
+  name: 'Argentina vs Nueva Zelanda (fase de grupos)',
+  kind: 'sports',
+  city: 'Perth',
+  country: 'Australia',
+  date: '2027-10-09',
+  time: '18:00',
+  venue: 'Perth Stadium',
+  tickets: 'want',
+  researched: true,
+  sources: [{ url: 'https://www.rugbyworldcup.com/2027/fixtures', title: 'Fixture oficial' }],
+  note: 'La venta oficial abre en 2026.',
 };
 
 console.log('newTrip/model');
@@ -116,9 +174,9 @@ test('conversationWithAnswers agrega pregunta (assistant) + respuesta (user), sa
   const base = baseConversation('Montevideo', null);
   const conv = conversationWithAnswers(base, [q({}), interests, must], { pace: 'relaxed', interests: ['walk'], must: '' });
   eq(conv.slice(2), [
-    { role: 'assistant', text: '¿Qué ritmo?' },
+    { role: 'assistant', text: '[q:pace/pace] ¿Qué ritmo?' },
     { role: 'user', text: 'Tranqui' },
-    { role: 'assistant', text: '¿Qué les copa?' },
+    { role: 'assistant', text: '[q:interests/interests] ¿Qué les copa?' },
     { role: 'user', text: 'Caminar' },
   ]);
 });
@@ -186,6 +244,111 @@ test('inputKey cambia con la conversación o la fecha', () => {
   const a = baseConversation('a', null);
   eq(inputKey(a, null) === inputKey(baseConversation('a', null), null), true);
   eq(inputKey(a, null) === inputKey(a, '2026-10-24'), false);
+});
+
+test('roundQuestions: rondas hasta upTo, en orden y sin repetir id', () => {
+  const rounds = [{ questions: [team, phase] }, { questions: [budget, { ...team, text: '¿Seguro que a los Pumas?' }, origin] }];
+  eq(roundQuestions(rounds).map((x) => x.id), ['team', 'phase', 'budget', 'origin']);
+  eq(roundQuestions(rounds, 0).map((x) => x.id), ['team', 'phase']);
+  eq(roundQuestions(rounds).find((x) => x.id === 'team')?.text, '¿A quién siguen?');
+  eq(roundQuestions([]), []);
+});
+
+test('mergeRoundAnswers: no pisa lo de rondas anteriores; defaults solo para lo nuevo', () => {
+  const r1 = [team, phase];
+  const prev = { team: 'nz', phase: ['final'] };
+  const merged = mergeRoundAnswers(prev, r1, [budget, origin, team]);
+  eq(merged, { budget: 'mid', team: 'nz', phase: ['final'] });
+  // Ronda 2 pedida de nuevo: lo que había contestado en la ronda 2 vieja se conserva si la pregunta vuelve.
+  eq(mergeRoundAnswers({ ...merged, budget: 'high', origin: 'Córdoba' }, r1, [budget]), { budget: 'high', team: 'nz', phase: ['final'] });
+  // Ronda 1 nueva (cambió lo contado): se descarta lo que ya no se pregunta.
+  eq(mergeRoundAnswers({ team: 'nz', pace: 'relaxed' }, [], [team]), { team: 'nz' });
+});
+
+test('conversación acumulada entre rondas: formato pregunta/respuesta y sin duplicar', () => {
+  const base = baseConversation('Me quiero ir a Australia con amigos a ver el mundial de rugby de 2027', null);
+  const rounds = [{ questions: [team, phase] }, { questions: [budget, team, origin] }];
+  const answers = { team: 'arg', phase: ['groups', 'final'], budget: 'high', origin: 'Buenos Aires' };
+  const conv = conversationWithAnswers(base, roundQuestions(rounds), answers);
+  eq(conv.slice(2), [
+    { role: 'assistant', text: '[q:team/anchor] ¿A quién siguen?' },
+    { role: 'user', text: 'Los Pumas' },
+    { role: 'assistant', text: '[q:phase/anchor] ¿Qué fase quieren ver?' },
+    { role: 'user', text: 'Fase de grupos, La final' },
+    { role: 'assistant', text: '[q:budget/budget] ¿Qué presupuesto manejan?' },
+    { role: 'user', text: 'Alto' },
+    { role: 'assistant', text: '[q:origin/origin] ¿Desde dónde salen?' },
+    { role: 'user', text: 'Buenos Aires' },
+  ]);
+  // Aunque se repita la pregunta en la lista, va una sola vez.
+  eq(conversationWithAnswers(base, [team, team], answers).length, 4);
+  // Lo que va a trip_brief en la ronda 2 valida con el contrato.
+  const parsed = TripBriefInput.safeParse({ conversation: conversationWithAnswers(base, roundQuestions(rounds, 0), answers), round: 2 });
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
+});
+
+test('wantsAnotherRound / skipRound: done, tope de rondas y ronda vacía', () => {
+  eq(wantsAnotherRound({ done: false, questions: [team] }, 1), true);
+  eq(wantsAnotherRound({ questions: [team] }, 2), true);
+  eq(wantsAnotherRound({ done: true, questions: [team] }, 1), false);
+  eq(wantsAnotherRound({ done: false, questions: [team] }, MAX_ROUNDS), false);
+  eq(wantsAnotherRound({ done: false, questions: [] }, 1), false);
+  eq(skipRound({ done: true, questions: [] }), true);
+  eq(skipRound({ done: true, questions: [budget] }), false);
+});
+
+test('coverageSummary: sé / supongo / me falta y score', () => {
+  const c = coverageSummary({ dates: 'known', travelers: 'known', pace: 'assumed', budget: 'unknown' });
+  eq(c?.known, ['fechas', 'el grupo']);
+  eq(c?.assumed, ['ritmo']);
+  eq(c?.missing, ['presupuesto']);
+  eq(c?.score, 0.625);
+  eq(coverageSummary(undefined), null);
+  eq(coverageSummary({}), null);
+});
+
+test('anchorWhen: fecha corta + hora, o a confirmar', () => {
+  eq(anchorWhen(anchor), 'sáb 9 oct · 18:00');
+  eq(anchorWhen({ date: null, time: null }), 'Fecha a confirmar');
+});
+
+test('skeletonFromShape lleva las anclas de la forma y valida con PlanTripInput', () => {
+  const withAnchors: TripShape = { ...shape, anchors: [anchor, { ...anchor, id: 'final', name: 'x'.repeat(300), researched: false, sources: [] }] };
+  const sk = skeletonFromShape(withAnchors);
+  eq(sk.anchors?.length, 2);
+  eq(sk.anchors?.[0]?.venue, 'Perth Stadium');
+  eq(sk.anchors?.[1]?.name.length, 200);
+  eq('anchors' in skeletonFromShape(shape), false);
+  const understanding = {
+    destinations: [{ city: 'Perth', country: 'Australia' }],
+    start_date: null,
+    end_date: null,
+    days: null,
+    travelers: 4,
+    party: 'friends' as const,
+    names: [],
+    interests: {},
+    must: [],
+    avoid: [],
+    budget: 'high' as const,
+    pace: null,
+    first_time: true,
+    kids_ages: [],
+    arrival: null,
+    departure: null,
+    lodging_booked: null,
+    notes: [],
+    trip_kind: 'event' as const,
+    anchors: [{ ...anchor, researched: false }],
+    origin: 'Buenos Aires',
+  };
+  const input = planTripInput({ conversation: baseConversation('Mundial de rugby', null), startDate: null, shape: withAnchors, mode: 'menu', understanding });
+  const parsed = PlanTripInput.safeParse(input);
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.error.issues));
+  eq(parsed.data.skeleton?.anchors?.[0]?.date, '2027-10-09');
+  eq(parsed.data.understanding?.trip_kind, 'event');
+  eq(parsed.data.understanding?.anchors?.length, 1);
+  eq(parsed.data.understanding?.origin, 'Buenos Aires');
 });
 
 if (failures) {

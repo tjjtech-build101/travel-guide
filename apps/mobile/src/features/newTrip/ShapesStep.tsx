@@ -1,4 +1,5 @@
-// Paso 3 · Elegí la forma del viaje: 2-3 TripShape de trip_shapes con línea de tiempo, pros/contras y supuestos.
+// Paso 3 · Elegí la forma del viaje: 2-3 TripShape de trip_shapes con anclas (fixture real con fuentes), línea de
+// tiempo, pros/contras y supuestos.
 import type { TripShape } from '@build101/shared';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -9,7 +10,7 @@ import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { requestShapes, startPlan } from './flow';
 import { durationLabel, MODE_LABEL, nightsLabel, parseTradeoff, shortRange, timeline } from './model';
-import { ErrorBox, InlineError, ModeIcon, StepShell } from './parts';
+import { AnchorCard, ErrorBox, InlineError, ModeIcon, StepShell } from './parts';
 import { useNewTripStore } from './store';
 
 export function ShapesStep() {
@@ -121,6 +122,15 @@ function ShapeCard({ shape, selected, onPress }: { shape: TripShape; selected: b
       </View>
       <Text style={styles.pitch}>{shape.pitch}</Text>
       <Text style={styles.range}>{formatDateRange(shape.start_date, shape.end_date)}</Text>
+      {shape.anchors?.length ? (
+        <View style={styles.anchors}>
+          {[...shape.anchors]
+            .sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'))
+            .map((a) => (
+              <AnchorCard key={a.id} anchor={a} compact />
+            ))}
+        </View>
+      ) : null}
       <ShapeTimeline shape={shape} />
       {shape.tradeoffs.length ? (
         <View style={styles.tradeoffs}>
@@ -172,6 +182,7 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: font.tiny, fontWeight: '800', color: colors.primaryText },
   pitch: { fontSize: font.body, color: colors.text, lineHeight: 23 },
   range: { fontSize: font.tiny, fontWeight: '700', color: colors.textMuted },
+  anchors: { gap: space.xs },
   timeline: { gap: 2, paddingLeft: space.xs },
   legRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 28 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
