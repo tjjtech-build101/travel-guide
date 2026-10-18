@@ -9,6 +9,7 @@ import {
   ComposeDaysInput,
   DecideProposalInput,
   EventsSearchInput,
+  GenerateIndoorTourInput,
   GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
@@ -24,6 +25,8 @@ import {
   SearchPlacesInput,
   ShouldGenerateTourInput,
   TourBriefInput,
+  TourInterviewInput,
+  TourVariantsInput,
   TripBriefInput,
   TripShapesInput,
   UndoInput,
@@ -31,9 +34,12 @@ import {
   WeatherInput,
 } from './schemas';
 import { GetStopContentInput, NextStopInput, SkipStopInput, StartTourInput, TourStatusInput } from './tour';
+import { GapSuggestionsInput, NowBriefInput, PlanDayInput, ReportLateInput } from './nowTools';
 
 export * from './schemas';
 export * from './tour';
+export * from './nowTools';
+export * from './routeDetail';
 
 type ToolDef = { description: string; input: z.ZodObject };
 
@@ -132,6 +138,16 @@ export const toolDefs = {
     description: 'Elige una de las opciones de un lugar del día (blocks.choice_group): confirma esa y manda las otras al banco de ideas.',
     input: ChooseOptionInput,
   },
+  tour_interview: {
+    description:
+      'Planificador de tours, paso 1 (como trip_brief): lee lo que contó la persona + perfiles + lugares cerca y devuelve lo que entendió y 0-4 preguntas (rondas 1-4, con repreguntas). Síncrona.',
+    input: TourInterviewInput,
+  },
+  tour_variants: {
+    description:
+      'Planificador de tours, paso 2 (como trip_shapes): 2-3 recorridos posibles con paradas reales, minutos, km y pros/contras. La elegida va a generate_tour (variant_stops). Síncrona.',
+    input: TourVariantsInput,
+  },
   tour_brief: {
     description:
       'Antes de generate_tour: mira el contexto del grupo (perfiles, viaje, clima, hora, zona) y devuelve un resumen + 0-3 preguntas que cambian el tour. Cada pregunta tiene como id el campo de generate_tour que completa.',
@@ -141,6 +157,11 @@ export const toolDefs = {
     description:
       'Arma un tour con paradas verificadas (planificado, espontáneo o explorador). Trabajo en segundo plano: devuelve { job_id, tour_id } y el progreso (y las paradas) se ven por Realtime en agent_jobs / tour_stops.',
     input: GenerateTourInput,
+  },
+  generate_indoor_tour: {
+    description:
+      'Arma un tour POR DENTRO de un lugar (museo, mercado, iglesia, palacio): 4-7 puntos (obras, salas, objetos) con datos verificados. Como adentro el GPS no sirve, la llegada a cada punto la marca la persona (voz, botón o foto). Trabajo en segundo plano: devuelve { job_id, tour_id }.',
+    input: GenerateIndoorTourInput,
   },
   weather: {
     description: 'Pronóstico diario y horario (Open-Meteo) para un punto y rango de fechas.',
@@ -185,9 +206,32 @@ export const toolDefs = {
     description: 'Saltea una parada del tour (p. ej. si la persona acepta recortar por tiempo).',
     input: SkipStopInput,
   },
+  // Ahora v2 (docs/AHORA-V2.md). now_brief y gap_suggestions son solo de la app (APP_ONLY_TOOLS).
+  now_brief: {
+    description: 'Una frase de Scout para la vista Ahora a partir de una foto del momento. Lectura, sin feed.',
+    input: NowBriefInput,
+  },
+  gap_suggestions: {
+    description: 'Hasta 3 ideas para un hueco libre: del banco de ideas del tramo, lugares abiertos cerca y eventos de hoy.',
+    input: GapSuggestionsInput,
+  },
+  report_late: {
+    description:
+      'Avisa al grupo que la persona llega tarde a un bloque (activity_feed running_late). No mueve nada; se puede deshacer.',
+    input: ReportLateInput,
+  },
+  plan_day: {
+    description:
+      'Scout arma bloques para un hueco del día (desde from_time hasta to_time) con el banco de ideas y lugares cerca. Siempre queda como UNA propuesta para aceptar; nunca aplica solo.',
+    input: PlanDayInput,
+  },
 } as const satisfies Record<string, ToolDef>;
 
 export type ToolName = keyof typeof toolDefs;
+/** Herramientas que solo usa la app (la voz y los agentes no las ven). */
+// tour_interview / tour_variants: el tour detallado es una pantalla (preguntas con opciones y texto libre); la voz la abre
+// con open_tour_planner (herramienta del celu) en vez de entrevistar hablando.
+export const APP_ONLY_TOOLS: readonly ToolName[] = ['now_brief', 'gap_suggestions', 'tour_interview', 'tour_variants'];
 export const TOOL_NAMES = Object.keys(toolDefs) as ToolName[];
 export type ToolInput<N extends ToolName> = z.infer<(typeof toolDefs)[N]['input']>;
 

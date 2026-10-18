@@ -3,9 +3,10 @@
 // la lista del día como sendero (MapTimeline). Tocar cualquier elemento → tarjeta compacta con el Scout
 // ("Hablar") → useScout().startScoutCall({ focus }). Un solo Scout a la vista: el flotante se esconde.
 // ▶ "Ver el día": el Scout camina de parada en parada contando un gancho de cada una (guion en model.previewSteps).
+// Bloques y paradas: además "Cómo llego" (ruta embebida, features/route) en la tarjeta del elegido.
 // Sin EXPO_PUBLIC_MAPBOX_TOKEN no se monta Mapbox: aviso + la misma lista de puntos (todo lo demás funciona igual).
 import { SCOUT } from '@build101/shared';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,6 +36,8 @@ import { localParts, resolveToday, tzOffsetMin } from '../../../../features/now/
 import { openBlock } from '../../../../features/plan/nav';
 import { useMe, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import { shortDay } from '../../../../features/plan/selectors';
+import { mapPointTarget } from '../../../../features/route/model';
+import { openRoute } from '../../../../features/route/nav';
 import { useTripId } from '../../../../features/trips/TripContext';
 import { errorDetail } from '../../../../features/trips/queries';
 import { env } from '../../../../lib/env';
@@ -218,6 +221,9 @@ export default function MapTab() {
   const canPlay = HAS_TOKEN && steps.length > 0;
   const step = preview ? preview.steps[preview.index] : null;
 
+  // "Cómo llego" al pin elegido (bloque o parada de tour; un tramo es una ciudad entera, no).
+  const selectedTarget = selected ? mapPointTarget(selected) : null;
+
   const select = (p: MapPoint) => {
     setSelected(p);
     // La tarjeta vive en la hoja chica: solo bajarla si estaba casi completa (que el punto quede a la vista).
@@ -323,6 +329,7 @@ export default function MapTab() {
                 scoutState={scout.state}
                 onTalk={() => talkAbout(selected)}
                 onClose={() => setSelected(null)}
+                onRoute={selectedTarget ? () => openRoute(router, tripId, selectedTarget) : undefined}
                 onOpen={
                   selected.kind === 'block' && selected.blockId
                     ? { label: 'Ver en el plan', run: () => openBlock(tripId, selected.blockId!) }
@@ -405,6 +412,7 @@ function SelectedCard({
   onTalk,
   onClose,
   onOpen,
+  onRoute,
 }: {
   point: MapPoint;
   minutes: number | null;
@@ -413,6 +421,8 @@ function SelectedCard({
   onTalk: () => void;
   onClose: () => void;
   onOpen: { label: string; run: () => void } | null;
+  /** "Cómo llego": ruta embebida hasta acá (features/route). */
+  onRoute?: () => void;
 }) {
   // Sin repetir: el lugar solo si no está ya en el título ("Visita guiada al Teatro Solís" · "Teatro Solís").
   const meta =
@@ -436,6 +446,11 @@ function SelectedCard({
           {onOpen ? (
             <Pressable onPress={onOpen.run} accessibilityRole="link" hitSlop={8}>
               <Text style={styles.link}>{onOpen.label} ›</Text>
+            </Pressable>
+          ) : null}
+          {onRoute ? (
+            <Pressable onPress={onRoute} accessibilityRole="link" accessibilityHint="Ver la ruta hasta acá" hitSlop={8}>
+              <Text style={styles.link}>Cómo llego ›</Text>
             </Pressable>
           ) : null}
         </View>

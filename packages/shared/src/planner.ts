@@ -142,28 +142,75 @@ export function optionIncluded(o: Pick<LegOptionRow, 'preselected'>, reactions: 
 
 // ───────────────────────── Entrevista (trip_brief)
 
-export const TRIP_QUESTION_IDS = [
+/**
+ * Dimensiones que la entrevista necesita conocer (v2: entrevista adaptativa en rondas). Cada pregunta cubre una;
+ * `coverage` dice cuáles ya se saben. Las preguntas las genera el LLM (no hay lista fija): el id es libre.
+ */
+export const TRIP_DIMENSIONS = [
+  'anchor', // el motivo del viaje: evento, partido, casamiento, recital (fecha/sede/entradas)
   'dates',
   'duration',
-  'travelers',
+  'travelers', // cuántos, quiénes, si alguien se separa o llega después
+  'origin', // desde dónde salen (vuelos, jet lag)
   'arrival',
   'departure',
   'lodging',
   'budget',
   'pace',
-  'first_time',
+  'first_time', // primera vez o repetidores (pesa lo canónico vs lo menos conocido)
+  'interests',
+  'extras', // lo que no es el ancla: escapadas, naturaleza, playas, noche
+  'transport', // vuelos internos, auto, campervan, tren
+  'food',
   'kids',
   'mobility',
-  'interests',
   'must',
   'avoid',
-  'split',
   'other',
 ] as const;
-export type TripQuestionId = (typeof TRIP_QUESTION_IDS)[number];
+export type TripDimension = (typeof TRIP_DIMENSIONS)[number];
+/** @deprecated v1: usá TripDimension. */
+export const TRIP_QUESTION_IDS = TRIP_DIMENSIONS;
+/** @deprecated v1: usá TripDimension. */
+export type TripQuestionId = TripDimension;
+
+export const TRIP_KINDS = ['event', 'city', 'road_trip', 'beach', 'nature', 'family', 'couple', 'backpacking', 'mixed'] as const;
+/** Tipo de viaje: cambia qué se pregunta y cómo se arman los días. */
+export type TripKind = (typeof TRIP_KINDS)[number];
+
+export const ANCHOR_KINDS = ['sports', 'concert', 'festival', 'wedding', 'conference', 'other'] as const;
+export type AnchorKind = (typeof ANCHOR_KINDS)[number];
+
+/**
+ * Ancla del viaje: algo con fecha/lugar que manda sobre todo lo demás (un partido, la final, un recital, un casamiento).
+ * En la entrevista sale de lo que dijo el usuario (`researched:false`); trip_shapes investiga el fixture real con web
+ * search y las devuelve con fecha, sede, hora y fuentes (`researched:true`). Van como bloques fijos en su día.
+ */
+export type TripAnchor = {
+  id: string;
+  /** "Argentina vs Nueva Zelanda (fase de grupos)", "Final del Mundial de Rugby 2027". */
+  name: string;
+  kind: AnchorKind;
+  city: string | null;
+  country: string | null;
+  date: string | null;
+  /** HH:MM local, si se sabe. */
+  time: string | null;
+  venue: string | null;
+  /** have = ya tienen entradas · want = quieren conseguir · watch_out = lo ven afuera (fan zone, bar) · unknown. */
+  tickets: 'have' | 'want' | 'watch_out' | 'unknown';
+  /** true si la fecha/sede salen de una fuente (no de la memoria del modelo). */
+  researched: boolean;
+  sources: CatalogSource[];
+  /** Una oración: por qué importa o qué ojo tener ("la venta oficial abre…", "a confirmar cuando salga el cruce"). */
+  note: string | null;
+};
 
 export type TripQuestion = {
-  id: TripQuestionId;
+  /** Id libre y estable dentro de la entrevista ("team", "phase", "tickets"). Las respuestas se guardan por id. */
+  id: string;
+  /** Qué dimensión completa (para coverage y para no volver a preguntar). */
+  dimension: TripDimension;
   /** Pregunta en voseo, lista para leer o decir. */
   text: string;
   /** Por qué se pregunta (chiquito en la UI). */
@@ -197,6 +244,11 @@ export type TripUnderstanding = {
   departure: string | null;
   lodging_booked: string | null;
   notes: string[];
+  /** v2: tipo de viaje y anclas (eventos con fecha que mandan). */
+  trip_kind?: TripKind | null;
+  anchors?: TripAnchor[];
+  /** v2: ciudad/país de salida ("Buenos Aires"). */
+  origin?: string | null;
 };
 
 /** data de trip_brief. */
@@ -206,10 +258,16 @@ export type TripBriefResult = {
   understood: TripUnderstanding;
   /** Bullets para "Lo que tengo en cuenta" (perfiles del grupo, temporada, eventos, clima). */
   context: string[];
-  /** Ordenadas por importancia (máx. 4). */
+  /** Ordenadas por importancia (máx. 4 por ronda). */
   questions: TripQuestion[];
   /** true = hay lo mínimo para armar (al menos un destino). */
   ready: boolean;
+  /** Ronda actual (1-4). */
+  round?: number;
+  /** v2: true = ya sé lo suficiente; la app pasa a las formas del viaje (aunque queden opcionales). */
+  done?: boolean;
+  /** v2: qué se sabe de cada dimensión (known = lo dijo · assumed = lo supuse · unknown = falta). */
+  coverage?: Partial<Record<TripDimension, 'known' | 'assumed' | 'unknown'>>;
 };
 
 // ───────────────────────── Formas del viaje (trip_shapes)
@@ -250,6 +308,8 @@ export type TripShape = {
   legs: TripShapeLeg[];
   transfers: TripShapeTransfer[];
   assumptions: string[];
+  /** v2: anclas investigadas (fixture real con fuentes) en las que se apoya esta forma. */
+  anchors?: TripAnchor[];
 };
 
 /** data de trip_shapes. */

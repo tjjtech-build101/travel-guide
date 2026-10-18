@@ -12,6 +12,9 @@
 //  - Permanencia: dwell a los 90 s (ofrecer `more`) y a los 240 s (ofrecer `secret`) dentro del radio.
 //  - Silencio inteligente: ≥ 90 s entre eventos proactivos (arrived_stop no espera, pero cuenta); nada si va a
 //    > 2,5 m/s por más de 20 s (va en un vehículo). Lo que no se puede decir se difiere (se reevalúa después).
+//  - Tour interno (positioning 'manual': museo, mercado): el GPS no sirve adentro, así que las muestras no generan
+//    llegadas ni desvíos. La llegada la marca la persona (voz, botón o foto) con engineArrive y el "sigo" con
+//    engineLeave; permanencia, reloj y fin funcionan igual.
 import { distanceMeters } from './location';
 import type { TourProgress } from './tools/tour';
 
@@ -55,6 +58,8 @@ export type EngineTour = {
   participants: string[];
   /** Polilínea de la ruta (tours.route) si existe; si no, segmentos rectos entre paradas. */
   route?: LatLng[] | null;
+  /** 'manual' = tour interno: llegadas a mano (engineArrive), sin geofence ni desvíos. Default 'gps'. */
+  positioning?: 'gps' | 'manual';
 };
 
 export type EngineFix = { t: number; lat: number; lng: number; speed?: number | null; accuracy?: number | null };
@@ -97,6 +102,8 @@ export type ArrivedStopPayload = {
   remaining_min: number;
   pending_stops: number;
   participants: string[];
+  /** true = la marcó la persona (tour interno: "llegué", botón o foto), no el GPS. */
+  manual?: boolean;
 };
 export type LeftRoutePayload = {
   distance_m: number;
@@ -312,6 +319,41 @@ function layersOf(s: EngineState, stopId: string): string[] {
   return [...(s.told[stopId] ?? [])];
 }
 
+/** Marca la llegada a `stop` (s ya clonado, insideStopId ya puesto) y agrega arrived_stop. */
+function arriveAt(tour: EngineTour, s: EngineState, stop: EngineStop, t: number, events: TourEngineEvent[], manual: boolean) {
+  const firstPending = pendingEngineStops(tour, s)[0];
+  const orderChanged = !!firstPending && firstPending.stop_id !== stop.stop_id && !s.visited[stop.stop_id];
+  const told = layersOf(s, stop.stop_id);
+  s.visited[stop.stop_id] = s.visited[stop.stop_id]
+    ? { ...s.visited[stop.stop_id], leftAt: null, layersTold: told }
+    : { arrivedAt: t, leftAt: null, layersTold: told };
+  s.lastArrivalAt[stop.stop_id] = t;
+  s.dwellFired[stop.stop_id] = [];
+  s.currentStopId = stop.stop_id;
+  s.status = 'active';
+  s.offRouteSince = null;
+  if (s.leftRouteFired) {
+    s.leftRouteFired = false;
+    events.push({ type: 'back_on_route' });
+  }
+  s.lastProactiveAt = t;
+  events.push({
+    type: 'arrived_stop',
+    payload: {
+      stop_id: stop.stop_id,
+      place_id: stop.place_id,
+      name: stop.name,
+      sort_order: stop.sort_order,
+      order_changed: orderChanged,
+      layers_told: told,
+      remaining_min: remainingMinutes(s, t),
+      pending_stops: pendingEngineStops(tour, s).length,
+      participants: tour.participants,
+      ...(manual ? { manual: true } : {}),
+    },
+  });
+}
+
 /** Nueva muestra de ubicación. */
 export function engineOnFix(tour: EngineTour, prev: EngineState, fix: EngineFix): EngineResult {
   const s = clone(prev);
@@ -321,6 +363,7 @@ export function engineOnFix(tour: EngineTour, prev: EngineState, fix: EngineFix)
     return { state: s, events };
   }
   const t = fix.t;
+  const manual = tour.positioning === 'manual';
 
   // 1) Velocidad (vehículo): la del fix o la derivada de la muestra anterior.
   let speed = fix.speed ?? null;
@@ -330,8 +373,8 @@ export function engineOnFix(tour: EngineTour, prev: EngineState, fix: EngineFix)
   if (speed != null && speed > TOUR_ENGINE.VEHICLE_SPEED_MPS) s.fastSince = s.fastSince ?? t;
   else s.fastSince = null;
 
-  // 2) Salida de la parada (histéresis).
-  if (s.insideStopId) {
+  // 2) Salida de la parada (histéresis). En el tour interno, entrar y salir lo marca la persona.
+  if (s.insideStopId && !manual) {
     const st = tour.stops.find((x) => x.stop_id === s.insideStopId);
     if (!st || distanceMeters(fix, st) > st.radius_m + TOUR_ENGINE.EXIT_MARGIN_M) {
       const id = s.insideStopId;
@@ -342,7 +385,7 @@ export function engineOnFix(tour: EngineTour, prev: EngineState, fix: EngineFix)
   }
 
   // 3) Llegada: la parada no salteada más cercana dentro de su radio.
-  if (!s.insideStopId && !inVehicle(s, t)) {
+  if (!s.insideStopId && !inVehicle(s, t) && !manual) {
     let hit: EngineStop | null = null;
     let hitD = Infinity;
     for (const st of tour.stops) {
@@ -360,43 +403,12 @@ export function engineOnFix(tour: EngineTour, prev: EngineState, fix: EngineFix)
       // Pasar de nuevo por una parada ya contada camino a otra no la vuelve a narrar.
       const revisit = !!s.visited[hit.stop_id];
       const canRearrive = !revisit || (s.currentStopId === hit.stop_id && last != null && t - last >= TOUR_ENGINE.REARRIVE_MS);
-      if (canRearrive && (last == null || t - last >= TOUR_ENGINE.REARRIVE_MS)) {
-        const firstPending = pendingEngineStops(tour, s)[0];
-        const orderChanged = !!firstPending && firstPending.stop_id !== hit.stop_id && !s.visited[hit.stop_id];
-        const told = layersOf(s, hit.stop_id);
-        s.visited[hit.stop_id] = s.visited[hit.stop_id]
-          ? { ...s.visited[hit.stop_id], leftAt: null, layersTold: told }
-          : { arrivedAt: t, leftAt: null, layersTold: told };
-        s.lastArrivalAt[hit.stop_id] = t;
-        s.dwellFired[hit.stop_id] = [];
-        s.currentStopId = hit.stop_id;
-        s.status = 'active';
-        s.offRouteSince = null;
-        if (s.leftRouteFired) {
-          s.leftRouteFired = false;
-          events.push({ type: 'back_on_route' });
-        }
-        s.lastProactiveAt = t;
-        events.push({
-          type: 'arrived_stop',
-          payload: {
-            stop_id: hit.stop_id,
-            place_id: hit.place_id,
-            name: hit.name,
-            sort_order: hit.sort_order,
-            order_changed: orderChanged,
-            layers_told: told,
-            remaining_min: remainingMinutes(s, t),
-            pending_stops: pendingEngineStops(tour, s).length,
-            participants: tour.participants,
-          },
-        });
-      }
+      if (canRearrive && (last == null || t - last >= TOUR_ENGINE.REARRIVE_MS)) arriveAt(tour, s, hit, t, events, false);
     }
   }
 
   // 4) Desvío (no mientras espera en el punto de inicio).
-  if (s.status === 'active' || s.status === 'off_route') {
+  if ((s.status === 'active' || s.status === 'off_route') && !manual) {
     const d = distanceToPolylineM(fix, routeLine(tour, s));
     if (d > TOUR_ENGINE.OFF_ROUTE_M) {
       s.offRouteSince = s.offRouteSince ?? t;
@@ -505,6 +517,37 @@ function timeChecks(tour: EngineTour, s: EngineState, t: number): EngineResult {
     events.push({ type: 'tour_done' });
   }
   return { state: s, events };
+}
+
+/**
+ * Llegada a mano (tour interno: "llegué", botón "Llegué" o una foto que reconoce el punto). Si ya está en esa parada no
+ * hace nada; si estaba en otra, primero sale de ella. Una parada salteada que la persona marca vuelve a contar.
+ */
+export function engineArrive(tour: EngineTour, prev: EngineState, stopId: string, t: number): EngineResult {
+  const stop = tour.stops.find((x) => x.stop_id === stopId);
+  if (!stop || prev.status === 'done' || prev.insideStopId === stopId) return { state: prev, events: [] };
+  const s = clone(prev);
+  const events: TourEngineEvent[] = [];
+  if (s.insideStopId) {
+    const id = s.insideStopId;
+    if (s.visited[id]) s.visited[id].leftAt = t;
+    events.push({ type: 'left_stop', stop_id: id });
+  }
+  s.skipped = s.skipped.filter((id) => id !== stopId);
+  s.insideStopId = stopId;
+  arriveAt(tour, s, stop, t, events, true);
+  return { state: s, events };
+}
+
+/** "Sigo" en el tour interno: sale de la parada actual (y si era la última, termina). */
+export function engineLeave(tour: EngineTour, prev: EngineState, t: number): EngineResult {
+  if (!prev.insideStopId || prev.status === 'done') return { state: prev, events: [] };
+  const s = clone(prev);
+  const id = s.insideStopId!;
+  s.insideStopId = null;
+  if (s.visited[id]) s.visited[id].leftAt = t;
+  const timed = timeChecks(tour, s, t);
+  return { state: timed.state, events: [{ type: 'left_stop', stop_id: id }, ...timed.events] };
 }
 
 /** Saltear una parada (botón o skip_stop aceptado por voz). */

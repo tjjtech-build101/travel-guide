@@ -75,6 +75,15 @@ export class SimulatedLocationProvider implements LocationProvider, SimulatedCon
     this.emitState();
   }
 
+  /**
+   * Modo demo (Ahora v2, `?loc=near`): se queda quieto en un punto arbitrario (track de 2 puntos iguales, en pausa).
+   * Reemite cada 1 s como cuando estás quieto. Cargar otro track lo reemplaza.
+   */
+  placeAt(lat: number, lng: number, label = 'Punto fijo (demo)'): void {
+    const p = { lat, lng, heading: null, accuracy: 5 };
+    this.load([{ t: 0, ...p }, { t: 1, ...p }], label);
+  }
+
   /** Descarga el track (vuelve al estado vacío: no emite nada). */
   unload(): void {
     this.cursor = null;

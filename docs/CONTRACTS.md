@@ -288,10 +288,103 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - Reglas: `leave_now` a ≤ 10 y ≤ 5 min de tener que salir; `running_late` si la llegada estimada supera el inicio por > 5 min; `starting_soon` si empieza en ≤ 15 min y ya estás a ≤ 150 m. Un aviso por bloque y por (tipo, umbral) — la clave incluye la hora de inicio, así un bloque movido se rearma. Solo el próximo bloque con hora fija (`time_flex='fixed'`) y lugar; nada durante un tour activo (manda `time_warning`), en `profiles.quiet_hours` ni para bloques a > 30 km.
 - Instrucciones del scout (`apps/api/src/voice/instructions.ts`, `SCHEDULE_ALERT_RULE`, aditiva en chat y tour): una frase con el número exacto, ofrecer indicaciones a pie ("¿te llevo?"); en `running_late`, ofrecer avisar al grupo o mover el bloque sin aplicar nada solo.
 - Entrega en el celu (`apps/mobile/src/schedule`): con llamada abierta → `voice.injectEvent('schedule_alert', payload)` (espera 3 s de silencio si la persona habla); sin llamada → notificación **local** de `expo-notifications` (`trigger: null`, sin servidor de push, no pasa por la tabla `notifications`), `data.url` = `/trip/<id>/now`. Sin cambios de esquema.
+
+---
+
+## Cambios Ahora v2 — en código
+
+Diseño en `docs/AHORA-V2.md`. Zod en `packages/shared/src/tools/nowTools.ts`, registradas en `toolDefs`. Una migración,
+solo de RLS (`20261017000010_member_locations_privacy.sql`, ver abajo). `activity_feed.kind` no tiene CHECK (el valor
+nuevo `running_late` ya está en `FEED_KINDS`) y la RLS de privados (`20261017000007_feed_private.sql`) cubre el aviso.
+
+- **RLS de `member_locations`** (`20261017000010_member_locations_privacy.sql`, función `security definer`
+  `member_location_visible(trip_id, user_id)`):
+  - select (`member_locations_select`): siendo miembro del viaje, mi fila siempre; la de otro solo si
+    `updated_at > now() - 15 min`, el viaje no está `finished`, su dueño tiene `location_sharing <> 'never'`, no está en
+    modo fantasma (`ghost_until` nulo o vencido) y, si el que mira es seguidor, el dueño tiene
+    `share_location_with_followers`.
+  - delete (`member_locations_delete`): solo la propia fila. insert/update siguen siendo solo la propia.
+  - `'shared_only'` (default) vs `'always'`: para el server valen igual. Que `'shared_only'` publique solo durante un
+    bloque compartido en curso o un tour lo decide la app (`useShareMyLocation`), que además borra su fila al dejar de
+    compartir, al desmontarse y al pasar a segundo plano; si la app muere sin borrarla, la RLS la esconde a los 15 min.
+
+- `APP_ONLY_TOOLS = ['now_brief', 'gap_suggestions']` (`packages/shared/src/tools/index.ts`): la voz no las ve
+  (`VOICE_HIDDEN_TOOLS`). `report_late` y `plan_day` sí están en la voz y en `toClaudeTools`.
+- **`now_brief`** (lectura, sin feed) `{trip_id, language='es', snapshot}` → `{text, source: 'llm' | 'rules'}`.
+  Claude `BRIEF_MODEL` (env, default `claude-haiku-5-5`), sin thinking, `max_tokens` 120, sin reintentos, timeout 4 s,
+  persona de `SCOUT`. Caché en memoria 10 min por hash de `(language, snapshot)`. La frase se descarta (→ reglas) si
+  está vacía, pasa de 110 caracteres o trae un número que no está en el snapshot. Cualquier error (sin key, sin saldo,
+  timeout) → `nowBriefRules(snapshot)` y 2 min de enfriamiento (responde reglas sin volver a llamar). 403 si no sos
+  miembro. `nowBriefRules` / `clampBrief` / `NOW_BRIEF_MAX` en `packages/shared/src/nowBrief.ts`.
+- **`gap_suggestions`** (lectura) `{trip_id, leg_id, lat, lng, minutes, date, local_time, limit≤3}` → `{items: GapSuggestion[]}`.
+  Solo reglas, sin Claude. Fuentes: banco de ideas del tramo (`blocks.day_id is null`, sin privados ajenos, con coords,
+  plan `main`), lugares abiertos ahora (Google Places `searchNearby`, filtrado a tipos de ocio; solo si hay
+  `GOOGLE_MAPS_API_KEY`, sin fallback OSM; corte a 3 s) y eventos de hoy **solo desde la caché** de `events_search`
+  (no dispara Claude; corte a 1,5 s). Caminata máx. = `minutes/3` (entre 5 y 25 min), `walk_min` con `walkEstimateMin`.
+  Ranking: ideas > lugares (rating suma) > eventos, menos caminata primero; primero el mejor de cada fuente, después
+  el resto. `why`: "De tu banco de ideas · 4 min a pie" / "Abierto ahora · 6 min a pie · ★ 4.6" / "Hoy a las 19:00 · Sala".
+  `id`: el `block_id` (idea), `place:{google_place_id}` o `event:{url}`.
+- **`report_late`** (escritura) `{trip_id, block_id, late_by_min, note?}` → `data {feed_id, summary}` + `undo_token`.
+  `activity_feed` kind `running_late`, payload `{summary, block_id, day_id, late_by_min, note?, inverse: []}`. Summary con
+  el nombre de la persona aunque lo mande Scout (`"Juan llega 10 min tarde a Almuerzo"`; `actor_agent` sí refleja
+  x-actor). Un aviso por persona y bloque: uno nuevo borra el anterior. Bloque privado → `payload.private: true`;
+  privado ajeno o seguidor → 403. **Deshacer** (`undo`) borra la fila `running_late` y deja la fila `undo` de siempre.
+- **`plan_day`** (propone) `{trip_id, day_id, from_time, to_time?, lat?, lng?, reason?}` →
+  `data {mode: 'proposed', proposal_id, summary, count, blocks: [{title, start_time, end_time, from_idea}]}` + `undo_token`
+  (el de `proposal_created`). Hueco: `[from_time, to_time)`; sin `to_time`, hasta el próximo bloque con hora o 22:00
+  (mín. 30 min, si no 400). Una llamada a Claude (`claude-opus-5-5`, effort `low` — env `PLAN_DAY_EFFORT` —, salida
+  estructurada, timeout 45 s) con lo ocupado (todo bloque privado, propio o ajeno, como "Ocupado"), el banco de ideas **sin privados** (la propuesta
+  y su `proposal_created` los ve todo el viaje) y hasta 10 lugares
+  abiertos cerca. Saneo por reglas: horas dentro del hueco, sin superposición, ids/refs que existan, máx. 6.
+  Crea **una** `agent_proposals` (`by_agent: true`) siempre, también con `x-actor: user`: ideas del banco como op
+  `move` (patch `{day_id, start_time, end_time, duration_min, status: 'confirmed'}`, no se duplican) y lo nuevo como
+  op `add` (participantes = miembros del tramo, `created_by_agent: true`). Permisos = los de proponer en el tramo.
+  Sin `ANTHROPIC_API_KEY` o si Claude falla → 503 `{code: 'scout_unavailable', message: 'Scout no está disponible ahora.'}`;
+  si no queda nada válido → 422 `empty_plan`.
+
+## Cambios PRD 08, research y traslados — en código
+
 - PRD 08: `look_at_photo` acepta `image_base64` (además de `storage_path`), devuelve `LookAtPhotoOutput` (+ `photo_id`, `storage_path`, `timings`); la voz ve la versión del celu `look_at_photo { question? }` y el resultado entra como `[EVENTO:photo_result]`. Env `VISION_MODEL` (default Opus 5.5; prod: `claude-sonnet-5-5`).
 - Herramienta nueva `research { question, place_id?, place_name?, lat?, lng?, trip_id?, language? }` → `{ job_id }` (job `research`, resultado `ResearchResult`: `answer` armada solo con facts verificados en paralelo, `facts`, `rejected`, `place_id`, `saved_facts`). Si es sobre un lugar de `place_library`, los facts verificados se suman a `facts` (dedupe por texto). Eventos `[EVENTO:research_ready] {question, answer, facts}` / `[EVENTO:research_failed] {question, error}`.
 - Memoria de lugares (`apps/api/src/places/library.ts`): `place_library.facts[]` = `{ text, source_url, verified, quote?, verified_at?, origin?: 'research'|'tour'|'camera'|'curated', question? }` (los campos opcionales son nuevos; los viejos no los tienen). Todos los que escriben **suman sin duplicar** (normalizando texto), nunca reemplazan. `research` y la cámara crean el lugar si no existe (`tier='researched'`, coordenadas de `search_places`; con OSM el id va a `osm_id`). `research` puede responder desde la memoria: `{ cached: true, answer, facts, place_id }` sin job.
 - Traslados dentro del día: `blocks.transfer` suma campos opcionales `lines[] {name, vehicle: bus|subway|train|tram|ferry|other, from_stop?, to_stop?, departure?, arrival?, headsign?, stops?}`, `walk_min?`, `summary?`, `maps_url?`, `estimated?` (jsonb, sin migración). `plan_trip` los agrega después de llenar cada tramo (bloques `type='transfer'` entre bloques seguidos si a pie > 20 min; transporte público con Google Routes TRANSIT y la hora real de salida; alerta `late` si no entra en el hueco). Herramienta nueva `plan_transfers { trip_id, leg_id?, day_id? }` → `{ days, added, skipped_existing, estimated }` para viajes ya armados. `route_eta` en modo `transit` con 2 paradas devuelve además `transit { duration_min, walk_min, lines, summary, maps_url }`. Sin `GOOGLE_MAPS_API_KEY`: traslados estimados por distancia, sin líneas.
+
+## Cómo llego embebido (Ahora) — en código
+
+Ruta dentro de la app (mapa + pasos) en vez de mandar a Maps. Tipos en `packages/shared/src/tools/routeDetail.ts`;
+implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDetail`, `estimatedDetail`).
+
+- **`route_eta`** acepta `detail?: boolean`. Con `detail: true` y **exactamente 2 paradas con `lat/lng`** devuelve,
+  además de lo de siempre (`segments`, `total_min`, `estimated?`, `transit?`), `data.detail: RouteDetail`.
+  Sin `detail` (o con > 2 paradas, o con `google_place_id` sin coords) la respuesta es idéntica a antes (la voz y
+  Ahora dependen de eso). Con `detail` se hace **una sola** consulta a Google: `segments`/`total_min` y, en transporte,
+  `transit` (líneas, caminata antes/después) se derivan del detalle. La caché de `routeDetail` redondea origen/destino a
+  4 decimales (~10 m). La app pide el detalle solo del modo elegido y, para los otros modos del selector, `route_eta`
+  sin `detail`; en transporte manda `departure_time` con el reloj del viaje.
+- **`RouteDetail`** `{ mode: walk|transit|car, duration_min, distance_m, polyline: string | null, steps: RouteStepDetail[], estimated: boolean }`.
+  `polyline`: polilínea codificada de Google (precisión 5) de toda la ruta; `null` si es estimada.
+- **`RouteStepDetail`** `{ instruction, maneuver: string | null, distance_m, duration_min, start {lat,lng}, end {lat,lng}, mode?, transit? }`.
+  - A pie / auto: los pasos de navegación de Google tal cual (`instruction` localizada en español, `maneuver` de
+    Google — `DEPART`, `TURN_LEFT`, `STRAIGHT`, `RAMP_RIGHT`… — para el ícono). `duration_min` redondeado (un paso
+    corto puede dar 0).
+  - Transporte: los pasos a pie seguidos se **agrupan** en uno: `"Caminá 4 min hasta la parada Ciudadela"` (o
+    `"… hasta tu destino"` al final), `maneuver: null`, `mode: 'walk'`. Cada tramo en vehículo es un paso
+    `"Tomá el bus 121 hacia Pocitos"` (bus / subte / tren / tranvía / ferry / "la línea"), `mode: 'transit'`
+    (un tramo `TRANSIT` sin nombre de línea igual es vehículo: `line` = "Bus" / "Tren"… y `"Tomá el tren"`),
+    `transit { line, vehicle, from_stop?, to_stop?, departure?, arrival?, headsign?, stops? }` con `departure`/`arrival`
+    en hora local `HH:MM` (de `localizedValues`, como `transitPlan`). Si Google resuelve el transporte caminando
+    (distancia corta), vienen los pasos a pie sin agrupar.
+  - `mode?` (nuevo, opcional por compatibilidad; la API siempre lo manda): cómo se hace ese paso.
+- **Google Routes** `computeRoutes`, `languageCode: 'es'`, field mask `routes.duration, routes.distanceMeters,
+  routes.polyline.encodedPolyline, routes.legs.steps.{navigationInstruction, distanceMeters, staticDuration,
+  startLocation, endLocation, travelMode, transitDetails}`. WALK sin hora; DRIVE con `routingPreference: TRAFFIC_AWARE`
+  y `departureTime` solo si `departure_time` es futuro (si no, Google usa "ahora"); TRANSIT con `departureTime` si viene.
+  Caché en memoria 10 min (`cached()`, clave = request).
+- **Fallback** (sin `GOOGLE_MAPS_API_KEY`, Google falla o no hay ruta): nunca error. `estimated: true`,
+  `polyline: null`, un solo paso en línea recta `"Caminá hacia tu destino"` / `"Manejá hacia…"` / `"Andá hacia…"`
+  con distancia y minutos de `estimateMinutes`. Solo tira 400 por input inválido (parada sin coords ni place id).
+- **Salir de la app** (Apple Maps / Google Maps / Waze, para auto y CarPlay) lo arma el celu con las coordenadas de
+  destino; no pasa por la API.
 
 
 ---
@@ -309,8 +402,8 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 
 ## Cambios PRD 31 (planificador colaborativo) — en código
 
-- **Migración `20261017000010_planner_colaborativo.sql`** (aditiva):
-  - `destination_catalog` (global por ciudad, escribe solo la API): `city_key` único (`"buenos aires|argentina"`), `city`, `country`, `lat`, `lng`, `items jsonb` (`CatalogItem[]`), `lodging_zones jsonb`, `model`, timestamps. Lectura para cualquier autenticado. TTL lógico 30 días.
+- **Migración `20261017000011_planner_colaborativo.sql`** (aditiva):
+  - `destination_catalog` (global por ciudad, escribe solo la API): `city_key` único (`"buenos aires|argentina"`), `city`, `country`, `lat`, `lng`, `items jsonb` (`CatalogItem[]`), `lodging_zones jsonb`, `model` (`claude-opus-5-5` = completo; `claude-opus-5-5+first-pass` = guardado tras la primera pasada, la revisión del crítico la completa en segundo plano), timestamps. Lectura para cualquier autenticado. TTL lógico 30 días.
   - `leg_options` (menú del tramo): `trip_id`, `leg_id`, `item jsonb` (`CatalogItem`), `section` ∈ `must|for_you|gems|food|day_trips|events`, `score`, `for_user_ids uuid[]`, `reason`, `preselected`, `sort_order`. Cae en cascada con el tramo.
   - `leg_option_reactions`: PK `(option_id, user_id)`, `trip_id`, `reaction` ∈ `love|no|must`. Escribe solo la API (`react_option`).
   - `blocks.choice_group uuid` (nullable): bloques con el mismo valor son opciones de un mismo lugar del día ("elegí 1 de N", status `proposed`; alojamiento `idea`). `blocks_visible` suma la columna al final.
@@ -319,6 +412,27 @@ profiles.budget_level in ('low','mid','high','no_limit')                       -
 - **`plan_trip`** acepta `skeleton` (`TripShapeSkeleton`, la forma elegida en `trip_shapes`: salta el LLM del esqueleto) y `mode` (`auto` default | `menu`). Con `menu` arma tramos + días + traslados + `leg_options` y termina con `result.stage='menu'`; con `auto` además arma los días desde el catálogo (`stage='planned'`). `PlanTripResult` suma `stage`, `options`, `choices`, `coverage`.
 - **Herramientas nuevas**: `trip_brief` (síncrona: lo que entendí + 0-4 preguntas; precalienta el catálogo), `trip_shapes` (síncrona: 2-3 formas del viaje), `react_option` (`{option_id, reaction|null}`), `compose_days` (job `kind='compose_days'`, `{trip_id, leg_ids?, instruction?}` → `{job_id, trip_id}`), `choose_option` (`{block_id}`: confirma esa opción y manda las otras al banco de ideas, con `undo_token`).
 - **`activity_feed.kind`** nuevos: `days_composed` (deshace todo lo armado por `compose_days`), `option_chosen`.
+
+## Cambios tour interno (museo / mercado por dentro) — en código
+
+- **Herramienta nueva `generate_indoor_tour`** `{venue_name, lat?, lng?, trip_id?, duration_min=45 (15-120), language='es', notes?}` → `{job_id, tour_id}`. Job `kind='generate_tour'` con el mismo `GenerateTourResult` (la app y la voz lo esperan igual: `[EVENTO:tour_ready]`). Investiga 4-7 puntos de adentro con web_search/web_fetch, verifica cada dato (la cita tiene que estar en la página; si no se puede bajar, web_fetch de Claude; después el juez) y escribe narraciones solo con lo verificado.
+- **`tours.route` (jsonb, sin migración)** suma `positioning: 'gps' | 'manual'`, `indoor: boolean`, `venue: {name, lat, lng, place_id}`. `isManualTour(route)` en `packages/shared`. `tours.mode` queda `spontaneous`.
+- **Paradas**: un `place_library` por punto (tier `researched`, con las coordenadas del lugar), `tour_stops.look_at` = "dónde está. qué mirar", `nav_to_next` = cómo llegar adentro.
+- **Motor** (`tourEngine`): `EngineTour.positioning`; con `'manual'` las muestras de GPS no generan llegadas, salidas ni desvíos. `engineArrive(tour, state, stop_id, t)` (llegada a mano) y `engineLeave(tour, state, t)` ("sigo"). `ArrivedStopPayload.manual?: true`.
+- **Herramienta del celu `at_stop`** `{stop_id?, name?}` (en `VOICE_CLIENT_TOOLS`): "llegué / estoy frente a X" → marca la llegada en el motor y devuelve la parada. `next_stop` en un tour interno además sale de la parada actual.
+- **`look_at_photo`** con `tour_id` de un tour interno: compara contra las paradas del tour (no lo cercano por GPS) y devuelve `tour_stop: {stop_id, name} | null`; el celu marca la llegada y `[EVENTO:photo_result]` lleva `tour_stop`. En tour interno no crea lugares nuevos desde la cámara.
+- **Reglas de voz**: `INDOOR_TOUR_RULES` (se suman a `TOUR_RULES` si el tour es manual; también en `tour_started`). Llegada marcada por la persona → narra directo, sin "¿te cuento?".
+
+---
+
+## Cambios tour director · investigación profunda (fase 2) — en código
+
+- Apenas `generate_tour` deja el tour `ready`, cada parada se investiga a fondo en **su propia invocación** (`POST /internal/enrich-stop {stop_id}`, token HMAC `x-internal-token` con la service key; solo lo llama la propia API). `start_tour` lo lanza una vez para tours que no pasaron por esto (marca `tours.brief.deep_research_at`), solo en paradas con < 15 facts verificados.
+- Investigación profunda (`apps/api/src/agents/tourDeepResearch.ts`): Wikipedia es + en completas en tramos, 3 búsquedas web por ángulo (historia/personajes · arquitectura/arte/detalles · curiosidades/mitos/presente), citas chequeadas en código, juez en lotes. Todo se suma a `place_library.facts` (`appendFacts`). En paradas no curadas, las capas se reescriben largas (short 120-180, more 300-450, secret 150-250 palabras) y `sources` suma las nuevas fuentes.
+- `get_stop_content` suma `layers_left` (capas con contenido que la persona no escuchó) y `facts` (dossier del lugar: hasta 80 datos verificados). Aditivo.
+- Capas de la generación inicial más largas (short 90-140, more 200-320, secret 100-180). Tour interno: short 90-150, more 120-250, hasta 6 datos por punto.
+- Voz (`TOUR_RULES`): cada capa se cuenta entera; al terminar se ofrece la siguiente (`layers_left`) y después se sigue con `facts`; las preguntas del lugar se responden primero con `facts`. `research` responde hasta ~130 palabras con hasta 8 datos.
+- Env de la API: `TOUR_DEEP_RESEARCH` (default `true`; `false` la apaga), `API_PUBLIC_URL` (opcional; si no, `VERCEL_PROJECT_PRODUCTION_URL` en producción o `VERCEL_URL`).
 
 ## Cambios PRD 11 (decidir propuestas) — en código
 
@@ -332,6 +446,28 @@ Sin migración: usa `agent_proposals` tal cual. Lo que falta del PRD 11 es el mo
 - **`activity_feed.kind`** nuevos: `proposal_accepted` (deshacible: `payload.inverse` revierte todo; `payload.block_ids`), `proposal_rejected`, `proposal_expired`. La app invalida `blocks` y `agent_proposals` con cualquier `proposal_*`; si decidió otra persona y hay llamada abierta sobre el viaje, manda `[EVENTO:proposal_decided] {decision, summary}`.
 - **Voz**: las instrucciones listan las propuestas pendientes con su `proposal_id` en "Datos para herramientas" y el Scout solo llama `decide_proposal` con un sí o un no explícito.
 - **Tours en el plan**: cuando `generate_tour` termina con `trip_id`, el tour queda en el plan. Con `block_id` se enlaza ese bloque (`blocks.tour_id`); si no, se agrega un bloque `type='tour'` con `tour_id` hoy (zona del viaje) a la hora de inicio redondeada a 5 min, con la regla de `add_block` (personal → aplica; compartido y lo pidió el Scout → propuesta). `GenerateTourResult.plan` y `TourReadyEvent.plan` = `TourPlanLink` (`linked|applied` con `block_id`, `proposed` con `proposal_id`, o `none` con `reason`). `addBlockImpl` acepta columnas extra (solo `tour_id` hoy).
+---
+
+## Cambios tours v3 (entrevista, lugares pedidos, paradas con historia, research en vivo) — en código
+
+- **Lugares pedidos (`must_include`)**: se comparan por palabras significativas ("Los portones de Carrasco" ≈ "Portones Shopping"); lo que devuelve la búsqueda por nombre cuenta como pedido; saltean los filtros (avoid, "no turístico", accesibilidad) y pueden estar hasta a 4 km. Lo que no se pudo incluir va en `GenerateTourResult.missing_must` y en `[EVENTO:tour_ready].missing_must`: el Scout lo dice.
+- **Pedido libre (`notes`)**: el generador lo interpreta (Claude) y suma lugares obligatorios, cosas a evitar y temas.
+- **Paradas con historia**: se priorizan lugares con fuentes (Wikipedia/Wikidata, reseñas, resumen de Google, datos propios); si la zona es pobre se amplía el radio (hasta 2,5 km); después de investigar, las paradas con < 3 datos verificados se cambian por reemplazos ya investigados (o salen). Fase 1 suma Wikipedia en inglés y web si hay < 10 datos.
+- **`tour_brief`** devuelve además `interview: string[]` (guía de entrevista para la voz) y arranca con la pregunta abierta `notes` ("¿Qué te gustaría que tenga el tour?"); `TourQuestion.placeholder` opcional; `TOUR_QUESTION_IDS` suma `notes`.
+- **Voz**: entrevista conversacional de 3-6 intercambios con resumen y confirmación antes de `generate_tour`; nunca dejar afuera un lugar pedido. En el tour: si la respuesta no está en `facts`, `research` en el momento (nunca "no sé"); `research_ready` se cuenta entero.
+- **`research`**: verifica citas en código contra la página (Claude solo si no se puede bajar), hasta 5 búsquedas, respuesta hasta ~130 palabras.
+- **Observabilidad**: cada investigación profunda queda en `agent_jobs` con `kind='enrich_stop'` (resultado o error).
+
+---
+
+## Planificador de tours (rápido y detallado) — en código
+
+- **Dos formas de armar un tour.** *Rápido*: la hoja "Tour acá, ahora" pide solo duración y "algo en especial" (va como `notes`, que el generador interpreta) y llama `generate_tour`; en el tour se ajusta con el Scout. *Detallado*: pantalla `/tours/new` (como "Nuevo viaje"): Contame → Lo que entendí (rondas) → Elegí tu recorrido → `generate_tour` con la variante.
+- **`tour_interview`** (nueva, síncrona, Claude): `{start_lat, start_lng, duration_min?, trip_id?, block_id?, participant_ids?, start_at?, conversation, round 1-4}` → `TourInterviewResult {summary, understood: TourUnderstanding, context[], nearby[], questions: TourInterviewQuestion[] (0-4), done, round, coverage}`. Ronda 1: lo básico; 2-4: repreguntas. Usa el brief del grupo y los lugares con historia cerca (Wikipedia + place_library). Tipos en `packages/shared/src/tourPlanner.ts`.
+- **`tour_variants`** (nueva, síncrona): `{…mismo punto de partida, conversation, understanding?}` → `TourVariantsResult {variants: TourVariant[]}` (2-3: recomendado · joyas · cierre con vista o tema a fondo), con paradas reales, `est_duration_min`, `walk_m`, pros/contras, `must_included`/`must_missing` y una `recommended`. Usa la misma preparación que `generate_tour` (`prepareTour`).
+- **`generate_tour`** acepta `variant_stops[] {name, lat, lng, google_place_id?, wikidata_id?}` (máx. 15): esas paradas son el recorrido (entran como pedidas, el director no las cambia). `understandingToTourInput()` pasa lo entendido a los campos de `generate_tour`.
+- **Voz**: rápido (1-2 preguntas y arma) o detallado (entrevista → `tour_variants` → elige → `generate_tour` con `variant_stops`).
+- **Tour detallado = solo pantalla** (actualización): `tour_interview` y `tour_variants` pasan a `APP_ONLY_TOOLS` (la voz no los ve). Herramienta nueva del celu `open_tour_planner {story?, duration_min?}` en `VOICE_CLIENT_TOOLS`: la voz la llama cuando piden un tour a medida; la app abre `/tours/new` con lo contado precargado (params `story`, `duration`) y minimiza la llamada. Por voz solo se arma el tour rápido.
 
 ---
 

@@ -13,6 +13,7 @@ import { addTransfers } from './dayTransfers';
 import { randomUUID } from 'node:crypto';
 import {
   SCOUT,
+  type TripAnchor,
   type TripUnderstanding,
   type CatalogItem,
   type LegOptionRow,
@@ -45,9 +46,12 @@ import {
   type PlannerProfile,
 } from './prompts';
 import {
+  anchorsForLeg,
   autoPicks,
   composeAndCheck,
   dayWindows,
+  isLongHaulArrival,
+  mergeAnchors,
   legWeather,
   loadLegGroup,
   loadPlannerModules,
@@ -461,12 +465,18 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
   let conversation = input.conversation;
   // PRD 31: lo que entendió trip_brief (gustos, ritmo, presupuesto); en un reintento, el del job anterior.
   let understanding = (input.understanding ?? null) as TripUnderstanding | null;
+  // PRD 31 v2: anclas del viaje (investigadas en trip_shapes y/o dichas en la entrevista) y llegada internacional.
+  let anchors: TripAnchor[] = [];
+  let longHaulLegId: string | null = null;
   const failedLegs: { leg_id: string; city: string; error: string }[] = [];
   const t0 = Date.now();
   // PRD 31
   const mode = input.mode ?? 'auto';
   let optionsCount = 0;
   let choicesCount = 0;
+  /** Tramos que quedaron con menú (leg_options). stage='menu' solo si hay al menos uno. */
+  const menuLegs = new Set<string>();
+  const noMenuNotes: string[] = [];
   const coverage: PlanCoverage[] = [];
   const composeIssues: string[] = [];
 
@@ -520,7 +530,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         const today = deps.today();
         const sk = await deps.llm.skeleton({
           system: SKELETON_SYSTEM,
-          user: renderSkeletonRequest({ input, today, organizerId: userId, profiles }),
+          user: renderSkeletonRequest({ input, today, organizerId: userId, profiles, anchors: mergeAnchors(understanding?.anchors) }),
           config: deps.config,
         });
         addUsage(usage, sk.usage);
@@ -623,6 +633,9 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         transfers: transferTimes.get(l.id) ?? [],
       }));
       legsForCount = plan.legs;
+      anchors = mergeAnchors(input.skeleton?.anchors, understanding?.anchors);
+      const first = plan.legs[0];
+      if (first && isLongHaulArrival(understanding?.origin, first.country, plan.assumptions)) longHaulLegId = first.id;
     } else {
       // ── Reintento: solo tramos sin bloques
       const ids = existing.map((l) => l.id);
@@ -642,8 +655,12 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       const withBlocks = new Set((blocks ?? []).map((b) => b.leg_id as string));
       const prevHints = ((prevJobs?.[0]?.result as PlanTripResult | undefined)?.participants_hint ?? []).filter((h) => ids.includes(h.leg_id));
       hints = prevHints;
-      const prevRequest = (prevJobs?.[0]?.result as PlanTripResult | undefined)?.request;
+      const prevResult = prevJobs?.[0]?.result as PlanTripResult | undefined;
+      const prevRequest = prevResult?.request;
       understanding ??= (prevRequest?.understanding ?? null) as TripUnderstanding | null;
+      anchors = mergeAnchors(input.skeleton?.anchors, understanding?.anchors, prevRequest?.understanding?.anchors);
+      const first = [...existing].sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+      if (first && isLongHaulArrival(understanding?.origin, first.country, [...(prevResult?.assumptions ?? []), ...(input.skeleton?.assumptions ?? [])])) longHaulLegId = first.id;
       if (prevRequest?.conversation?.length) {
         conversation = [...prevRequest.conversation, ...input.conversation.filter((m) => !prevRequest.conversation.some((p) => p.text === m.text))];
       }
@@ -664,6 +681,8 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
 
     // ── Por tramo (hasta 3 en paralelo): catálogo → menú → (auto) armado; si el catálogo no sirve, relleno por LLM.
     const emptyLegIds = new Set(legsToFill.map((l) => l.id));
+    const allLegs = (existing.length ? existing : legsToFill).map((l) => ({ id: l.id, city: l.city, start_date: l.start_date, end_date: l.end_date }));
+    const legAnchors = (leg: LegToFill) => anchorsForLeg(anchors, leg, allLegs);
     const { data: saved } = await admin.from('saved_places').select('name,google_place_id,note,city').eq('user_id', userId).limit(200);
     const savedFor = (city: string) =>
       (saved ?? [])
@@ -706,28 +725,35 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
 
     type LegMenu = { m: PlannerModules; options: LegOptionRow[]; items: CatalogItem[]; lodgingZones: ComposeLeg['lodgingZones']; group: PlannerGroup };
 
+    /** Progreso sin repetir la misma línea (getCatalog ya avisa "Investigando…"; dos tramos no la duplican). */
+    const said = new Set<string>();
+    const sayOnce = (t: string) => {
+      if (said.has(t)) return;
+      said.add(t);
+      void progress.push(t);
+    };
+
     /** Catálogo del destino + menú del tramo (leg_options). Tira si no sirve (→ fallback). */
     const buildMenu = async (leg: LegToFill): Promise<LegMenu> => {
       const m = await deps.planner();
       const city = { city: leg.city, country: leg.country, lat: leg.lat, lng: leg.lng };
-      void progress.push(`Investigando qué no te podés perder en ${leg.city}…`);
       const catalogDeps = m.defaultCatalogDeps();
-      const cat = await withTimeout(`investigando ${leg.city}`, (signal) =>
-        m.getCatalog(admin, city, catalogDeps, { signal, onProgress: (t) => void progress.push(t) }),
-      );
-      addUsage(usage, cat.usage);
-      if (cat.items.length < MIN_CATALOG_ITEMS) {
-        throw new JobError('catalog_small', `El catálogo de ${leg.city} quedó chico (${cat.items.length} lugares).`);
-      }
-      const group = await loadLegGroup(admin, m, tripId, leg.member_ids, understanding);
       // Reintento: si el tramo ya tiene menú, se reusa (las reacciones del grupo quedan).
       const { data: prev, error: e0 } = await admin.from('leg_options').select('*').eq('leg_id', leg.id).order('sort_order');
       if (e0) throw dbError(e0, 'leg_options');
       let options = (prev ?? []) as LegOptionRow[];
       const dates = leg.days.map((d) => d.date);
-      let events: CatalogItem[] = [];
+      // Eventos del tramo en paralelo con el catálogo (no dependen de él; legEvents nunca tira y tiene su tope).
+      const eventsP: Promise<CatalogItem[]> = options.length ? Promise.resolve([]) : m.legEvents(city, dates, catalogDeps).catch(() => []);
+      // El catálogo avisa su propio progreso ("Investigando…", "Ubicando…"): no lo repetimos acá.
+      const cat = await withTimeout(`investigando ${leg.city}`, (signal) => m.getCatalog(admin, city, catalogDeps, { signal, onProgress: sayOnce }));
+      addUsage(usage, cat.usage);
+      if (cat.items.length < MIN_CATALOG_ITEMS) {
+        throw new JobError('catalog_small', `El catálogo de ${leg.city} quedó chico (${cat.items.length} lugares).`);
+      }
+      const group = await loadLegGroup(admin, m, tripId, leg.member_ids, understanding);
+      const events = await eventsP;
       if (!options.length) {
-        events = await m.legEvents(city, dates, catalogDeps).catch(orFallback([]));
         const drafts = m.buildLegOptions({ trip_id: tripId, leg_id: leg.id, dates, items: cat.items, events, group, saved: savedFor(leg.city) });
         if (!drafts.length) throw new JobError('catalog_small', `No armé opciones para ${leg.city}.`);
         const { data: rows, error } = await admin.from('leg_options').insert(drafts).select('*');
@@ -752,13 +778,13 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         country: leg.country,
         center,
         days: leg.days,
-        dayWindows: dayWindows(leg.days, leg.transfers, group.chronotype),
+        dayWindows: dayWindows(leg.days, leg.transfers, group.chronotype, { longHaulArrival: leg.id === longHaulLegId }),
         weather: await legWeather(center, leg.days.map((d) => d.date), deps.forecast),
         lodging: null,
         lodgingZones: menu.lodgingZones,
       };
       void progress.push(`Armando los días de ${leg.city} por zonas…`);
-      const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: null }, deps.composeDeps(), {
+      const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: null, anchors: legAnchors(leg) }, deps.composeDeps(), {
         items: menu.items,
         mustOptions: mustOptions(menu.options),
         excludedReason: 'no estaba preseleccionado',
@@ -807,6 +833,9 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
                 arrivals: leg.arrivals,
                 savedPlaces: savedFor(leg.city),
                 webSearch: deps.config.webSearch,
+                anchors: legAnchors(leg),
+                longHaulArrival: leg.id === longHaulLegId,
+                origin: understanding?.origin ?? null,
               }),
             },
           ],
@@ -839,11 +868,20 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
         try {
           menu = await buildMenu(leg);
           optionsCount += menu.options.length;
+          if (menu.options.length) menuLegs.add(leg.id);
         } catch (err) {
           rethrowIfFatal(err); // sin créditos / key inválida: el relleno por LLM fallaría igual
           console.warn(`[plan_trip/${jobId}] ${leg.city}: sin catálogo (${readable(err)}) → relleno por LLM`);
         }
-        if (menu && mode === 'menu') return menu.options.length;
+        if (menu && mode === 'menu' && menu.options.length) return menu.options.length;
+        if (mode === 'menu') {
+          // Sin menú en este tramo: se arma directo (relleno por LLM) y se avisa, para que la app no lleve a un menú vacío.
+          const n = await fillWithLlm(leg);
+          const note = `No pude armar el menú de ${leg.city}; te armé los días directo`;
+          noMenuNotes.push(note);
+          void progress.push(note);
+          return n;
+        }
         if (menu) {
           try {
             const n = await composeFromMenu(leg, menu);
@@ -876,13 +914,18 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
   }
 
   // ── Cierre: trip_planned (si se creó algo) + result + status
+  // mode menu: 'menu' solo si algún tramo quedó con menú; si ninguno, el viaje ya está armado ('planned'). Los tramos
+  // sin menú quedan armados directo y se avisa en assumptions.
+  const stage: PlanTripResult['stage'] = mode === 'menu' && menuLegs.size > 0 ? 'menu' : 'planned';
+  if (noMenuNotes.length) assumptions = [...assumptions, ...noMenuNotes];
+  const menuReady = stage === 'menu';
   const daysCount = new Set(legsForCount.flatMap((l) => eachDate(l.start_date, l.end_date))).size;
   const legsText = legsForCount.map((l) => `${l.city} (${shortRange(l.start_date, l.end_date)})`).join(', ');
   const legsWord = `${legsForCount.length} ${legsForCount.length === 1 ? 'tramo' : 'tramos'}`;
   const summary = !legsForCount.length
     ? 'No llegué a armar nada.'
-    : mode === 'menu' && optionsCount > 0
-      ? `Armé ${legsWord}, ${daysCount} días y un menú de ${optionsCount} opciones para elegir: ${legsText}.`
+    : menuReady
+      ? `Armé ${legsWord}, ${daysCount} días y un menú de ${optionsCount} opciones para elegir${noMenuNotes.length ? ` (y ${createdBlocks.length} bloques donde no hubo menú)` : ''}: ${legsText}.`
       : `Armé ${legsWord}, ${daysCount} días y ${createdBlocks.length} bloques: ${legsText}.`;
   let undo_token: string | null = null;
   try {
@@ -917,7 +960,8 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       conversation,
       ...(input.start_date ? { start_date: input.start_date } : {}),
       ...(input.end_date ? { end_date: input.end_date } : {}),
-      ...(understanding ? { understanding } : {}),
+      // Las anclas viajan dentro de understanding: compose_days y los reintentos las reusan.
+      ...(understanding || anchors.length ? { understanding: { ...(understanding ?? {}), ...(anchors.length ? { anchors } : {}) } } : {}),
     },
     usage: {
       input_tokens: usage.input_tokens,
@@ -925,7 +969,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
       cache_read_input_tokens: usage.cache_read_input_tokens,
       cache_creation_input_tokens: usage.cache_creation_input_tokens,
     },
-    stage: mode === 'menu' ? 'menu' : 'planned',
+    stage,
     options: optionsCount,
     choices: choicesCount,
     coverage,
@@ -941,7 +985,7 @@ export async function runPlanTrip(args: RunArgs, deps: PlanDeps): Promise<void> 
     await progress.set({ status: 'failed', error, ...errorCodeFields(fatalErr ?? failedReasons[0]), result });
   } else {
     await progress.push(
-      mode === 'menu' && optionsCount > 0
+      menuReady
         ? `¡Listo el menú! ${legsWord}, ${daysCount} días, ${optionsCount} opciones para elegir`
         : `¡Listo! ${legsWord}, ${daysCount} días, ${createdBlocks.length} bloques`,
     );

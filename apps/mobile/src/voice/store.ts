@@ -6,6 +6,7 @@ import {
   formatVoiceEvent,
   languageSwitchMessage,
   REALTIME_TRANSCRIBE_MODEL,
+  type VoiceSourceGroup,
   type ResearchResult,
   type TranscriptLine,
   type VoiceEventType,
@@ -13,6 +14,7 @@ import {
   type VoiceSessionStart,
 } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { create } from 'zustand';
 
 import { toAppError, type AppError } from '../lib/errors';
@@ -84,6 +86,10 @@ type State = {
   expanded: boolean;
   /** `error`: por qué no hay job de resumen (falló el cierre en la API). */
   summary: { jobId: string | null; voiceSessionId: string; durationS: number; tripId: string | null; error?: AppError } | null;
+  /** Fuentes de lo que contó el scout en esta llamada (research, cámara, paradas), más nuevas al final. */
+  sources: VoiceSourceGroup[];
+  /** Hoja de Fuentes abierta. */
+  sourcesOpen: boolean;
   /** Consola de eventos (dev): lo que pasa por el data channel y las herramientas, más nuevo al final. */
   events: VoiceLogEntry[];
   /** Aviso corto en la llamada ("Activé el modo por turnos…"). */
@@ -113,6 +119,9 @@ type Actions = {
   startTranslator: (from: string, to: string) => void;
   /** Corta al scout (botón "Interrumpir", sobre todo en modo por turnos). */
   interrupt: () => void;
+  /** Suma un grupo de fuentes (dedupe por url + texto); la cámara y los jobs lo llaman. */
+  addSources: (g: Omit<VoiceSourceGroup, 'id' | 'at'>) => void;
+  setSourcesOpen: (open: boolean) => void;
 };
 
 export type VoiceStore = State & Actions;
@@ -175,6 +184,8 @@ const initial: State = {
   expanded: false,
   summary: null,
   notice: null,
+  sources: [],
+  sourcesOpen: false,
   events: [],
   askPermission: null,
   lastEventAt: 0,
@@ -279,6 +290,19 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     return true;
   });
 
+  // Tour detallado: es una pantalla (no se entrevista por voz). Se abre con lo contado precargado y se minimiza la llamada.
+  registerLocalTool('open_tour_planner', async (input) => {
+    const here = currentLocation();
+    if (!here) return { ok: false, error: { code: 'no_location', message: 'No tengo la ubicación del celu: pedile que la active.' } };
+    const tripId = get().args?.tripId ?? null;
+    const story = typeof input.story === 'string' ? input.story.slice(0, 1500) : '';
+    const duration = typeof input.duration_min === 'number' ? String(Math.round(input.duration_min)) : '';
+    set({ expanded: false });
+    router.push({ pathname: '/tours/new', params: { lat: String(here.lat), lng: String(here.lng), ...(tripId ? { tripId } : {}), ...(story ? { story } : {}), ...(duration ? { duration } : {}) } });
+    log('🔧', 'planificador de tour abierto');
+    return { ok: true, data: { opened: true } };
+  });
+
   registerLocalTool('set_language', async (input) => {
     const lang = String(input.lang ?? '').trim().slice(0, 2).toLowerCase();
     if (!/^[a-z]{2}$/.test(lang)) return { ok: false, error: { code: 'invalid_input', message: 'lang = código ISO de 2 letras' } };
@@ -329,6 +353,21 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         setTimeout(() => get().dismissAction(id), ACTION_TTL_MS);
       }
     }
+    // Fuentes de lo que vuelve de las herramientas: research desde la memoria (cached) y las paradas del tour.
+    for (const { call, res, input } of results) {
+      if (!res.ok) continue;
+      const d = (res.data ?? {}) as {
+        cached?: boolean;
+        facts?: { text: string; source_url: string; quote?: string }[];
+        name?: string;
+        sources?: { url: string; title?: string }[];
+      };
+      if (call.name === 'research' && d.cached && d.facts?.length) {
+        get().addSources({ kind: 'research', topic: String(input.question ?? 'Lo que preguntaste'), items: d.facts.map((f) => ({ text: f.text, url: f.source_url, quote: f.quote })) });
+      } else if (call.name === 'get_stop_content' && d.sources?.length) {
+        get().addSources({ kind: 'stop', topic: d.name ?? 'Esta parada', items: d.sources.map((x) => ({ url: x.url, title: x.title })) });
+      }
+    }
     // research es un job: cuando termine, el scout retoma solo el tema ([EVENTO:research_ready]).
     for (const { call, res, input } of results) {
       if (call.name !== 'research' || !res.ok) continue;
@@ -344,16 +383,17 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         if (r.ok) {
           const out = r.row.result as ResearchResult | null;
           log('🔧', `research listo: ${out?.facts.length ?? 0} datos verificados`);
-          get().injectEvent('research_ready', { question, answer: out?.answer ?? '', facts: out?.facts ?? [] });
+          get().injectEvent('research_ready', { question, answer: out?.answer ?? '', facts: (out?.facts ?? []).map((f) => ({ text: f.text, source_url: f.source_url })) });
+          if (out?.facts.length) get().addSources({ kind: 'research', topic: question, items: out.facts.map((f) => ({ text: f.text, url: f.source_url, quote: f.quote })) });
         } else {
           log('⚠️', `research falló: ${r.error}`);
           get().injectEvent('research_failed', { question, error: r.error });
         }
       });
     }
-    // generate_tour es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
+    // generate_tour (y el tour interno) es un job: cuando termine, el scout lo anuncia solo ([EVENTO:tour_ready]).
     for (const { call, res } of results) {
-      if (call.name !== 'generate_tour' || !res.ok) continue;
+      if ((call.name !== 'generate_tour' && call.name !== 'generate_indoor_tour') || !res.ok) continue;
       const { job_id, tour_id } = (res.data ?? {}) as { job_id?: string; tour_id?: string };
       if (!job_id || !tour_id) continue;
       log('🔧', `generate_tour: escuchando el job ${job_id.slice(0, 8)}…`);
@@ -711,6 +751,19 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       const s = get();
       set({ ...initial, speaker: s.speaker, turnTaking: s.turnTaking, captions: s.captions });
     },
+
+    addSources: (g) => {
+      const items = g.items.filter((x) => /^https?:\/\//.test(x.url));
+      if (!items.length) return;
+      set((s) => {
+        const seen = new Set(s.sources.flatMap((x) => x.items.map((i) => `${i.url}|${i.text ?? ''}`)));
+        const fresh = items.filter((i) => !seen.has(`${i.url}|${i.text ?? ''}`));
+        if (!fresh.length) return {};
+        return { sources: [...s.sources, { ...g, items: fresh, id: `src-${Date.now()}`, at: Date.now() }].slice(-30) };
+      });
+      log('🔧', `fuentes: ${items.length} de «${g.topic.slice(0, 40)}»`);
+    },
+    setSourcesOpen: (sourcesOpen) => set({ sourcesOpen }),
 
     interrupt: () => {
       if (!conn) return;

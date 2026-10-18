@@ -18,6 +18,7 @@ import {
 import type { Op } from '../../blocks';
 import { badInput, conflict, dbError, forbidden, notFound } from '../../errors';
 import { insertFeed } from '../../feed';
+import { addTransfers } from '../dayTransfers';
 import { fetchForecast } from '../../google/openMeteo';
 import { createJob, JobProgress } from '../../jobs';
 import { loadTripRole } from '../../policy/writeMode';
@@ -25,8 +26,11 @@ import type { ToolCtx } from '../../tools/types';
 import { JobError } from '../llm';
 import { defaultComposeDeps, errorCodeFields, pool, readable } from '../planTrip';
 import {
+  anchorsForLeg,
   composeAndCheck,
   dayWindows,
+  isLongHaulArrival,
+  mergeAnchors,
   legWeather,
   loadLegGroup,
   loadPlannerModules,
@@ -44,10 +48,18 @@ export type ComposeJobDeps = {
   forecast: typeof fetchForecast;
   concurrency: number;
   heartbeatMs?: number;
+  /** Traslados dentro de cada día después de armarlo (opcional: los tests que no lo pasan, lo saltean). */
+  transfers?: (ctx: ToolCtx, args: { trip_id: string; leg_id: string }) => Promise<{ added: number }>;
 };
 
 export function defaultComposeJobDeps(): ComposeJobDeps {
-  return { planner: loadPlannerModules, composeDeps: defaultComposeDeps, forecast: fetchForecast, concurrency: 3 };
+  return {
+    planner: loadPlannerModules,
+    composeDeps: defaultComposeDeps,
+    forecast: fetchForecast,
+    concurrency: 3,
+    transfers: (ctx, args) => addTransfers(ctx, args),
+  };
 }
 
 type LegRow = { id: string; city: string; country: string | null; lat: number | null; lng: number | null; start_date: string; end_date: string };
@@ -111,11 +123,20 @@ export async function startComposeDays(
     job_id: jobId,
     trip_id: tripId,
     leg_ids: targets.map((l) => l.id),
-    run: () => runComposeDays({ jobId, tripId, legs: targets, instruction: input.instruction ?? null, ctx, firstLine }, full),
+    run: () => runComposeDays({ jobId, tripId, legs: targets, allLegs: legs, instruction: input.instruction ?? null, ctx, firstLine }, full),
   };
 }
 
-type RunArgs = { jobId: string; tripId: string; legs: LegRow[]; instruction: string | null; ctx: ToolCtx; firstLine: string };
+type RunArgs = {
+  jobId: string;
+  tripId: string;
+  legs: LegRow[];
+  /** Todos los tramos del viaje (para saber cuál es el primero y a qué tramo va cada ancla). Default: legs. */
+  allLegs?: LegRow[];
+  instruction: string | null;
+  ctx: ToolCtx;
+  firstLine: string;
+};
 
 export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promise<void> {
   const { jobId, tripId, ctx } = args;
@@ -157,7 +178,14 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
         .select('city_key,lodging_zones')
         .in('city_key', args.legs.map((l) => cityKeyOf(l.city, l.country))),
     ]);
-    const understanding = ((prevJobs?.[0]?.result as PlanTripResult | undefined)?.request?.understanding ?? null) as TripUnderstanding | null;
+    const prevResult = prevJobs?.[0]?.result as PlanTripResult | undefined;
+    const understanding = (prevResult?.request?.understanding ?? null) as TripUnderstanding | null;
+    // Anclas (guardadas por plan_trip en request.understanding) y llegada internacional al primer tramo del viaje.
+    const anchors = mergeAnchors(understanding?.anchors);
+    const allLegs = args.allLegs?.length ? args.allLegs : args.legs;
+    const firstLeg = [...allLegs].sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+    const longHaulLegId =
+      firstLeg && isLongHaulArrival(understanding?.origin, firstLeg.country, prevResult?.assumptions ?? []) ? firstLeg.id : null;
     const zonesByCity = new Map(
       ((cats ?? []) as { city_key: string; lodging_zones: ComposeLeg['lodgingZones'] | null }[]).map((c) => [c.city_key, c.lodging_zones ?? []]),
     );
@@ -196,14 +224,17 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
           country: leg.country,
           center,
           days: legDays,
-          dayWindows: dayWindows(legDays, blocksNow.filter((b) => b.type === 'transfer'), group.chronotype),
+          dayWindows: dayWindows(legDays, blocksNow.filter((b) => b.type === 'transfer'), group.chronotype, {
+            longHaulArrival: leg.id === longHaulLegId,
+          }),
           weather: await legWeather(center, legDays.map((d) => d.date), deps.forecast),
           lodging: lodging ? { lat: lodging.lat!, lng: lodging.lng! } : null,
           lodgingZones: zonesByCity.get(cityKeyOf(leg.city, leg.country)) ?? [],
         };
 
         void progress.push(`Armando ${leg.city} por zonas con ${picks.length} lugares elegidos…`);
-        const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: args.instruction }, deps.composeDeps(), {
+        const legAnchors = anchorsForLeg(anchors, leg, allLegs);
+        const r = await composeAndCheck(m, { leg: composeLeg, group, picks, instruction: args.instruction, anchors: legAnchors }, deps.composeDeps(), {
           items: options.map((o) => o.item),
           mustOptions: mustOptions(options),
         });
@@ -215,6 +246,15 @@ export async function runComposeDays(args: RunArgs, deps: ComposeJobDeps): Promi
         choices += w.choiceGroups;
         coverage.push({ ...r.coverage, choices: w.choiceGroups });
         issues.push(...r.issues);
+        if (deps.transfers) {
+          try {
+            void progress.push(`Calculando cómo moverse en ${leg.city}…`);
+            const tr = await deps.transfers(planCtx, { trip_id: tripId, leg_id: leg.id });
+            if (tr.added) void progress.push(`Agregué ${tr.added} traslados en ${leg.city}`);
+          } catch (e) {
+            console.warn(`[compose_days/${jobId}] traslados ${leg.city}:`, (e as Error).message);
+          }
+        }
         void progress.push(
           `Listo ${leg.city}: ${w.ids.length} bloques, ${r.coverage.must_covered}/${r.coverage.must_total} imperdibles${w.choiceGroups ? `, ${w.choiceGroups} para elegir` : ''}`,
         );

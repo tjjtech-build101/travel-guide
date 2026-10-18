@@ -2,11 +2,12 @@
 import { SCOUT } from '@build101/shared';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../features/auth/AuthProvider';
 import { useGuideStore } from '../../features/guide/store';
+import { useOutdoorMode } from '../../features/now/v2/outdoor';
 import { draftFromProfile, patchFromDraft, type ProfileDraft } from '../../features/profile/model';
 import { ProfileForm } from '../../features/profile/ProfileForm';
 import { useMyProfile, useSaveProfile } from '../../features/profile/queries';
@@ -24,6 +25,7 @@ export default function ProfileScreen() {
   const save = useSaveProfile();
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [saved, setSaved] = useState(false);
+  const { outdoor, setOutdoor } = useOutdoorMode();
 
   useEffect(() => {
     if (profile.data !== undefined && draft === null) setDraft(draftFromProfile(profile.data));
@@ -60,6 +62,10 @@ export default function ProfileScreen() {
             setDraft(d);
           }}
         />
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>Modo exterior (más contraste y letra grande)</Text>
+          <Switch value={outdoor} onValueChange={setOutdoor} accessibilityLabel="Modo exterior" />
+        </View>
         <View style={styles.guide}>
           <ScoutAvatar size={48} />
           <View style={{ flex: 1 }}>
@@ -118,6 +124,8 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   save: { minHeight: 56, marginBottom: space.sm },
+  switchRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  switchLabel: { flex: 1, fontSize: font.body, fontWeight: '600', color: colors.text },
   error: { fontSize: font.small, color: colors.danger, textAlign: 'center' },
   ok: { fontSize: font.small, color: colors.success, textAlign: 'center', fontWeight: '700' },
 });

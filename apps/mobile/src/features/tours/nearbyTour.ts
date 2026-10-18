@@ -19,17 +19,17 @@ import { env } from '../../lib/env';
 export const NEARBY_TOUR_TOOL = 'generate_tour';
 export const NEARBY_DURATIONS = [30, 45, 60, 90, 120] as const;
 
-type TourAnswerFields = Pick<
-  ToolInput<'generate_tour'>,
-  'themes' | 'energy' | 'familiarity' | 'food_stop' | 'include_paid_entries' | 'kids' | 'indoor' | 'finish' | 'must_include' | 'notes'
->;
+/** Todo lo de generate_tour salvo el punto de partida y el modo (respuestas de la entrevista, variante elegida…). */
+type TourExtraFields = Omit<ToolInput<'generate_tour'>, 'mode' | 'start_lat' | 'start_lng' | 'duration_min' | 'trip_id' | 'storyline' | 'language'> & {
+  storyline?: boolean;
+};
 
 export type StartNearbyTourInput = {
   lat: number;
   lng: number;
   trip_id?: string;
   duration_min?: number;
-} & Partial<TourAnswerFields>;
+} & Partial<TourExtraFields>;
 
 /** Entrevista previa (tour_brief): qué sabe el Scout y qué conviene preguntar. */
 export async function fetchTourBrief(args: { lat: number; lng: number; trip_id?: string; duration_min: number }): Promise<TourBriefResult> {

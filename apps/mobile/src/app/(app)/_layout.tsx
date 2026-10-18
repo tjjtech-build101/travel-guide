@@ -45,6 +45,7 @@ function AppStack() {
       <Stack.Screen name="trip/[tripId]" options={{ headerShown: false }} />
       <Stack.Screen name="dev" options={{ presentation: 'modal', title: 'Menú dev' }} />
       <Stack.Screen name="dev-record" options={{ presentation: 'modal', title: 'Grabar track' }} />
+      <Stack.Screen name="dev/now-gallery" options={{ title: 'Galería de Ahora', headerBackTitle: 'Atrás' }} />
       {/* PRD 10 mínimo: onboarding con chips (primer login) y perfil editable. */}
       <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="profile" options={{ title: 'Tu perfil', headerBackTitle: 'Atrás' }} />
@@ -55,6 +56,7 @@ function AppStack() {
       {/* PRD 02 · sheets del Plan (detalle/edición, crear, propuestas, traer del banco). */}
       <Stack.Screen name="plan/block/[blockId]" options={PLAN_SHEET} />
       <Stack.Screen name="plan/new" options={PLAN_SHEET} />
+      <Stack.Screen name="tours/new" options={{ title: 'Nuevo tour', headerBackTitle: 'Atrás' }} />
       <Stack.Screen name="plan/proposals" options={PLAN_SHEET} />
       <Stack.Screen name="plan/bank" options={PLAN_SHEET} />
     </Stack>

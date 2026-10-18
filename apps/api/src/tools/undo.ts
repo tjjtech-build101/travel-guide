@@ -36,7 +36,11 @@ export async function undo(input: ToolInput<'undo'>, ctx: ToolCtx): Promise<Tool
 
   let touched: Awaited<ReturnType<typeof applyOps>> = [];
   const proposalId = typeof feed.payload.proposal_id === 'string' ? feed.payload.proposal_id : null;
-  if (feed.kind === 'proposal_created' && proposalId) {
+  if (feed.kind === 'running_late') {
+    // report_late: deshacer borra el aviso (no tocó bloques).
+    const { error: e4 } = await admin.from('activity_feed').delete().eq('id', feed.id);
+    if (e4) throw dbError(e4, 'activity_feed');
+  } else if (feed.kind === 'proposal_created' && proposalId) {
     const { data: rows, error: e3 } = await admin
       .from('agent_proposals')
       .update({ status: 'rejected', decided_by: ctx.userId, decided_at: new Date().toISOString() })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { briefQuestions, briefSummary } from './tourBrief';
+import { briefQuestions, briefSummary, buildBriefResult } from './tourBrief';
 import { groupProfile, localClock, renderBriefCard, type Member, type TourBrief } from './tourContext';
 
 const member = (over: Partial<Member> = {}): Member => ({
@@ -67,13 +67,14 @@ describe('groupProfile', () => {
 });
 
 describe('briefQuestions', () => {
-  it('máximo 3 preguntas obligatorias + "algo que sí o sí"', () => {
+  it('abre con la pregunta abierta, hasta 4 de contexto y cierra con "algo que no te quieras perder"', () => {
     const b = brief({ weather: { utc_offset_s: -10800, tz: null, sunset: '19:20', hours: [], max_precip_prob: 70, temp_c: 14 }, members: [member({ companions: 'mi hija', pace: null })] });
     const qs = briefQuestions(b, groupProfile(b), { mode: 'spontaneous', duration_min: 120 });
-    expect(qs.filter((q) => !q.optional)).toHaveLength(3);
-    expect(qs[0].id).toBe('indoor'); // la lluvia va primero
-    expect(qs[0].default).toBe('indoor');
-    expect(qs[1].id).toBe('kids');
+    expect(qs[0].id).toBe('notes');
+    expect(qs.filter((q) => !q.optional).length).toBeLessThanOrEqual(4);
+    expect(qs[1].id).toBe('indoor'); // la lluvia va primero entre las de contexto
+    expect(qs[1].default).toBe('indoor');
+    expect(qs[2].id).toBe('kids');
     expect(qs[qs.length - 1].id).toBe('must_include');
   });
   it('perfil claro de una persona, sin lluvia, tour corto: no pregunta temas', () => {
@@ -114,5 +115,16 @@ describe('briefSummary / renderBriefCard', () => {
     expect(card).toContain('evita museos');
     expect(card).toContain('Teatro Solís');
     expect(card).toContain('Palacio Salvo');
+  });
+});
+
+describe('buildBriefResult · guía de entrevista', () => {
+  it('trae temas a cubrir, usa lo que ya sabe y termina pidiendo confirmación', () => {
+    const b = brief({ members: [member({ avoid: ['museos'] })] });
+    const r = buildBriefResult(b, groupProfile(b), { mode: 'spontaneous', duration_min: 60 }, []);
+    expect(r.interview.length).toBeGreaterThanOrEqual(5);
+    expect(r.interview.join(' ')).toMatch(/no se quieran perder/);
+    expect(r.interview.join(' ')).toMatch(/evitan museos/);
+    expect(r.interview[r.interview.length - 1]).toMatch(/confirmación/);
   });
 });

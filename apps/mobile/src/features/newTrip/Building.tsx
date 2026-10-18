@@ -1,5 +1,5 @@
 // Armando (progreso en vivo): AgentJobProgress + LiveItinerary. Al terminar, si plan_trip dejó el menú
-// (stage 'menu', PRD 31) vamos al menú del viaje; si no, al viaje.
+// (stage 'menu' con opciones, PRD 31) vamos al menú del viaje; si no, al viaje.
 import type { AgentJobRow, PlanTripResult, PlanTripStart } from '@build101/shared';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -55,8 +55,9 @@ export function Building({ job }: { job: PlanTripStart }) {
   }, [finished, openTrip]);
 
   const onDone = useCallback((row: { result: unknown }) => {
-    const stage = (row.result as PlanTripResult | null)?.stage;
-    setFinished(stage === 'menu' ? 'menu' : 'planned');
+    const r = row.result as PlanTripResult | null;
+    // Al menú solo si trajo opciones para elegir; si no, al viaje.
+    setFinished(r?.stage === 'menu' && (r.options ?? 0) > 0 ? 'menu' : 'planned');
   }, []);
 
   return (
@@ -76,7 +77,7 @@ export function Building({ job }: { job: PlanTripStart }) {
                   ? `Uy, me trabé. ${failure.title}. Lo que ya armé queda; abajo podés reintentar.`
                   : `Uy, me trabé. ${failure.title}. Esto no se arregla reintentando: abajo te explico qué pasó.`
                 : jobMode === 'menu'
-                ? 'Estoy armando los tramos y un menú por ciudad para que el grupo elija. Te los voy mostrando acá.'
+                ? 'Estoy armando los tramos y una lista de imperdibles y opciones por ciudad para que marquen lo que les copa. Te los voy mostrando acá.'
                 : 'Estoy armando los días. Te los voy mostrando a medida que salen.'
           }
         />

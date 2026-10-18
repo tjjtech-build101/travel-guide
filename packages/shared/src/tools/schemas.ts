@@ -44,6 +44,8 @@ export const Transfer = z.object({
   maps_url: z.string().url().optional(),
   /** true = sin Google: duración estimada por distancia, sin líneas. */
   estimated: z.boolean().optional(),
+  /** true = lo calculó el sistema: se recalcula solo cuando cambia el día (uno cargado a mano nunca se toca). */
+  auto: z.boolean().optional(),
 });
 
 export const BlockAlertInput = z.object({
@@ -148,6 +150,10 @@ export const RouteEtaInput = z.object({
   stops: z.array(RouteStop).min(2).max(10),
   mode: z.enum(ROUTE_MODES),
   departure_time: z.string().optional().describe('ISO 8601'),
+  detail: z
+    .boolean()
+    .optional()
+    .describe('Con exactamente 2 paradas con lat/lng: devuelve además `detail` (polilínea y pasos) para mostrar la ruta en la app.'),
 });
 
 export const UndoInput = z.object({ undo_token: z.string().min(10) });
@@ -204,6 +210,22 @@ export const TripShapeTransferInput = z.object({
   participant_names: z.array(z.string().max(60)).max(20).default([]),
 });
 
+/** Ancla del viaje (TripAnchor): evento con fecha/sede que va como bloque fijo. Laxo: viene de un LLM. */
+export const TripAnchorInput = z.object({
+  id: z.string().max(60),
+  name: z.string().max(200),
+  kind: z.enum(['sports', 'concert', 'festival', 'wedding', 'conference', 'other']).catch('other'),
+  city: z.string().max(120).nullable().optional(),
+  country: z.string().max(80).nullable().optional(),
+  date: IsoDate.nullable().optional().catch(null),
+  time: TimeOfDay.nullable().optional().catch(null),
+  venue: z.string().max(200).nullable().optional(),
+  tickets: z.enum(['have', 'want', 'watch_out', 'unknown']).catch('unknown'),
+  researched: z.boolean().catch(false),
+  sources: z.array(z.object({ url: z.string().max(500), title: z.string().max(200).nullable().optional() })).max(6).catch([]),
+  note: z.string().max(400).nullable().optional(),
+});
+
 /** El esqueleto de una TripShape tal como vuelve en plan_trip (validado de nuevo en el servidor). */
 export const TripShapeSkeleton = z.object({
   title: z.string().max(80).default(''),
@@ -212,6 +234,7 @@ export const TripShapeSkeleton = z.object({
   legs: z.array(TripShapeLegInput).min(1).max(8),
   transfers: z.array(TripShapeTransferInput).max(16).default([]),
   assumptions: z.array(z.string().max(400)).max(12).default([]),
+  anchors: z.array(TripAnchorInput).max(12).optional().describe('v2: anclas investigadas (van como bloques fijos)'),
 });
 
 /** TripUnderstanding de trip_brief (laxo: todo opcional; el servidor lo usa para el perfil del grupo). */
@@ -235,6 +258,9 @@ export const TripUnderstandingInput = z.object({
   departure: z.string().max(300).nullable().optional(),
   lodging_booked: z.string().max(300).nullable().optional(),
   notes: z.array(z.string().max(300)).max(10).optional(),
+  trip_kind: z.enum(['event', 'city', 'road_trip', 'beach', 'nature', 'family', 'couple', 'backpacking', 'mixed']).nullable().optional().catch(null),
+  anchors: z.array(TripAnchorInput).max(12).optional(),
+  origin: z.string().max(120).nullable().optional(),
 });
 
 export const PlanTripInput = z.object({
@@ -259,13 +285,14 @@ export const PlanTripInput = z.object({
 
 // ---------- PRD 31 · planificador colaborativo ----------
 
-const PlannerConversation = z.array(PlanTripMessage).min(1).max(40);
+export const PlannerConversation = z.array(PlanTripMessage).min(1).max(40);
 
 export const TripBriefInput = z.object({
   trip_id: Id.optional(),
   conversation: PlannerConversation.describe('Lo que contó el usuario + preguntas/respuestas anteriores'),
   start_date: IsoDate.optional(),
   end_date: IsoDate.optional(),
+  round: z.number().int().min(1).max(4).optional().describe('Ronda de la entrevista (1-4): 1 = lo básico, 2-4 = repreguntas sobre lo que contestó. Default 1.'),
 });
 
 export const TripShapesInput = z.object({
@@ -273,6 +300,7 @@ export const TripShapesInput = z.object({
   conversation: PlannerConversation,
   start_date: IsoDate.optional(),
   end_date: IsoDate.optional(),
+  understanding: TripUnderstandingInput.optional().describe('v2: lo entendido en la última ronda de trip_brief (evita re-extraerlo)'),
 });
 
 export const ReactOptionInput = z.object({
@@ -336,6 +364,64 @@ export const GenerateTourInput = z.object({
   finish: TourFinish.optional().describe('Cómo terminar si no hay end_point: con vista, comiendo, volviendo al inicio o donde sea'),
   must_include: z.array(z.string().min(1).max(120)).max(5).optional().describe('Lugares que sí o sí quieren ver (nombres)'),
   notes: z.string().max(500).optional().describe('Pedido libre de la persona ("algo con fantasmas", "nada de iglesias")'),
+  variant_stops: z
+    .array(z.object({ name: z.string().max(160), lat: z.number(), lng: z.number(), google_place_id: z.string().nullable().optional(), wikidata_id: z.string().nullable().optional() }))
+    .max(15)
+    .optional()
+    .describe('Paradas de la variante elegida en tour_variants: el tour se arma con estas (orden y textos los decide el generador)'),
+});
+
+// ---------- generate_indoor_tour · tour adentro de un lugar (museo, mercado, iglesia) ----------
+
+export const GenerateIndoorTourInput = z.object({
+  venue_name: z.string().min(2).max(160).describe('El lugar por dentro, tal cual lo dijo la persona ("Museo Torres García")'),
+  lat: z.number().min(-90).max(90).optional().describe('Posición de la persona (para ubicar el lugar correcto)'),
+  lng: z.number().min(-180).max(180).optional(),
+  trip_id: Id.optional(),
+  duration_min: z.number().int().min(15).max(120).default(45),
+  language: z.string().default('es'),
+  notes: z.string().max(500).optional().describe('Pedido libre ("lo más famoso", "para chicos", "solo la planta baja")'),
+});
+
+// ---------- tour_interview / tour_variants · planificador de tours (como el de viajes) ----------
+
+const TourBase = {
+  start_lat: z.number().min(-90).max(90),
+  start_lng: z.number().min(-180).max(180),
+  duration_min: z.number().int().min(15).max(240).optional().describe('Si la persona ya la dijo; si no, la entrevista la pregunta'),
+  trip_id: Id.optional(),
+  block_id: Id.optional(),
+  participant_ids: z.array(Id).optional(),
+  start_at: z.string().optional().describe('ISO datetime; default: ahora'),
+};
+
+// Laxo a propósito (viene de un LLM): el servidor lo sanea.
+export const TourUnderstandingInput = z.object({
+  duration_min: z.number().nullable().optional(),
+  must_include: z.array(z.string().max(160)).max(8).optional(),
+  avoid: z.array(z.string().max(120)).max(10).optional(),
+  themes: z.array(z.string().max(40)).max(10).optional(),
+  energy: z.string().nullable().optional(),
+  finish: z.string().nullable().optional(),
+  food_stop: z.boolean().nullable().optional(),
+  kids: z.array(z.string()).max(4).optional(),
+  indoor: z.string().nullable().optional(),
+  familiarity: z.string().nullable().optional(),
+  include_paid_entries: z.boolean().nullable().optional(),
+  storyline: z.boolean().nullable().optional(),
+  wishes: z.array(z.string().max(300)).max(10).optional(),
+});
+
+export const TourInterviewInput = z.object({
+  ...TourBase,
+  conversation: PlannerConversation.describe('Lo que contó la persona + preguntas/respuestas anteriores'),
+  round: z.number().int().min(1).max(4).optional().describe('Ronda (1-4): 1 = lo básico, 2-4 = repreguntas. Default 1.'),
+});
+
+export const TourVariantsInput = z.object({
+  ...TourBase,
+  conversation: PlannerConversation,
+  understanding: TourUnderstandingInput.optional().describe('Lo entendido en la última ronda de tour_interview'),
 });
 
 // ---------- tour_brief · entrevista previa al tour ----------
@@ -419,6 +505,8 @@ export const LookAtPhotoModelOutput = z.object({
 export type LookAtPhotoModelOutput = z.infer<typeof LookAtPhotoModelOutput>;
 
 export type LookAtPhotoOutput = LookAtPhotoModelOutput & {
+  /** Tour interno (positioning manual): la parada del tour que se ve en la foto (confianza ≥ 0,6). */
+  tour_stop?: { stop_id: string; name: string } | null;
   photo_id: string | null;
   storage_path: string | null;
   /** ms por tramo (subida, cercanos, claude) para medir la latencia. */

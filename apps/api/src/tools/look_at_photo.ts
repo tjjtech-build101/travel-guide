@@ -4,13 +4,14 @@
 import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
-import { distanceMeters, LookAtPhotoModelOutput, type LookAtPhotoOutput, type ToolInput } from '@build101/shared';
+import { distanceMeters, isManualTour, LookAtPhotoModelOutput, type LookAtPhotoOutput, type ToolInput } from '@build101/shared';
 import { PLANNER_MODEL } from '../agents/llm';
 import { env } from '../env';
 import { badInput, classifyAnthropic, dbError, notConfigured, providerFailure, upstream } from '../errors';
 import { runInBackground } from '../jobs';
 import { ensurePlace } from '../places/library';
 import type { Db } from '../supabase';
+import { loadStops, loadTour, stopName } from '../tourLive';
 import type { ToolCtx, ToolOk } from './types';
 
 export const PHOTOS_BUCKET = 'photos';
@@ -162,6 +163,53 @@ function ensureBucket(admin: Db): Promise<void> {
   return bucketReady;
 }
 
+/**
+ * Tour interno (positioning manual): adentro el GPS no distingue una sala de otra, así que los candidatos son las
+ * paradas del tour (con su "dónde / qué mirar") en vez de lo cercano. null si no hay tour o no es interno.
+ */
+export type IndoorCandidates = { venue: string; candidates: NearbyPlace[]; lookAt: Map<string, string>; stopByPlace: Map<string, { stop_id: string; name: string }> };
+
+async function loadIndoorCandidates(ctx: ToolCtx, tourId: string): Promise<IndoorCandidates | null> {
+  try {
+    const tour = await loadTour(ctx, tourId);
+    if (!isManualTour(tour.route)) return null;
+    const stops = (await loadStops(ctx, tourId)).filter((s) => s.place_id);
+    const ids = stops.map((s) => s.place_id!);
+    const { data } = await ctx.admin.from('place_library').select('id,facts').in('id', ids);
+    const factsOf = new Map((data ?? []).map((r) => [r.id as string, (r.facts ?? []) as Fact[]]));
+    return {
+      venue: tour.route?.venue?.name ?? tour.title ?? 'el lugar',
+      candidates: stops.map((s) => ({
+        place_id: s.place_id!,
+        name: stopName(s),
+        distance_m: 0,
+        bearing_deg: 0,
+        relative_deg: null,
+        in_front: false,
+        facts: (factsOf.get(s.place_id!) ?? [])
+          .filter((f) => f.verified === true && f.text && f.source_url)
+          .slice(0, MAX_FACTS_PER_PLACE)
+          .map((f) => ({ text: f.text, source_url: f.source_url })),
+      })),
+      lookAt: new Map(stops.map((s) => [s.place_id!, s.look_at ?? ''])),
+      stopByPlace: new Map(stops.map((s) => [s.place_id!, { stop_id: s.id, name: stopName(s) }])),
+    };
+  } catch (e) {
+    console.warn('[look_at_photo] tour interno:', (e as Error).message);
+    return null;
+  }
+}
+
+function indoorPromptText(i: ToolInput<'look_at_photo'>, c: IndoorCandidates, lang: string): string {
+  const list = c.candidates
+    .map((p) => {
+      const facts = p.facts.length ? p.facts.map((f) => `    - ${f.text} [${f.source_url}]`).join('\n') : '    (sin datos verificados)';
+      return `- id=${p.place_id} · ${p.name}\n  Dónde / qué mirar: ${c.lookAt.get(p.place_id) || '—'}\n  DATOS VERIFICADOS:\n${facts}`;
+    })
+    .join('\n');
+  return `La persona está ADENTRO de ${c.venue}, haciendo un recorrido. La ubicación GPS no sirve para distinguir los puntos: guiate por la imagen y por "dónde / qué mirar". Si la foto muestra uno de estos puntos, place.place_id es su id.\nIdioma de la persona: ${lang}.\n${i.question ? `Pregunta: "${i.question}"\n` : ''}Puntos del recorrido:\n${list}`;
+}
+
 async function loadNearby(admin: Db, lat: number, lng: number, heading: number | null): Promise<NearbyPlace[]> {
   const { data, error } = await admin
     .from('place_library')
@@ -227,16 +275,16 @@ export async function look_at_photo(input: ToolInput<'look_at_photo'>, ctx: Tool
         return null;
       })
     : Promise.resolve(storagePath);
-  const [nearby, profile] = await Promise.all([
-    loadNearby(ctx.admin, input.lat, input.lng, input.heading ?? null).then((r) => (lap('nearby'), r)),
-    ctx.admin.from('profiles').select('locale').eq('id', ctx.userId).maybeSingle(),
-  ]);
+  const indoorP = input.tour_id ? loadIndoorCandidates(ctx, input.tour_id) : Promise.resolve(null);
+  const [indoor, profile] = await Promise.all([indoorP, ctx.admin.from('profiles').select('locale').eq('id', ctx.userId).maybeSingle()]);
+  const nearby = indoor ? indoor.candidates : await loadNearby(ctx.admin, input.lat, input.lng, input.heading ?? null);
+  lap('nearby');
   const lang = input.language ?? (profile.data?.locale as string | undefined) ?? 'es';
 
   const tLlm = Date.now();
   let raw: LookAtPhotoModelOutput;
   try {
-    raw = await visionDeps.llm({ system: SYSTEM, text: promptText(input, nearby, lang), imageBase64 });
+    raw = await visionDeps.llm({ system: SYSTEM, text: indoor ? indoorPromptText(input, indoor, lang) : promptText(input, nearby, lang), imageBase64 });
   } catch (err) {
     // Sin resultado no hay fila en photos: no dejar la foto huérfana en Storage (solo si la subimos nosotros).
     if (input.image_base64) {
@@ -272,7 +320,8 @@ export async function look_at_photo(input: ToolInput<'look_at_photo'>, ctx: Tool
   // Memoria: un lugar reconocido con confianza que no estaba en place_library se agrega (de fondo, sin sumar latencia)
   // y la foto queda vinculada. ensurePlace solo crea si search_places lo ubica con ese nombre cerca.
   const photoId = (photo?.id as string | undefined) ?? null;
-  if (out.place && !out.place.place_id && out.place.confidence >= NEW_PLACE_CONFIDENCE) {
+  // (En un tour interno no: las coordenadas son las del edificio, no las de lo que se ve.)
+  if (!indoor && out.place && !out.place.place_id && out.place.confidence >= NEW_PLACE_CONFIDENCE) {
     const name = out.place.name;
     runInBackground(
       'look_at_photo/new_place',
@@ -286,6 +335,7 @@ export async function look_at_photo(input: ToolInput<'look_at_photo'>, ctx: Tool
   lap('total');
   console.log(`[look_at_photo] ${JSON.stringify(timings)} · ${nearby.length} cercanos · ${out.place?.name ?? '—'} (${out.place?.confidence ?? 0})`);
 
-  const data: LookAtPhotoOutput = { ...out, photo_id: (photo?.id as string | undefined) ?? null, storage_path: storagePath, timings };
+  const tourStop = indoor && confident && out.place?.place_id ? (indoor.stopByPlace.get(out.place.place_id) ?? null) : null;
+  const data: LookAtPhotoOutput = { ...out, ...(indoor ? { tour_stop: tourStop } : {}), photo_id: (photo?.id as string | undefined) ?? null, storage_path: storagePath, timings };
   return { ok: true, data };
 }

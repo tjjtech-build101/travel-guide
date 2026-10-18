@@ -59,7 +59,7 @@ const ITEM_RULES = `Reglas de cada ítem:
 export const CATALOG_GENERATE_SYSTEM = `Sos el investigador de destinos de ${SCOUT.name}, un guía de viajes rioplatense. Conocés las ciudades como un local y como el mejor editor de guías del mundo. Te paso una ciudad y armás el catálogo COMPLETO de lo que vale la pena: la base con la que después se arman viajes para grupos con gustos distintos. Lo que no esté acá, no existe para el planificador: si se te escapa un imperdible, el viaje sale mal.
 
 Cómo investigar:
-- Usá web_search (pocas búsquedas, bien elegidas) y web_fetch para leer las mejores listas: turismo oficial de la ciudad, guías serias (Lonely Planet, Time Out, Michelin, Condé Nast, Atlas Obscura), prensa local y recomendaciones de locales.
+- Rápido: como mucho 4 búsquedas con web_search, bien elegidas (turismo oficial de la ciudad, guías serias como Lonely Planet, Time Out, Michelin, Condé Nast o Atlas Obscura, prensa local, recomendaciones de locales). No bajes páginas: alcanza con los resultados y lo que ya sabés de la ciudad, siempre que una fuente lo respalde.
 - Cruzá fuentes: lo que aparece en varias listas independientes es canónico.
 
 Cubrí SISTEMÁTICAMENTE, sin saltear ninguna categoría que la ciudad tenga:
@@ -73,7 +73,7 @@ Cubrí SISTEMÁTICAMENTE, sin saltear ninguna categoría que la ciudad tenga:
 8. Joyas locales poco turísticas, de cualquier categoría (tier gem).
 9. Escapadas de un día desde la ciudad, con duración realista ida y vuelta incluida (day_trip).
 
-Entre 35 y 60 ítems en total, sin repetir. Además, lodging_zones: 2 a 4 barrios recomendados para alojarse, cada uno con por qué (una oración: qué tiene cerca, para qué tipo de viajero).
+Entre 30 y 45 ítems en total, sin repetir (los más importantes primero: si hay que recortar, que sea en lo menor). Además, lodging_zones: 2 a 4 barrios recomendados para alojarse, cada uno con por qué (una oración: qué tiene cerca, para qué tipo de viajero).
 
 ${ITEM_RULES}
 
@@ -83,7 +83,7 @@ export const CATALOG_REVIEW_SYSTEM = `Sos el crítico más exigente de ${SCOUT.n
 
 Cómo revisar:
 - Pensá como un local y como el editor de la mejor guía: recorré mentalmente cada categoría (íconos, museos, miradores, barrios, comida institucional y mercados, cafés históricos, experiencias y shows, fútbol, ferias semanales, parques y costas, vida nocturna, compras con identidad, joyas locales, escapadas de un día).
-- Usá web_search y web_fetch para chequear listas serias que el otro investigador pudo no mirar (turismo oficial, prensa local, Atlas Obscura, guías gastronómicas) y confirmar que lo que proponés existe hoy.
+- Usá web_search (y, si hace falta, un web_fetch) para chequear listas serias que el otro investigador pudo no mirar (turismo oficial, prensa local, Atlas Obscura, guías gastronómicas) y confirmar que lo que proponés existe hoy.
 - Devolvé SOLO ítems nuevos: nada que ya esté en la lista, ni con otro nombre ni en otro idioma ("Recoleta Cemetery" = "Cementerio de la Recoleta"). Si no falta nada importante, devolvé una lista vacía.
 - Máximo 15 ítems, los más importantes primero. lodging_zones: [].
 
@@ -108,10 +108,16 @@ export function renderCatalogReviewUser(city: CityRef, known: string[]): string 
 
 // ───────────────────────── Llamada
 
-const CONFIGS: Record<'generate' | 'review', TourLlmConfig> = {
-  generate: { effort: 'high', maxTokens: 32000, maxIterations: 14, fallbacks: true },
-  review: { effort: 'high', maxTokens: 16000, maxIterations: 10, fallbacks: true },
+// generate corre dentro del tramo (tope ~90 s en catalog.ts): effort low, 4 búsquedas, sin web_fetch, 30-45 ítems.
+// review corre en segundo plano (no frena el plan): un poco más de esfuerzo, pocas herramientas igual.
+export const CATALOG_LLM_CONFIGS: Record<'generate' | 'review', TourLlmConfig> = {
+  generate: { effort: 'low', maxTokens: 16000, maxIterations: 8, fallbacks: true },
+  review: { effort: 'medium', maxTokens: 12000, maxIterations: 8, fallbacks: true },
 };
+export const CATALOG_MAX_USES = {
+  generate: { web_search: 4 },
+  review: { web_search: 4, web_fetch: 1 },
+} as const;
 
 /** CatalogDeps['research'] real (Claude + web). */
 export const research: CatalogDeps['research'] = async ({ city, mode, known, signal }) => {
@@ -121,14 +127,14 @@ export const research: CatalogDeps['research'] = async ({ city, mode, known, sig
     captureName: 'report_catalog',
     captureDescription: 'Reportá el catálogo (o, en revisión, solo los ítems que faltaban), cada ítem con sus fuentes reales.',
     captureSchema: ResearchOutput,
-    serverTools: ['web_search', 'web_fetch'],
-    maxUses: mode === 'generate' ? { web_search: 6, web_fetch: 4 } : { web_search: 4, web_fetch: 2 },
-    config: CONFIGS[mode],
+    serverTools: mode === 'generate' ? ['web_search'] : ['web_search', 'web_fetch'],
+    maxUses: CATALOG_MAX_USES[mode],
+    config: CATALOG_LLM_CONFIGS[mode],
     signal,
   });
   const items: RawCatalogItem[] = (r.value?.items ?? []).map((i) => ({ ...i, sources: i.sources ?? [] }));
   return {
-    items: mode === 'review' ? items.slice(0, 15) : items,
+    items: mode === 'review' ? items.slice(0, 15) : items.slice(0, 50),
     lodging_zones: mode === 'generate' ? (r.value?.lodging_zones ?? []) : [],
     usage: r.usage,
   };

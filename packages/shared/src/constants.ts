@@ -49,6 +49,7 @@ export const FEED_KINDS = [
   'tour_generated', // PRD 06
   'days_composed', // PRD 31
   'option_chosen', // PRD 31
+  'running_late', // Ahora v2 (report_late)
 ] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 

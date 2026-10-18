@@ -35,6 +35,21 @@ export type TourProgress = z.infer<typeof TourProgress>;
 
 export const StartTourInput = z.object({ tour_id: Id });
 
+/**
+ * `tours.route` (Contratos v1.1 + modo interno). positioning 'manual' = tour adentro de un lugar (museo, mercado):
+ * el GPS no sirve para saber en qué punto está, así que la llegada la marca la persona (voz, botón o foto).
+ */
+export type TourRoute = {
+  polyline: string | null;
+  total_walk_m?: number;
+  est_duration_min?: number;
+  positioning?: 'gps' | 'manual';
+  indoor?: boolean;
+  venue?: { name: string; lat: number; lng: number; place_id: string | null } | null;
+};
+
+export const isManualTour = (route: Pick<TourRoute, 'positioning'> | null | undefined): boolean => route?.positioning === 'manual';
+
 export const TourStatusInput = z.object({
   tour_id: Id,
   progress: TourProgress.optional().describe(
@@ -85,7 +100,7 @@ export type StartTourResult = {
     mode: string | null;
     status: string;
     duration_min: number;
-    route: { polyline: string | null; total_walk_m?: number; est_duration_min?: number } | null;
+    route: TourRoute | null;
     progress: TourProgress;
   };
   stops: TourStopView[];
@@ -115,6 +130,10 @@ export type StopContentResult = {
   text: string | null;
   sources: { url: string; title?: string }[];
   already_told: boolean;
+  /** Capas con contenido que esta persona todavía no escuchó (en orden: more, secret, myth, kid, photo). */
+  layers_left?: StopLayer[];
+  /** Dossier del lugar: todos los datos verificados (para seguir contando y responder preguntas sin inventar). */
+  facts?: string[];
 };
 
 /** data de next_stop. */

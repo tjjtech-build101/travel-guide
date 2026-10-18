@@ -6,14 +6,14 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { ActivityIndicator, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { callTool } from '../../lib/api';
 import { describeError } from '../../lib/errors';
 import { Button } from '../../ui/Button';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { currentLocation, useVoiceStore } from '../store';
-import { useCameraStore } from './cameraStore';
+import { cameraTourHooks, useCameraStore } from './cameraStore';
 
 type Phase =
   | { kind: 'viewfinder' }
@@ -39,7 +39,9 @@ export function CameraModal() {
   const open = useCameraStore((s) => s.open);
   return (
     <Modal visible={open} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useCameraStore.getState().close()}>
-      {open ? <CameraScreen /> : null}
+      {/* El Modal nativo abre su propia ventana: el SafeAreaProvider de más arriba no la mide bien
+          (insets en 0 ahí adentro), así que el botón de cerrar quedaba pegado al borde/notch. */}
+      <SafeAreaProvider>{open ? <CameraScreen /> : null}</SafeAreaProvider>
     </Modal>
   );
 }
@@ -88,7 +90,7 @@ function CameraScreen() {
         accuracy: fix.accuracy ?? null,
         question: question ?? undefined,
         trip_id: useVoiceStore.getState().args?.tripId ?? undefined,
-        tour_id: useVoiceStore.getState().args?.tourId ?? undefined,
+        tour_id: useVoiceStore.getState().args?.tourId ?? cameraTourHooks.tourId() ?? undefined,
         taken_at: new Date().toISOString(),
         language: useVoiceStore.getState().lang,
       },
@@ -123,8 +125,18 @@ function CameraScreen() {
     }
     setPhase({ kind: 'result', uri, out });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (out.facts_used.length) {
+      useVoiceStore.getState().addSources({
+        kind: 'photo',
+        topic: out.place && out.place.confidence >= 0.6 ? out.place.name : 'Tu foto',
+        items: out.facts_used.map((f) => ({ text: f.text, url: f.source_url })),
+      });
+    }
+    // Tour interno: la foto reconoció una parada → llegada (sin aviso aparte al scout: va en photo_result).
+    if (out.tour_stop) cameraTourHooks.onTourStop(out.tour_stop.stop_id);
     // El scout lo narra (si hay llamada). Sin llamada, la tarjeta alcanza.
     useVoiceStore.getState().injectEvent('photo_result', {
+      ...(out.tour_stop ? { tour_stop: out.tour_stop } : {}),
       photo_id: out.photo_id,
       question,
       place: out.place,

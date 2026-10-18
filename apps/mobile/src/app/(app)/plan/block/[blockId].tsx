@@ -1,5 +1,5 @@
 // Detalle de bloque (sheet al 60 %, expandible): ver, editar (update_block), mover (move_block), borrar (remove_block).
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
@@ -22,6 +22,8 @@ import { confirm } from '../../../../features/plan/menu';
 import { toolErrorMessage, useMoveBlock, useRemoveBlock, useUpdateBlock } from '../../../../features/plan/mutations';
 import { useMe, usePermissions, usePlanBlocks, usePlanOverview } from '../../../../features/plan/queries';
 import { durationLabel, timeLabel, type PlanBlock } from '../../../../features/plan/selectors';
+import { hasCoords } from '../../../../features/now/selectors';
+import { openRoute } from '../../../../features/route/nav';
 import { formatDay } from '../../../../lib/format';
 import { Avatar } from '../../../../ui/Avatar';
 import { Button } from '../../../../ui/Button';
@@ -211,7 +213,21 @@ function ViewMode({
             ))}
           </View>
         ) : null}
-        {block.transfer?.maps_url ? (
+        {/* Un solo "Cómo llego": con coordenadas, la ruta embebida (que ya tiene "Abrir en" Maps/Google Maps/Waze);
+            sin coordenadas, el link de Google Maps del traslado si lo hay. */}
+        {hasCoords(block) ? (
+          <Button
+            label="Cómo llego"
+            variant="secondary"
+            accessibilityHint="Ver la ruta hasta acá"
+            onPress={() => {
+              const target = { block_id: block.id, lat: block.lat, lng: block.lng, name: block.place_name ?? block.title };
+              // Cerramos el sheet y abrimos la ruta en las tabs del viaje (un push desde el sheet apilaría otro viaje).
+              closeSheet();
+              openRoute(router, tripId, target);
+            }}
+          />
+        ) : block.transfer?.maps_url ? (
           <Button label="Cómo llego (Google Maps)" variant="secondary" onPress={() => void Linking.openURL(block.transfer!.maps_url!)} />
         ) : null}
         {block.booking_url ? (

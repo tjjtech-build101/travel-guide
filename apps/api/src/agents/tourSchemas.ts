@@ -43,6 +43,14 @@ export const JudgeOutput = z.object({
 });
 export type JudgeOutputT = z.infer<typeof JudgeOutput>;
 
+// ---------- Pedido libre de la persona → campos concretos ----------
+export const InterpretOutput = z.object({
+  must_include: z.array(z.string()).describe('Lugares concretos que la persona quiere sí o sí (nombre tal cual lo dijo); vacío si no nombra ninguno'),
+  avoid: z.array(z.string()).describe('Cosas que no quiere (palabras cortas: "iglesias", "museos", "subidas")'),
+  themes: z.array(z.string()).describe('Temas que le interesan, de esta lista: historia, arquitectura, arte, museos, comida, mercados, vida_nocturna, musica, naturaleza, playa, compras, deporte, fotografia, religion, tecnologia, curiosidades, para_chicos'),
+});
+export type InterpretOutputT = z.infer<typeof InterpretOutput>;
+
 // ---------- Director: tesis, arco y papel de cada parada ----------
 export const StopRole = z.enum(['gancho', 'desarrollo', 'giro', 'climax', 'respiro', 'cierre']);
 export const DirectorOutput = z.object({

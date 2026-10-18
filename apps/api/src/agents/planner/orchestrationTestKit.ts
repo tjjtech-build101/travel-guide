@@ -7,7 +7,7 @@ import type { Db } from '../../supabase';
 import type { ToolCtx } from '../../tools/types';
 import { emptyUsage } from '../schemas';
 import type { PlannerModules } from './runtime';
-import type { ComposedBlock, PlannerGroup } from './types';
+import type { ComposedBlock, ComposeInput, PlannerGroup } from './types';
 
 type Row = Record<string, unknown>;
 type Filter = (r: Row) => boolean;
@@ -334,18 +334,28 @@ export function fakeGroup(): PlannerGroup {
   };
 }
 
-export type ModuleCalls = { getCatalog: string[]; compose: { leg: string; picks: string[]; instruction: string | null | undefined }[] };
+export type ModuleCalls = {
+  getCatalog: string[];
+  compose: {
+    leg: string;
+    picks: string[];
+    instruction: string | null | undefined;
+    anchors?: string[];
+    dayWindows?: ComposeInput['leg']['dayWindows'];
+  }[];
+};
 
 /**
  * Módulos falsos: catálogo fijo (o error por ciudad), menú = must (preseleccionados) + recomendados, armado = 1
  * actividad por pick repartida en los días + una cena "elegí 1 de 2" por día.
  */
-export function fakeModules(opts: { failCity?: string; smallCity?: string } = {}): { m: PlannerModules; calls: ModuleCalls } {
+export function fakeModules(opts: { failCity?: string; failCities?: string[]; smallCity?: string } = {}): { m: PlannerModules; calls: ModuleCalls } {
   const calls: ModuleCalls = { getCatalog: [], compose: [] };
   const m: PlannerModules = {
-    async getCatalog(_admin, city) {
+    async getCatalog(_admin, city, _deps, catOpts) {
       calls.getCatalog.push(city.city);
-      if (city.city === opts.failCity) throw new Error('Google sin key');
+      catOpts?.onProgress?.(`Investigando qué no te podés perder en ${city.city}…`);
+      if (city.city === opts.failCity || opts.failCities?.includes(city.city)) throw new Error('Google sin key');
       const items = city.city === opts.smallCity ? catalogItems().slice(0, 3) : catalogItems(city.city.slice(0, 3).toLowerCase());
       return { items, lodging_zones: [], cached: false, usage: emptyUsage() };
     },
@@ -372,7 +382,13 @@ export function fakeModules(opts: { failCity?: string; smallCity?: string } = {}
       now: () => new Date(),
     }),
     async composeLeg(input) {
-      calls.compose.push({ leg: input.leg.city, picks: input.picks.map((p) => p.item.id), instruction: input.instruction });
+      calls.compose.push({
+        leg: input.leg.city,
+        picks: input.picks.map((p) => p.item.id),
+        instruction: input.instruction,
+        anchors: (input.anchors ?? []).map((a) => a.id),
+        dayWindows: input.leg.dayWindows,
+      });
       const days = input.leg.days;
       const blocks: ComposedBlock[] = input.picks.map((p, i) => ({
         type: 'activity',

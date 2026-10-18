@@ -5,6 +5,8 @@ import { CIUDAD_VIEJA_STOPS } from './demo';
 import { distanceMeters } from './location';
 import {
   createEngineState,
+  engineArrive,
+  engineLeave,
   engineMarkTold,
   engineOnFix,
   engineProgress,
@@ -356,5 +358,56 @@ describe('tourEngine · estado persistible', () => {
     expect(Object.keys(s.visited)).toEqual(['s1', 's2']);
     expect(s.skipped).toEqual(['s4']);
     expect(engineView(CV, s, null, T0).next?.stop_id).toBe('s3');
+  });
+});
+
+describe('tour interno (positioning manual)', () => {
+  // Todas las paradas con las coordenadas del museo (adentro el GPS no distingue salas).
+  const MUSEO = { lat: -34.9067, lng: -56.2009 };
+  const indoor = tourOf(
+    ['Autorretrato', 'Arte constructivo', 'Juguetes'].map((name) => ({ name, ...MUSEO })),
+    { positioning: 'manual' },
+  );
+
+  it('el GPS no genera llegadas ni desvíos', () => {
+    let s = fresh(indoor);
+    const evs: TourEngineEvent[] = [];
+    for (let i = 0; i < 120; i++) {
+      // Parado en el museo y después 400 m lejos: nada.
+      const r = engineOnFix(indoor, s, { t: T0 + i * 1000, lat: MUSEO.lat + (i > 60 ? 0.004 : 0), lng: MUSEO.lng, speed: 1 });
+      s = r.state;
+      evs.push(...r.events);
+    }
+    expect(evs.filter((e) => e.type === 'arrived_stop' || e.type === 'left_route')).toEqual([]);
+    expect(s.insideStopId).toBeNull();
+  });
+
+  it('llegada a mano: arrived_stop manual, sale de la anterior, sin duplicados', () => {
+    let r = engineArrive(indoor, fresh(indoor), 's1', T0 + MIN);
+    expect(r.events).toMatchObject([{ type: 'arrived_stop', payload: { stop_id: 's1', manual: true, order_changed: false, pending_stops: 2 } }]);
+    expect(engineArrive(indoor, r.state, 's1', T0 + 2 * MIN).events).toEqual([]);
+    // Salta a la 3 (orden flexible): sale de la 1.
+    r = engineArrive(indoor, r.state, 's3', T0 + 5 * MIN);
+    expect(r.events.map((e) => e.type)).toEqual(['left_stop', 'arrived_stop']);
+    expect(r.events[1]).toMatchObject({ payload: { stop_id: 's3', order_changed: true } });
+    expect(r.state.visited.s1.leftAt).toBe(T0 + 5 * MIN);
+  });
+
+  it('permanencia y fin: dwell a los 90 s; "sigo" en la última termina el tour', () => {
+    let s = engineArrive(indoor, fresh(indoor), 's1', T0).state;
+    const dwell = engineTick(indoor, s, T0 + 95_000);
+    expect(dwell.events.map((e) => e.type)).toEqual(['dwell']);
+    s = engineArrive(indoor, dwell.state, 's2', T0 + 4 * MIN).state;
+    s = engineSkip(indoor, s, 's3');
+    const leave = engineLeave(indoor, s, T0 + 8 * MIN);
+    expect(leave.events.map((e) => e.type)).toEqual(['left_stop', 'tour_done']);
+    expect(leave.state.status).toBe('done');
+  });
+
+  it('marcar una salteada la vuelve a contar', () => {
+    const s = engineSkip(indoor, fresh(indoor), 's2');
+    const r = engineArrive(indoor, s, 's2', T0);
+    expect(r.state.skipped).toEqual([]);
+    expect(r.events[0]).toMatchObject({ type: 'arrived_stop', payload: { stop_id: 's2' } });
   });
 });

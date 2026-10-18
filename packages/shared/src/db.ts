@@ -106,6 +106,7 @@ export interface BlockTransfer {
   summary?: string;
   maps_url?: string;
   estimated?: boolean;
+  auto?: boolean;
 }
 
 export interface BlockAlert {

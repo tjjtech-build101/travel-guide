@@ -38,7 +38,7 @@ export const BLOCK_COLUMNS = [
   'updated_at',
 ] as const;
 export const BLOCK_SELECT = BLOCK_COLUMNS.join(',');
-// PRD 31: blocks.choice_group NO va en BLOCK_COLUMNS a propósito: si la migración 20261017000010 no está aplicada,
+// PRD 31: blocks.choice_group NO va en BLOCK_COLUMNS a propósito: si la migración 20261017000011 no está aplicada,
 // todas las lecturas de bloques fallarían. Lo leen/escriben explícitamente choose_option y el armado de días.
 
 /** Campos que se pueden escribir desde un patch (sin pertenencia ni auditoría). */

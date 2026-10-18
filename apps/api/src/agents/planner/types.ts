@@ -7,6 +7,7 @@ import type {
   BlockFieldsInput,
   CatalogItem,
   LegOptionRow,
+  TripAnchor,
   OptionReaction,
   OptionSection,
   PlanCoverage,
@@ -45,6 +46,11 @@ export type PlannerGroup = {
   hasKids: boolean;
   firstTime: boolean;
   stepFree: boolean;
+  /**
+   * Intereses que salieron de la conversación / la entrevista / trip_prefs (no del perfil guardado). Pesan aunque
+   * sean < 3; los demás intereses flojos no suman (catalog.scoreItem). Opcional: sin dato = nada dicho.
+   */
+  spoken?: string[];
 };
 
 // ───────────────────────── Catálogo (catalog.ts)
@@ -125,18 +131,38 @@ export type ComposeLeg = {
   country: string | null;
   center: { lat: number; lng: number } | null;
   days: { id: string; date: string }[];
-  /** Llegada/salida: minutos del día desde los que se puede arrancar / hasta los que hay tiempo. */
-  dayWindows: Record<string, { start_min: number; end_min: number }>;
+  /**
+   * Por fecha (YYYY-MM-DD). Llegada/salida: minutos del día desde los que se puede arrancar / hasta los que hay
+   * tiempo. cap_factor recorta la capacidad (llegada internacional ≈ 0,35), dinner_min adelanta la cena y note es
+   * el aviso para el grupo ("Llegan de un vuelo largo…"), que va en el primer bloque del día.
+   */
+  dayWindows: Record<string, DayWindow>;
   /** Pronóstico por fecha (si hay). */
   weather: Record<string, { precip_prob: number | null; temp_max: number | null; sunset_min: number | null }>;
   lodging: { lat: number; lng: number } | null;
   lodgingZones: { zone: string; why: string; lat: number | null; lng: number | null }[];
 };
 
+export type DayWindow = {
+  start_min: number;
+  end_min: number;
+  cap_factor?: number;
+  dinner_min?: number;
+  /** Día de ancla: la comida que choca con el evento no se agenda (la cubren la previa o el tercer tiempo). */
+  skip_lunch?: boolean;
+  skip_dinner?: boolean;
+  note?: string;
+};
+
 export type ComposeInput = {
   leg: ComposeLeg;
   group: PlannerGroup;
   picks: PickedItem[];
+  /**
+   * Anclas del viaje que caen en este tramo (runtime.anchorsForLeg): las que tienen fecha del tramo van como bloque
+   * fijo en su día (con previa y tercer tiempo si es deporte/recital); las sin fecha confirmada, al banco de ideas.
+   */
+  anchors?: TripAnchor[];
   /** Instrucción libre ("más tranqui", "el martes libre a la tarde"); el composer solo usa lo que entiende. */
   instruction?: string | null;
 };

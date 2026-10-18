@@ -12,6 +12,7 @@ import { camera, useCameraStore } from '../camera/cameraStore';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { useVoiceStore, type CallError, type Line } from '../store';
 import { ActionCards } from './ActionCards';
+import { SourcesButton, SourcesSheet, SourcesToast } from './Sources';
 import { ScoutAvatar } from '../../ui/ScoutAvatar';
 import { mmss, SCOUT_COLOR, useElapsed } from './CallBar';
 import { ScoutStage } from './ScoutStage';
@@ -75,6 +76,7 @@ function Live() {
   const startedAt = useVoiceStore((s) => s.startedAt);
   const lines = useVoiceStore((s) => s.lines);
   const notice = useVoiceStore((s) => s.notice);
+  const sourcesOpen = useVoiceStore((s) => s.sourcesOpen);
   const ptt = useVoiceStore((s) => s.turnTaking);
   const captions = useVoiceStore((s) => s.captions);
   const [showAll, setShowAll] = useState(false);
@@ -103,9 +105,13 @@ function Live() {
 
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       <ActionCards style={styles.cards} />
+      <SourcesToast style={styles.cards} />
+      <SourcesButton />
 
       <Controls />
       <TranscriptSheet visible={showAll} lines={lines} onClose={() => setShowAll(false)} />
+      {/* Dentro del Modal de la llamada (iOS no presenta dos Modal hermanos a la vez). */}
+      <SourcesSheet visible={sourcesOpen} />
     </View>
   );
 }

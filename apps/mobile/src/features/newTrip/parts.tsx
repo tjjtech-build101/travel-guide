@@ -1,28 +1,28 @@
-// Piezas comunes de las fases de "Nuevo viaje": marco con atrás + pie fijo y el Scout que conduce cada paso,
-// fila de fechas, aviso de error con reintento y el ícono de modo de traslado.
-import type { TransferMode } from '@build101/shared';
+// Piezas comunes de las fases de "Nuevo viaje": marco con atrás + pie fijo y el Scout que conduce cada paso, burbuja del compañero,
+// contador de días, botón de texto largo, aviso de error con reintento, el ícono de modo de traslado y la tarjetita de un ancla del viaje.
+import type { TransferMode, TripAnchor } from '@build101/shared';
+import * as WebBrowser from 'expo-web-browser';
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ColorValue } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ColorValue } from 'react-native';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
-import { formatDay } from '../../lib/format';
+import { Button } from '../../ui/Button';
+import { BackIcon } from '../../ui/icons';
 import type { ScoutMode, ScoutPose } from '../../scout/ScoutRig';
 import { ErrorNotice } from '../../ui/ErrorNotice';
 import { ScoutSays } from '../../ui/ScoutSays';
-import { Button } from '../../ui/Button';
-import { BackIcon } from '../../ui/icons';
 import { Text } from '../../ui/Text';
 import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
-import { Chip } from '../plan/components/Controls';
+import { daysLabel, MAX_DAYS, MIN_DAYS } from './calendarModel';
+import { anchorWhen, TICKETS_LABEL } from './model';
 
 export function isoIn(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-const DATES = Array.from({ length: 120 }, (_, i) => isoIn(i));
 
 /** Lo que dice el Scout arriba de una fase (cambia con el estado: pensando mientras carga, etc.). */
 export type StepScout = { text: string; pose?: ScoutPose; mode?: ScoutMode };
@@ -71,14 +71,107 @@ export function StepShell({
   );
 }
 
-/** Fila horizontal de fechas (hoy + 120 días). Tocar la elegida la saca. */
-export function DateRow({ value, onChange }: { value: string | null; onChange: (iso: string | null) => void }) {
+export function Bubble({ text }: { text: string }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateRow}>
-      {DATES.map((d) => (
-        <Chip key={d} label={formatDay(d)} selected={value === d} onPress={() => onChange(value === d ? null : d)} />
-      ))}
-    </ScrollView>
+    <Animated.View entering={FadeInUp.duration(200)} style={styles.bubble}>
+      <Text style={styles.bubbleText}>{text}</Text>
+    </Animated.View>
+  );
+}
+
+/**
+ * "[−] 9 días [+]" (1-60). `selected` = la cantidad elegida es esta (si no, se ve apagado y tocar el número la elige).
+ */
+export function DaysStepper({
+  value,
+  selected = true,
+  onChange,
+  label,
+}: {
+  value: number;
+  selected?: boolean;
+  onChange: (n: number) => void;
+  label?: string;
+}) {
+  const set = (n: number) => onChange(Math.max(MIN_DAYS, Math.min(MAX_DAYS, n)));
+  return (
+    <View style={styles.stepperRow}>
+      {label ? <Text style={styles.stepperLabel}>{label}</Text> : null}
+      <View
+        style={styles.stepper}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label ?? 'Cantidad de días'}
+        accessibilityValue={{ text: daysLabel(value) }}
+        accessibilityState={{ selected }}
+        accessibilityHint="Deslizá para arriba o abajo para cambiar; tocá dos veces para elegir esta cantidad"
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }, { name: 'activate' }]}
+        onAccessibilityAction={(e) => {
+          const name = e.nativeEvent.actionName;
+          set(name === 'increment' ? value + 1 : name === 'decrement' ? value - 1 : value);
+        }}
+      >
+        <StepBtn sign="−" disabled={value <= MIN_DAYS} onPress={() => set(value - 1)} />
+        <Pressable
+          onPress={() => set(value)}
+          style={({ pressed }) => [styles.stepperValue, selected && styles.stepperValueOn, pressed && { opacity: 0.75 }]}
+        >
+          <Text style={[styles.stepperText, selected && styles.stepperTextOn]}>{daysLabel(value)}</Text>
+        </Pressable>
+        <StepBtn sign="+" disabled={value >= MAX_DAYS} onPress={() => set(value + 1)} />
+      </View>
+    </View>
+  );
+}
+
+function StepBtn({ sign, disabled, onPress }: { sign: '−' | '+'; disabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={4}
+      style={({ pressed }) => [styles.stepBtn, disabled && { opacity: 0.35 }, pressed && { opacity: 0.6 }]}
+    >
+      <Text style={styles.stepBtnText}>{sign}</Text>
+    </Pressable>
+  );
+}
+
+/** Botón que puede ocupar dos renglones (los de ui/Button cortan en uno): textos largos como "Pasemos a las opciones…". */
+export function TextButton({
+  label,
+  onPress,
+  disabled,
+  loading,
+  primary,
+  accessibilityHint,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  primary?: boolean;
+  accessibilityHint?: string;
+}) {
+  const off = disabled || loading;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={off}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: !!off, busy: !!loading }}
+      style={({ pressed }) => [styles.textBtn, primary && styles.textBtnPrimary, off && !loading && { opacity: 0.45 }, pressed && { opacity: 0.75 }]}
+    >
+      {loading ? (
+        <ActivityIndicator color={primary ? colors.primaryText : colors.primary} />
+      ) : (
+        <Text style={[styles.textBtnText, primary && styles.textBtnTextPrimary]} numberOfLines={2}>
+          {label}
+        </Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -176,8 +269,88 @@ export function ModeIcon({ mode, color = colors.textMuted, size = 16 }: { mode: 
   }
 }
 
+/** Ícono de evento (entrada con estrella). */
+export function AnchorIcon({ color = colors.bronzeText, size = 18 }: { color?: ColorValue; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z" />
+      <Path d="M12 8.5l1 2 2.2.3-1.6 1.5.4 2.2-2-1.1-2 1.1.4-2.2-1.6-1.5 2.2-.3z" />
+    </Svg>
+  );
+}
+
+function openSource(url: string) {
+  if (!/^https?:\/\//i.test(url)) return;
+  void WebBrowser.openBrowserAsync(url).catch(() => undefined);
+}
+
+/**
+ * Ancla del viaje (partido, recital, casamiento): nombre, cuándo, dónde, entradas, nota y fuentes tocables.
+ * `researched:false` → "a confirmar" (sale de lo que contó la persona o de la memoria del modelo).
+ */
+export function AnchorCard({ anchor, compact = false }: { anchor: TripAnchor; compact?: boolean }) {
+  const where = [anchor.venue, anchor.city].filter(Boolean).join(' · ');
+  const sources = (anchor.sources ?? []).filter((src) => /^https?:\/\//i.test(src.url));
+  return (
+    <View
+      style={[styles.anchor, compact && styles.anchorCompact]}
+      accessible={!sources.length}
+      accessibilityLabel={`${anchor.name}. ${anchorWhen(anchor)}${where ? `, ${where}` : ''}. ${TICKETS_LABEL[anchor.tickets]}${anchor.researched ? '' : '. A confirmar'}`}
+    >
+      <View style={styles.anchorHead}>
+        <AnchorIcon />
+        <Text style={styles.anchorName} numberOfLines={2}>
+          {anchor.name}
+        </Text>
+        {!anchor.researched ? (
+          <View style={styles.confirm}>
+            <Text style={styles.confirmText}>a confirmar</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.anchorWhen}>
+        {anchorWhen(anchor)}
+        {where ? ` · ${where}` : ''}
+      </Text>
+      {anchor.tickets !== 'unknown' || !compact ? <Text style={styles.anchorMeta}>{TICKETS_LABEL[anchor.tickets]}</Text> : null}
+      {anchor.note ? <Text style={styles.anchorNote}>{anchor.note}</Text> : null}
+      {sources.length ? (
+        <View style={styles.sources}>
+          {sources.slice(0, 3).map((src, i) => (
+            <Pressable
+              key={`${src.url}-${i}`}
+              onPress={() => openSource(src.url)}
+              accessibilityRole="link"
+              accessibilityLabel={`Fuente: ${src.title ?? src.url}`}
+              hitSlop={8}
+              style={({ pressed }) => [styles.source, pressed && { opacity: 0.7 }]}
+            >
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {sources.length > 1 ? `Fuente ${i + 1}` : 'Fuente'}
+                {src.title ? `: ${src.title}` : ''} ↗
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  anchor: { backgroundColor: colors.khakiLight, borderRadius: radius.md, padding: space.md, gap: 4, borderWidth: 1, borderColor: colors.bronze },
+  anchorCompact: { padding: space.sm },
+  anchorHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  anchorName: { fontSize: font.small, fontWeight: '800', color: colors.text, flexShrink: 1 },
+  anchorWhen: { fontSize: font.tiny, fontWeight: '700', color: colors.bronzeText },
+  anchorMeta: { fontSize: font.tiny, color: colors.textMuted },
+  anchorNote: { fontSize: font.tiny, color: colors.text, lineHeight: 18 },
+  confirm: { marginLeft: 'auto', borderRadius: radius.pill, borderWidth: 1, borderColor: colors.bronze, paddingHorizontal: space.sm, paddingVertical: 1 },
+  confirmText: { fontSize: font.tiny, fontWeight: '700', color: colors.bronzeText },
+  sources: { flexDirection: 'row', flexWrap: 'wrap', gap: space.md },
+  source: { minHeight: 32, justifyContent: 'center', maxWidth: '100%' },
+  sourceText: { fontSize: font.tiny, fontWeight: '700', color: colors.primary },
   body: { padding: space.lg, gap: space.md, paddingBottom: space.xxl, backgroundColor: colors.bg, flexGrow: 1 },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   back: { width: MIN_TOUCH, height: MIN_TOUCH, alignItems: 'center', justifyContent: 'center', marginLeft: -space.md },
@@ -191,7 +364,48 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.bg,
   },
-  dateRow: { gap: space.sm, paddingVertical: space.xs },
+  bubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '90%',
+    borderRadius: radius.lg,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  bubbleText: { fontSize: font.body, color: colors.text, lineHeight: 23 },
+  stepperRow: { gap: space.xs },
+  stepperLabel: { fontSize: font.small, fontWeight: '700', color: colors.textMuted },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: space.sm, alignSelf: 'flex-start' },
+  stepBtn: {
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    borderRadius: MIN_TOUCH / 2,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  stepBtnText: { fontSize: 24, lineHeight: 28, fontWeight: '700', color: colors.primary },
+  stepperValue: {
+    minWidth: 96,
+    minHeight: MIN_TOUCH - 8,
+    paddingHorizontal: space.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValueOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  stepperText: { fontSize: font.body, fontWeight: '700', color: colors.text },
+  stepperTextOn: { color: colors.primaryText },
+  textBtn: { minHeight: MIN_TOUCH, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.lg, paddingVertical: space.xs },
+  textBtnPrimary: { backgroundColor: colors.primary, borderRadius: radius.md },
+  textBtnText: { fontSize: font.body, fontWeight: '600', color: colors.primary, textAlign: 'center' },
+  textBtnTextPrimary: { color: colors.primaryText },
   error: { backgroundColor: colors.dangerBg, borderColor: colors.danger, borderWidth: 1, borderRadius: radius.md, padding: space.md, gap: space.sm },
   errorText: { fontSize: font.small, color: colors.danger, fontWeight: '600' },
   errorActions: { flexDirection: 'row', gap: space.sm },

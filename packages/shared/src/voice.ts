@@ -131,6 +131,16 @@ export type ScheduleAlertPayload = {
   late_by_min: number | null;
 };
 
+/** Fuentes que llegan a la llamada (research, cámara, paradas del tour): las muestra la hoja de Fuentes. */
+export type VoiceSourceGroup = {
+  id: string;
+  kind: 'research' | 'photo' | 'stop';
+  /** De qué se trata: la pregunta, el lugar de la foto o la parada. */
+  topic: string;
+  items: { text?: string; url: string; quote?: string; title?: string }[];
+  at: number;
+};
+
 /** Payload de [EVENTO:tour_ready]. */
 export type TourReadyEvent = {
   tour_id: string;
@@ -141,6 +151,8 @@ export type TourReadyEvent = {
   stops: { sort_order: number; name: string }[];
   /** Cómo quedó en el plan (para que el Scout lo cuente: "te lo dejé a las 15:40" / "quedó propuesto al grupo"). */
   plan?: TourPlanLink;
+  /** Lugares que la persona pidió y no quedaron en el tour: el Scout lo tiene que decir. */
+  missing_must?: string[];
 };
 export type VoiceEventType = (typeof VOICE_EVENT_TYPES)[number];
 
@@ -210,6 +222,34 @@ export const VOICE_CLIENT_TOOLS = [
     parameters: {
       type: 'object',
       properties: { question: { type: 'string', description: 'Lo que preguntó la persona, si preguntó algo concreto' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'open_tour_planner',
+    description:
+      'Abre en la app el planificador de tour DETALLADO (preguntas con opciones y texto libre, repreguntas y 2-3 recorridos para elegir). Usala cuando la persona quiere un tour a medida / pensado con tiempo. Pasá lo que ya te contó para que aparezca precargado.',
+    parameters: {
+      type: 'object',
+      properties: {
+        story: { type: 'string', description: 'Lo que la persona ya te contó del tour, con sus palabras (qué quiere, lugares, con quién)' },
+        duration_min: { type: 'number', description: 'Minutos, si los dijo' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function' as const,
+    name: 'at_stop',
+    description:
+      'Tour interno (museo, mercado): la persona dice que llegó o que está frente a una parada ("llegué", "estoy frente al autorretrato"). Marca la llegada en el celu y devuelve la parada; después narrala con get_stop_content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        stop_id: { type: 'string', description: 'stop_id de la parada (de la lista del tour activo)' },
+        name: { type: 'string', description: 'Lo que dijo la persona, si no sabés el stop_id ("la sala de los juguetes")' },
+      },
       additionalProperties: false,
     },
   },

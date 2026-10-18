@@ -1,7 +1,7 @@
 // Piezas de la home (Inicio): héroe (viaje en curso / próximo / bienvenida), accesos rápidos y filas de viajes.
 import { SCOUT } from '@build101/shared';
-import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMemo, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
@@ -13,7 +13,7 @@ import { colors, font, MIN_TOUCH, radius, space } from '../../ui/theme';
 import { callTool } from '../../lib/api';
 import { errorLine } from '../../lib/errors';
 import { formatDateRange } from '../../lib/format';
-import { ChevronIcon, SparkIcon } from '../plan/components/TypeIcon';
+import { ChevronIcon, DotsIcon, SparkIcon } from '../plan/components/TypeIcon';
 import { confirm, showMenu } from '../plan/menu';
 import { openProposals } from '../plan/nav';
 import { useMe, usePendingProposals, usePlanBlocks, usePlanOverview } from '../plan/queries';
@@ -33,12 +33,51 @@ export function openTripPlan(tripId: string) {
   router.push({ pathname: '/trip/[tripId]', params: { tripId } });
 }
 
+/** Menú del viaje (long-press o ⋯): por ahora solo "Borrar viaje" (irreversible; el backend exige organizador). */
+export function useTripMenu() {
+  const qc = useQueryClient();
+  return (trip: Pick<TripCard, 'id' | 'title'>) =>
+    showMenu(trip.title, [
+      {
+        label: 'Borrar viaje',
+        destructive: true,
+        onPress: () =>
+          confirm(
+            'Borrar viaje',
+            `Se borra "${trip.title}" entero: tramos, días, bloques, tours, gastos. No se puede deshacer.`,
+            'Borrar',
+            () => {
+              void (async () => {
+                const res = await callTool('delete_trip', { trip_id: trip.id });
+                if (res.ok) void qc.invalidateQueries({ queryKey: tripKeys.mine() });
+                else Alert.alert('No pude borrar el viaje', errorLine(res.error, { doing: 'borrar el viaje' }));
+              })();
+            },
+          ),
+      },
+    ]);
+}
+
 // ───────── Héroe
 
-function HeroShell({ pose, onPress, label, children }: { pose: ScoutPose; onPress?: () => void; label: string; children: ReactNode }) {
+function HeroShell({
+  pose,
+  onPress,
+  onLongPress,
+  label,
+  children,
+}: {
+  pose: ScoutPose;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={450}
       disabled={!onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -88,6 +127,7 @@ function ProposalsChip({ tripId }: { tripId: string }) {
 /** Viaje en curso: qué toca ahora / qué sigue, en una tarjeta grande. */
 export function HeroLive({ trip, now }: { trip: TripCard; now: number }) {
   const me = useMe();
+  const tripMenu = useTripMenu();
   const overview = usePlanOverview(trip.id);
   const blocks = usePlanBlocks(trip.id);
 
@@ -171,7 +211,7 @@ export function HeroLive({ trip, now }: { trip: TripCard; now: number }) {
   }
 
   return (
-    <HeroShell pose="compass" label={`Abrir ${trip.title} en Ahora`} onPress={() => openTripNow(trip.id)}>
+    <HeroShell pose="compass" label={`Abrir ${trip.title} en Ahora`} onPress={() => openTripNow(trip.id)} onLongPress={() => tripMenu(trip)}>
       <Kicker>{kicker}</Kicker>
       <Text style={styles.heroTitle} numberOfLines={2}>
         {trip.title}
@@ -185,6 +225,7 @@ export function HeroLive({ trip, now }: { trip: TripCard; now: number }) {
 
 /** Próximo viaje: cuenta regresiva y cuánto del plan ya está armado. */
 export function HeroUpcoming({ trip, now }: { trip: TripCard; now: number }) {
+  const tripMenu = useTripMenu();
   const overview = usePlanOverview(trip.id);
   const blocks = usePlanBlocks(trip.id);
   const days = daysUntilStart(trip, now);
@@ -199,7 +240,7 @@ export function HeroUpcoming({ trip, now }: { trip: TripCard; now: number }) {
   }, [overview.data, blocks.data]);
 
   return (
-    <HeroShell pose="map" label={`Abrir ${trip.title}`} onPress={() => openTripPlan(trip.id)}>
+    <HeroShell pose="map" label={`Abrir ${trip.title}`} onPress={() => openTripPlan(trip.id)} onLongPress={() => tripMenu(trip)}>
       <Kicker>Tu próximo viaje</Kicker>
       <View style={styles.countRow}>
         {days !== null && days > 1 ? (
@@ -316,6 +357,7 @@ function DateBadge({ iso, dim }: { iso: string | null; dim?: boolean }) {
 }
 
 export function TripRow({ trip, now, kind }: { trip: TripCard; now: number; kind: 'live' | 'upcoming' | 'past' }) {
+  const tripMenu = useTripMenu();
   const pill =
     kind === 'live'
       ? { text: 'En curso', bg: colors.scout, fg: colors.scoutText }
@@ -323,35 +365,13 @@ export function TripRow({ trip, now, kind }: { trip: TripCard; now: number; kind
         ? { text: 'Terminado', bg: colors.surfaceMuted, fg: colors.textMuted }
         : { text: countdownLabel(daysUntilStart(trip, now)), bg: colors.khakiLight, fg: colors.khakiText };
   const sub = trip.destinations.length ? trip.destinations.join(' · ') : formatDateRange(trip.start_date, trip.end_date);
-  const qc = useQueryClient();
-  const onMenu = () => {
-    showMenu(trip.title, [
-      {
-        label: 'Borrar viaje',
-        destructive: true,
-        onPress: () =>
-          confirm(
-            'Borrar viaje',
-            `Se borra "${trip.title}" entero: tramos, días, bloques, tours, gastos. No se puede deshacer.`,
-            'Borrar',
-            () => {
-              void (async () => {
-                const res = await callTool('delete_trip', { trip_id: trip.id });
-                if (res.ok) void qc.invalidateQueries({ queryKey: tripKeys.mine() });
-                else Alert.alert('No pude borrar el viaje', errorLine(res.error, { doing: 'borrar el viaje' }));
-              })();
-            },
-          ),
-      },
-    ]);
-  };
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Abrir ${trip.title}, ${pill.text}`}
-      accessibilityHint="Mantené apretado para más opciones"
       onPress={() => (kind === 'live' ? openTripNow(trip.id) : openTripPlan(trip.id))}
-      onLongPress={onMenu}
+      onLongPress={() => tripMenu(trip)}
+      delayLongPress={450}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <DateBadge iso={trip.start_date} dim={kind === 'past'} />
@@ -369,9 +389,15 @@ export function TripRow({ trip, now, kind }: { trip: TripCard; now: number; kind
           {trip.members.length > 1 ? <AvatarStack people={trip.members} size={24} max={4} /> : null}
         </View>
       </View>
-      <View style={{ transform: [{ rotate: '-90deg' }] }}>
-        <ChevronIcon color={colors.textMuted} size={18} />
-      </View>
+      <Pressable
+        onPress={() => tripMenu(trip)}
+        accessibilityRole="button"
+        accessibilityLabel={`Opciones de ${trip.title}`}
+        hitSlop={8}
+        style={styles.rowMenu}
+      >
+        <DotsIcon color={colors.textMuted} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -518,6 +544,7 @@ const styles = StyleSheet.create({
   rowTitle: { fontSize: font.body, fontWeight: '700', color: colors.text },
   rowSub: { fontSize: font.small, color: colors.textMuted },
   rowFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: space.xs },
+  rowMenu: { alignSelf: 'stretch', justifyContent: 'center', paddingLeft: space.xs },
   pill: { paddingHorizontal: space.sm, paddingVertical: 3, borderRadius: radius.pill },
   pillText: { fontSize: 12, fontWeight: '700' },
 });

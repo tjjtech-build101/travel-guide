@@ -95,3 +95,35 @@ describe('compose_days', () => {
     expect(picks[3].score).toBeCloseTo(0.6);
   });
 });
+
+describe('compose_days · anclas y llegada larga', () => {
+  it('reusa las anclas y el origen que guardó plan_trip', async () => {
+    const { fake, tripId, mvd, calls, deps } = setup();
+    fake.seed('agent_jobs', [
+      {
+        id: 'prev-plan',
+        trip_id: tripId,
+        kind: 'plan_trip',
+        status: 'done',
+        created_at: '2026-10-17T10:00:00Z',
+        updated_at: '2026-10-17T10:00:00Z',
+        result: {
+          assumptions: [],
+          request: {
+            conversation: [{ role: 'user', text: 'Montevideo' }],
+            understanding: {
+              origin: 'Buenos Aires, Argentina',
+              anchors: [{ id: 'recital', name: 'Recital en el Solís', kind: 'concert', city: 'Montevideo', date: '2026-10-21', time: '21:00', venue: 'Teatro Solís', tickets: 'have', researched: true, sources: [], note: null }],
+            },
+          },
+        },
+      },
+    ]);
+    const start = await startComposeDays({ trip_id: tripId }, ctxFor(fake, U.juan), deps);
+    await start.run();
+    expect(calls.compose[0].anchors).toEqual(['recital']);
+    // Buenos Aires → Montevideo no es vuelo largo.
+    expect(calls.compose[0].dayWindows?.['2026-10-20']?.cap_factor).toBeUndefined();
+    expect(mvd.dayIds).toHaveLength(2);
+  });
+});

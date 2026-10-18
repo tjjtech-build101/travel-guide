@@ -3,7 +3,7 @@
 //      (sin job, sin web_search)
 //   1) investigar: Claude + web_search/web_fetch → datos atómicos con su URL (captureViaTool, PRD 06)
 //   2) verificar EN PARALELO cada dato contra su URL (verifyFact + VERIFY_SYSTEM del generador de tours)
-//   3) responder en ≤60 palabras SOLO con lo verificado (sin herramientas)
+//   3) responder (hasta ~130 palabras, con detalle) SOLO con lo verificado (sin herramientas)
 //   4) guardar en place_library (crea el lugar si no existía): quote, verified_at, origin, question
 // La voz escucha el job por Realtime y recibe [EVENTO:research_ready].
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
@@ -15,14 +15,16 @@ import type { ToolCtx } from '../tools/types';
 import { anthropicClient, PLANNER_MODEL, textOf, type AnyBlock } from './llm';
 import { addUsage, emptyUsage, type Usage } from './schemas';
 import { anthropicTourLlm, captureViaTool, type TourLlmConfig } from './tourLlm';
+import { fetchPageText } from '../google/pageText';
+import { quoteInText } from './tourCheck';
 import { renderVerifyUser, VERIFY_SYSTEM } from './tourPrompts';
 import { ResearchOutput, type ResearchOutputT } from './tourSchemas';
 
 /** Tope total (Vercel corta a los 300 s; la voz espera "un ratito", no minutos). */
-const BUDGET_MS = 75_000;
-const MAX_FACTS = 5;
+const BUDGET_MS = 90_000;
+const MAX_FACTS = 8;
 
-export const RESEARCH_Q_SYSTEM = `Sos el investigador de una app de viajes rioplatense. Te hacen UNA pregunta concreta (un año, un origen, quién, por qué, una curiosidad) sobre un lugar o tema. Buscala con web_search y web_fetch en fuentes confiables (Wikipedia, sitios oficiales, prensa seria) y reportá con report_facts entre 1 y ${MAX_FACTS} datos atómicos que respondan la pregunta, cada uno con la URL exacta donde aparece. Un dato por fact, escrito tal cual lo respalda la fuente. No inventes ni completes: si no encontrás nada confiable, reportá facts vacío.`;
+export const RESEARCH_Q_SYSTEM = `Sos el investigador de una app de viajes rioplatense. Te hacen UNA pregunta concreta (un año, un origen, quién, por qué, una curiosidad) sobre un lugar o tema. Buscala con web_search y web_fetch en fuentes confiables (Wikipedia, sitios oficiales, prensa seria; abrí las mejores páginas y sacá todo lo útil) y reportá con report_facts entre 1 y ${MAX_FACTS} datos atómicos que respondan la pregunta de la forma más completa posible, cada uno con la URL exacta donde aparece, el título de la fuente y una frase copiada TEXTUAL de esa página que lo respalde (se chequea automáticamente). Un dato por fact, escrito tal cual lo respalda la fuente. No inventes ni completes: si no encontrás nada confiable, reportá facts vacío.`;
 
 export function renderResearchQUser(i: Pick<ToolInput<'research'>, 'question' | 'place_name' | 'lat' | 'lng'>): string {
   const where = i.lat != null && i.lng != null ? ` (cerca de ${i.lat.toFixed(4)}, ${i.lng.toFixed(4)})` : '';
@@ -32,17 +34,17 @@ export function renderResearchQUser(i: Pick<ToolInput<'research'>, 'question' | 
 const AnswerOut = z.object({ answer: z.string() });
 const CacheOut = z.object({
   answerable: z.boolean().describe('true solo si los datos responden la pregunta (lo central, no algo parecido)'),
-  answer: z.string().describe('Respuesta hablada ≤60 palabras con esos datos; vacío si answerable=false'),
+  answer: z.string().describe('Respuesta hablada (hasta 130 palabras) con esos datos; vacío si answerable=false'),
 });
 
-export const ANSWER_SYSTEM = `Sos un guía de viaje que habla en voz alta. Respondé la pregunta en máximo 60 palabras, en tono hablado, usando SOLO los datos verificados que te paso (podés reordenarlos y conectarlos, no agregar años, nombres ni cifras que no estén). Si los datos no alcanzan para responder del todo, decí qué sí se sabe. No menciones fuentes ni "los datos".`;
-export const CACHE_SYSTEM = `Te paso una pregunta y los datos verificados que ya tenemos de un lugar. Decidí si esos datos responden la pregunta (lo que se pregunta concretamente, no algo parecido). Si sí, respondé en máximo 60 palabras en tono hablado usando SOLO esos datos. Si no alcanzan, answerable=false.`;
+export const ANSWER_SYSTEM = `Sos un guía de viaje que habla en voz alta. Respondé la pregunta en tono hablado, completo y con detalle (hasta 130 palabras: todo lo que los datos permitan contar, sin relleno), usando SOLO los datos verificados que te paso (podés reordenarlos y conectarlos, no agregar años, nombres ni cifras que no estén). Si los datos no alcanzan para responder del todo, decí qué sí se sabe. No menciones fuentes ni "los datos".`;
+export const CACHE_SYSTEM = `Te paso una pregunta y los datos verificados que ya tenemos de un lugar. Decidí si esos datos responden la pregunta (lo que se pregunta concretamente, no algo parecido). Si sí, respondé en tono hablado, completo y con detalle (hasta 130 palabras) usando SOLO esos datos. Si no alcanzan, answerable=false.`;
 
 export type VerifiedFact = { text: string; source_url: string; quote: string };
 
 export interface ResearchLLM {
   research(args: { question: ToolInput<'research'>; config: TourLlmConfig; signal: AbortSignal }): Promise<{ facts: ResearchOutputT['facts']; usage: Usage }>;
-  verify(args: { fact: { text: string; source_url: string }; config: TourLlmConfig }): Promise<{ supported: boolean; quote: string; usage: Usage }>;
+  verify(args: { fact: { text: string; source_url: string; quote?: string }; config: TourLlmConfig }): Promise<{ supported: boolean; quote: string; usage: Usage }>;
   answer(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answer: string; usage: Usage }>;
   fromMemory(args: { question: string; facts: { text: string }[]; language: string }): Promise<{ answerable: boolean; answer: string }>;
 }
@@ -57,7 +59,7 @@ async function structured<T extends z.ZodType>(schema: T, system: string, user: 
   const format = betaZodOutputFormat(schema);
   const params = {
     model,
-    max_tokens: 800,
+    max_tokens: 1500,
     output_config: { effort: 'low', format: { type: 'json_schema', schema: format.schema } },
     system: [{ type: 'text', text: system }],
     messages: [{ role: 'user', content: user }],
@@ -81,10 +83,16 @@ export function anthropicResearchLlm(): ResearchLLM {
         serverTools: ['web_search', 'web_fetch'],
         config,
         signal,
+        maxUses: 5,
       });
       return { facts: (r.value?.facts ?? []).slice(0, MAX_FACTS), usage: r.usage };
     },
     async verify({ fact, config }) {
+      // Rápido: si la página se puede bajar, la cita se chequea en código (sin otra vuelta de Claude).
+      if (fact.quote?.trim()) {
+        const page = await fetchPageText(fact.source_url);
+        if (page) return { supported: quoteInText(fact.quote, page), quote: fact.quote, usage: emptyUsage() };
+      }
       const v = await tour.verifyFact({ system: VERIFY_SYSTEM, user: renderVerifyUser(fact), config });
       const quote = v.result?.quote?.trim() ?? '';
       return { supported: !!(v.result?.supported && quote), quote, usage: v.usage };
@@ -117,7 +125,7 @@ async function language(ctx: ToolCtx, input: ToolInput<'research'>): Promise<str
   return (data?.locale as string | undefined) ?? 'es';
 }
 
-export type MemoryHit = { cached: true; answer: string; facts: { text: string; source_url: string }[]; place_id: string };
+export type MemoryHit = { cached: true; answer: string; facts: { text: string; source_url: string; quote?: string }[]; place_id: string };
 
 /** Paso 0: ¿la memoria (place_library) ya responde? null si no (o si falla: se investiga igual). */
 export async function answerFromMemory(input: ToolInput<'research'>, ctx: ToolCtx, llm: ResearchLLM = anthropicResearchLlm()): Promise<MemoryHit | null> {
@@ -129,7 +137,12 @@ export async function answerFromMemory(input: ToolInput<'research'>, ctx: ToolCt
     if (!facts.length) return null;
     const r = await llm.fromMemory({ question: input.question, facts, language: await language(ctx, input) });
     if (!r.answerable || !r.answer.trim()) return null;
-    return { cached: true, answer: r.answer, facts: facts.map((f) => ({ text: f.text, source_url: f.source_url })), place_id: placeId };
+    return {
+      cached: true,
+      answer: r.answer,
+      facts: facts.map((f) => ({ text: f.text, source_url: f.source_url, ...(f.quote ? { quote: f.quote } : {}) })),
+      place_id: placeId,
+    };
   } catch (e) {
     console.warn('[research] memoria:', (e as Error).message);
     return null;
@@ -199,7 +212,7 @@ export async function runResearch(args: {
     const result: ResearchResult = {
       question: input.question,
       answer,
-      facts: verified.map((f) => ({ text: f.text, source_url: f.source_url })),
+      facts: verified.map((f) => ({ text: f.text, source_url: f.source_url, quote: f.quote })),
       rejected,
       place_id: placeId,
       saved_facts: saved,

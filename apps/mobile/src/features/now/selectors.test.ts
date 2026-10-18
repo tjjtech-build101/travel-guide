@@ -15,6 +15,7 @@ import {
   nearbyIdeas,
   needsSuggestions,
   resolveToday,
+  tripTimeZone,
   tzOffsetMin,
   utcFromLocal,
   walkEstimateMin,
@@ -164,6 +165,31 @@ test('isTripInProgress: por fechas o status', () => {
   ok(isTripInProgress({ ...trip, status: 'active' }, utcFromLocal('2026-11-25T10:00')!), 'active manda');
   ok(!isTripInProgress({ ...trip, status: 'finished' }, utcFromLocal('2026-10-18T10:00')!), 'finished');
   ok(!isTripInProgress({ start_date: null, end_date: null }, Date.now()), 'sin fechas');
+});
+test('tramo en París con DST: hoy y minutos según Europe/Paris', () => {
+  const paris = leg('par', '2026-10-24', '2026-10-27', [JUAN], [day('p25', 'par', '2026-10-25'), day('p26', 'par', '2026-10-26')], 'Francia');
+  // 25/10 cambia la hora (CEST → CET): 11:00Z son las 12:00 locales.
+  const r = resolveToday([paris], JUAN, Date.parse('2026-10-25T11:00:00Z'));
+  ok(r.kind === 'today', r.kind);
+  if (r.kind === 'today') {
+    eq(r.day.id, 'p25');
+    eq(r.minutes, 12 * 60);
+  }
+  // 23:30Z del 25 ya es el 26 en París.
+  const r2 = resolveToday([paris], JUAN, Date.parse('2026-10-25T23:30:00Z'));
+  eq(r2.kind === 'today' && r2.day.id, 'p26');
+});
+test('tripTimeZone: mi tramo de hoy, si no mi primero; sin tramos el celu', () => {
+  const ny = { ...leg('ny', '2026-10-20', '2026-10-22', [SOFI], [], 'Estados Unidos'), lat: 40.7, lng: -74 };
+  const at = utcFromLocal('2026-10-21T12:00')!;
+  eq(tripTimeZone([mvd, ny], SOFI, at), 'America/New_York');
+  eq(tripTimeZone([mvd, ny], JUAN, at), 'America/Montevideo');
+  eq(tripTimeZone([ny], JUAN, at), 'America/New_York');
+  ok(typeof tripTimeZone([], JUAN, at) === 'string', 'celu');
+});
+test('isTripInProgress acepta zona IANA', () => {
+  ok(isTripInProgress(trip, Date.parse('2026-10-17T02:00:00Z'), 'Europe/Paris'), 'ya es 17 en París');
+  ok(!isTripInProgress(trip, Date.parse('2026-10-17T02:00:00Z'), 'America/Montevideo'), 'todavía 16 en Montevideo');
 });
 
 console.log('buildNowPlan (día 2 del seed)');

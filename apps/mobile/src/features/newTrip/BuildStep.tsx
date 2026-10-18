@@ -1,5 +1,5 @@
-// Paso 4 · ¿Cómo lo armamos? Con la forma elegida: "Armémoslo juntos" (menú por tramo, mode menu) o
-// "Armalo vos" (días armados directo, mode auto).
+// Paso 4 · ¿Cómo lo armamos? Con la forma elegida: "Armémoslo juntos" (primero una lista de imperdibles y opciones
+// por ciudad para marcar lo que les copa, después los días; mode menu) o "Armalo vos" (días armados directo, mode auto).
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -45,7 +45,7 @@ export function BuildStep() {
               onPress={() => go('menu')}
               loading={loading === 'plan' && busyMode === 'menu'}
               disabled={loading === 'plan'}
-              accessibilityHint="Te muestro un menú por ciudad y el grupo elige qué entra"
+              accessibilityHint="Primero te armo una lista de imperdibles y opciones por ciudad; marcan lo que les copa y después armo los días"
             />
             <Button
               label="Armalo vos"
@@ -72,12 +72,14 @@ export function BuildStep() {
           <View style={styles.option}>
             <Text style={styles.optionTitle}>Armémoslo juntos</Text>
             <Text style={styles.optionText}>
-              Te muestro un menú por ciudad: imperdibles, joyas, comida y escapadas. Cada uno marca lo que le copa y después armo los días con eso.
+              Primero te armo una lista de imperdibles y opciones por ciudad (lugares, comida, escapadas). Vos y el grupo marcan lo que les copa y
+              después armo los días con eso.
             </Text>
+            <Text style={styles.optionHow}>1 · Te paso la lista por ciudad → 2 · Marcan lo que va → 3 · Armo los días</Text>
           </View>
           <View style={styles.option}>
             <Text style={styles.optionTitle}>Armalo vos</Text>
-            <Text style={styles.optionText}>Armo los días directo con lo que me contaste. Después cambiás lo que quieras.</Text>
+            <Text style={styles.optionText}>Armo los días directo con lo que me contaste, sin lista previa. Después cambiás lo que quieras.</Text>
           </View>
 
           {planError ? (
@@ -98,5 +100,6 @@ const styles = StyleSheet.create({
   option: { gap: 2 },
   optionTitle: { fontSize: font.body, fontWeight: '700', color: colors.text },
   optionText: { fontSize: font.small, color: colors.textMuted, lineHeight: 21 },
+  optionHow: { fontSize: font.tiny, fontWeight: '700', color: colors.khakiText, marginTop: 2 },
   muted: { fontSize: font.small, color: colors.textMuted },
 });
