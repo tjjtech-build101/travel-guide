@@ -112,6 +112,27 @@ export class RealLocationProvider implements LocationProvider {
     return this.current;
   }
 
+  /** Le pide al GPS la posición de ahora (no la última del watch). Pide permiso si hace falta; null si no llega a tiempo. */
+  async requestFix(timeoutMs: number): Promise<LocationFix | null> {
+    const perm = await Location.requestForegroundPermissionsAsync();
+    if (perm.status !== 'granted') throw new LocationPermissionError(perm.canAskAgain);
+    const loc = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      new Promise<null>((r) => setTimeout(() => r(null), timeoutMs)),
+    ]);
+    if (!loc) return null;
+    const fix: LocationFix = {
+      t: loc.timestamp,
+      lat: loc.coords.latitude,
+      lng: loc.coords.longitude,
+      heading: this.heading ?? validHeading(loc.coords.heading),
+      speed: loc.coords.speed != null && loc.coords.speed >= 0 ? loc.coords.speed : null,
+      accuracy: loc.coords.accuracy ?? 0,
+    };
+    this.emit(fix);
+    return fix;
+  }
+
   subscribe(cb: (fix: LocationFix) => void): () => void {
     return this.emitter.subscribe(cb);
   }
