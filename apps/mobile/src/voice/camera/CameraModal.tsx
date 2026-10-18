@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { callTool } from '../../lib/api';
 import { Button } from '../../ui/Button';
@@ -27,7 +27,9 @@ export function CameraModal() {
   const open = useCameraStore((s) => s.open);
   return (
     <Modal visible={open} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => useCameraStore.getState().close()}>
-      {open ? <CameraScreen /> : null}
+      {/* El Modal nativo abre su propia ventana: el SafeAreaProvider de más arriba no la mide bien
+          (insets en 0 ahí adentro), así que el botón de cerrar quedaba pegado al borde/notch. */}
+      <SafeAreaProvider>{open ? <CameraScreen /> : null}</SafeAreaProvider>
     </Modal>
   );
 }
