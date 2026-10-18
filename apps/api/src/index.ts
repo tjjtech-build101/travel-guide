@@ -5,7 +5,7 @@ import { TOOL_NAMES } from '@build101/shared';
 import { requireAuth, type AuthVars } from './auth';
 import { env, missingSupabaseEnv } from './env';
 import { dbError } from './errors';
-import { enrichStop, internalToken } from './agents/tourDeepResearch';
+import { enrichStopTracked, internalToken } from './agents/tourDeepResearch';
 import { runInBackground } from './jobs';
 import { serviceClient } from './supabase';
 import { runTool } from './tools/registry';
@@ -61,7 +61,7 @@ app.post('/internal/enrich-stop', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { stop_id?: string };
   const stopId = body.stop_id ?? '';
   if (!stopId || c.req.header('x-internal-token') !== internalToken(stopId)) return c.json({ ok: false }, 401);
-  runInBackground(`enrich-stop/${stopId}`, enrichStop(serviceClient(), stopId));
+  runInBackground(`enrich-stop/${stopId}`, enrichStopTracked(serviceClient(), stopId));
   return c.json({ ok: true, accepted: stopId }, 202);
 });
 

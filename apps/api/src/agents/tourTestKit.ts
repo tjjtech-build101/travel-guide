@@ -37,6 +37,7 @@ export function fakeLlm(): TourLLM & { writes: number } {
         facts: [
           { text: `${title} se inauguró en ${p.year}`, quote: `${title} fue inaugurado en el año ${p.year} tras años de obras.`, kind: 'date' as const },
           { text: `${title} tiene una fachada con detalles de piedra`, quote: 'La fachada tiene detalles de piedra que se ven desde la vereda de enfrente.', kind: 'detail' as const },
+          { text: `${title} fue un punto de encuentro de vecinos y visitantes`, quote: 'Durante mucho tiempo fue un punto de encuentro de vecinos y visitantes del barrio.', kind: 'story' as const },
           // Cita inventada: no está en el artículo → se descarta en código.
           { text: `${title} fue diseñado por Gaudí`, quote: 'Fue diseñado por el arquitecto Antoni Gaudí en persona.', kind: 'person' as const },
         ],
@@ -51,6 +52,9 @@ export function fakeLlm(): TourLLM & { writes: number } {
     async judgeFacts({ user }: { user: string }) {
       const ids = [...user.matchAll(/\[(c\d+)\]/g)].map((m) => m[1]);
       return { usage: u, verdicts: ids.map((id) => ({ id, supported: true })) };
+    },
+    async interpret({ user }: { user: string }) {
+      return { usage: u, request: { must_include: /portones/i.test(user) ? ['Los portones de Carrasco'] : [], avoid: [], themes: [] } };
     },
     async direct({ user }: { user: string }) {
       const keys = [...user.split('ALTERNATIVAS')[0].matchAll(/\[(p\d+)\]/g)].map((m) => m[1]);

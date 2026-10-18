@@ -13,6 +13,7 @@ export const TOUR_QUESTION_IDS = [
   'indoor',
   'finish',
   'must_include',
+  'notes',
 ] as const;
 export type TourQuestionId = (typeof TOUR_QUESTION_IDS)[number];
 
@@ -28,6 +29,8 @@ export type TourQuestion = {
   default: string | string[] | null;
   /** true = se puede dejar sin responder sin preguntar de nuevo. */
   optional: boolean;
+  /** Texto de ejemplo para las preguntas abiertas. */
+  placeholder?: string;
 };
 
 /** data de tour_brief. */
@@ -38,15 +41,17 @@ export type TourBriefResult = {
   neighborhood: string | null;
   /** Lo que el Scout tiene en cuenta (bullets cortos para la hoja "Lo que tengo en cuenta"). */
   context: string[];
-  /** Ordenadas por importancia; las obligatorias primero (máx. 3) y después las opcionales. */
+  /** Ordenadas por importancia: la abierta ("¿qué querés que tenga?") primero, después las de contexto y "algo que sí o sí". */
   questions: TourQuestion[];
+  /** Guía de entrevista para la voz: temas a cubrir, en orden, ya adaptados al contexto (saltear lo que ya se sabe). */
+  interview: string[];
 };
 
 export type TourAnswers = Partial<Record<TourQuestionId, string | string[] | null | undefined>>;
 
 type TourAnswerFields = Pick<
   ToolInput<'generate_tour'>,
-  'themes' | 'energy' | 'familiarity' | 'food_stop' | 'include_paid_entries' | 'kids' | 'indoor' | 'finish' | 'must_include'
+  'themes' | 'energy' | 'familiarity' | 'food_stop' | 'include_paid_entries' | 'kids' | 'indoor' | 'finish' | 'must_include' | 'notes'
 >;
 
 const asList = (v: string | string[] | null | undefined) => (v == null ? [] : Array.isArray(v) ? v : [v]).filter(Boolean);
@@ -74,6 +79,8 @@ export function tourAnswersToInput(a: TourAnswers): Partial<TourAnswerFields> {
     .filter(Boolean)
     .slice(0, 5);
   if (must.length) out.must_include = must;
+  const notes = asOne(a.notes)?.trim();
+  if (notes) out.notes = notes.slice(0, 500);
   return out;
 }
 

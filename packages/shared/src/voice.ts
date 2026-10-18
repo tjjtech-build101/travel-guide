@@ -151,6 +151,8 @@ export type TourReadyEvent = {
   stops: { sort_order: number; name: string }[];
   /** Cómo quedó en el plan (para que el Scout lo cuente: "te lo dejé a las 15:40" / "quedó propuesto al grupo"). */
   plan?: TourPlanLink;
+  /** Lugares que la persona pidió y no quedaron en el tour: el Scout lo tiene que decir. */
+  missing_must?: string[];
 };
 export type VoiceEventType = (typeof VOICE_EVENT_TYPES)[number];
 

@@ -58,6 +58,10 @@ export function renderJudgeUser(place: string, pairs: { id: string; text: string
   return [`Lugar: ${place}`, ...pairs.map((p) => `[${p.id}]\nDATO: ${p.text}\nCITA: "${p.quote}"`)].join('\n\n');
 }
 
+// ───────────────────────── Pedido libre
+
+export const INTERPRET_SYSTEM = `Te paso lo que una persona le pidió a su guía para un tour a pie, con sus palabras. Extraé: los lugares concretos que nombra y quiere sí o sí (tal cual los nombra, uno por elemento), lo que no quiere, y los temas que le interesan (solo de la lista del esquema). No inventes lugares que no nombró.`;
+
 // ───────────────────────── Director
 
 export const DIRECTOR_SYSTEM = `Sos el director creativo de los tours a pie de ${SCOUT.name}, un guía de viajes rioplatense. Convertís una lista de lugares en un tour memorable, pensado para ESTE grupo, en ESTE momento.

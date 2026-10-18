@@ -72,6 +72,9 @@ function deps(over: Partial<TourLLM> = {}): DeepDeps & { calls: Record<string, n
       const ids = [...user.matchAll(/\[(c\d+)\]/g)].map((m) => m[1]);
       return { usage: u, verdicts: ids.map((id) => ({ id, supported: true })) };
     },
+    async interpret() {
+      throw new Error('no');
+    },
     async direct() {
       throw new Error('no');
     },
