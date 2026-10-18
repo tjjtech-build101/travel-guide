@@ -227,6 +227,20 @@ export const VOICE_CLIENT_TOOLS = [
   },
   {
     type: 'function' as const,
+    name: 'open_tour_planner',
+    description:
+      'Abre en la app el planificador de tour DETALLADO (preguntas con opciones y texto libre, repreguntas y 2-3 recorridos para elegir). Usala cuando la persona quiere un tour a medida / pensado con tiempo. Pasá lo que ya te contó para que aparezca precargado.',
+    parameters: {
+      type: 'object',
+      properties: {
+        story: { type: 'string', description: 'Lo que la persona ya te contó del tour, con sus palabras (qué quiere, lugares, con quién)' },
+        duration_min: { type: 'number', description: 'Minutos, si los dijo' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function' as const,
     name: 'at_stop',
     description:
       'Tour interno (museo, mercado): la persona dice que llegó o que está frente a una parada ("llegué", "estoy frente al autorretrato"). Marca la llegada en el celu y devuelve la parada; después narrala con get_stop_content.',

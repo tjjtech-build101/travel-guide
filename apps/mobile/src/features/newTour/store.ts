@@ -22,7 +22,7 @@ type State = {
   chosenId: string | null;
   loading: LoadingKey;
   error: Record<ErrorKey, string | null>;
-  init: (opts: { here: { lat: number; lng: number } | null; tripId: string | null }) => void;
+  init: (opts: { here: { lat: number; lng: number } | null; tripId: string | null; story?: string; durationMin?: number | null }) => void;
   setStory: (s: string) => void;
   setDuration: (m: number | null) => void;
   setPhase: (p: TourPhase) => void;
@@ -53,8 +53,8 @@ export const useNewTourStore = create<State>()((set, get) => ({
   chosenId: null,
   loading: null,
   error: noErrors,
-  init: ({ here, tripId }) =>
-    set({ phase: 'tell', story: '', durationMin: 60, here, tripId, rounds: [], roundIndex: 0, answers: {}, free: {}, variants: null, chosenId: null, loading: null, error: noErrors }),
+  init: ({ here, tripId, story, durationMin }) =>
+    set({ phase: 'tell', story: story ?? '', durationMin: durationMin === undefined ? 60 : durationMin, here, tripId, rounds: [], roundIndex: 0, answers: {}, free: {}, variants: null, chosenId: null, loading: null, error: noErrors }),
   setStory: (story) => set({ story }),
   setDuration: (durationMin) => set({ durationMin }),
   setPhase: (phase) => set({ phase }),

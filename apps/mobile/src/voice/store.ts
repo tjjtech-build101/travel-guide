@@ -14,6 +14,7 @@ import {
   type VoiceSessionStart,
 } from '@build101/shared';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { create } from 'zustand';
 
 import { endVoiceSession, startVoiceSession } from './api';
@@ -284,6 +285,19 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     if (!get().expanded) return false;
     set({ expanded: false });
     return true;
+  });
+
+  // Tour detallado: es una pantalla (no se entrevista por voz). Se abre con lo contado precargado y se minimiza la llamada.
+  registerLocalTool('open_tour_planner', async (input) => {
+    const here = currentLocation();
+    if (!here) return { ok: false, error: { code: 'no_location', message: 'No tengo la ubicación del celu: pedile que la active.' } };
+    const tripId = get().args?.tripId ?? null;
+    const story = typeof input.story === 'string' ? input.story.slice(0, 1500) : '';
+    const duration = typeof input.duration_min === 'number' ? String(Math.round(input.duration_min)) : '';
+    set({ expanded: false });
+    router.push({ pathname: '/tours/new', params: { lat: String(here.lat), lng: String(here.lng), ...(tripId ? { tripId } : {}), ...(story ? { story } : {}), ...(duration ? { duration } : {}) } });
+    log('🔧', 'planificador de tour abierto');
+    return { ok: true, data: { opened: true } };
   });
 
   registerLocalTool('set_language', async (input) => {
