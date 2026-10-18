@@ -139,5 +139,15 @@ test('estado del sendero: terminado, ahora y próximo', () => {
   eq([...timelineStatus(pts, 13 * 60)], [['a', 'done'], ['b', 'done'], ['c', 'now'], ['d', 'next']]);
 });
 
+test('nivel día: un lugar "elegí 1 de N" es un solo pin (la recomendada)', () => {
+  const blocks = [
+    block({ id: 'op-2', start_time: '15:00', sort_order: 2, lat: -34.907, lng: -56.2, choice_group: 'g' }),
+    block({ id: 'op-1', start_time: '15:00', sort_order: 1, lat: -34.906, lng: -56.199, choice_group: 'g' }),
+    block({ id: 'cena', start_time: '21:00', sort_order: 3, lat: -34.905, lng: -56.198 }),
+  ];
+  const m = buildMapModel({ legs, blocks, tours, scope: { kind: 'day', dayId: 'd2' } });
+  eq(m.points.map((p) => p.id), ['block:op-1', 'block:cena']);
+});
+
 if (failures) throw new Error(`${failures} test(s) fallaron`);
 console.log('ok');

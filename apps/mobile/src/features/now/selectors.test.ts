@@ -282,6 +282,18 @@ test('lejos: GPS del simulador (Cupertino) vs Montevideo', () => {
   ok(!isFarAway({ lat: -34.9067, lng: -56.2012 }, { lat: -34.915, lng: -56.15 }), 'Pocitos');
 });
 
+test('Ahora: un lugar "elegí 1 de N" cuenta una vez (la recomendada)', () => {
+  const dia = [
+    block({ id: 'c-2', day_id: 'd18', start_time: '15:00', end_time: '16:00', sort_order: 2, choice_group: 'g' }),
+    block({ id: 'c-1', day_id: 'd18', start_time: '15:00', end_time: '16:00', sort_order: 1, choice_group: 'g' }),
+    block({ id: 'c-3', day_id: 'd18', start_time: '18:00', end_time: '19:00', sort_order: 3 }),
+  ];
+  const p = buildNowPlan(dia, JUAN, 14 * 60);
+  eq(p.total, 2);
+  eq(p.next?.block.id, 'c-1');
+  eq(p.later.map((b) => b.id), ['c-3']);
+});
+
 if (failures) {
   throw new Error(`${failures} test(s) fallaron`);
 }

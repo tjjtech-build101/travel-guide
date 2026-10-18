@@ -171,6 +171,81 @@ export const PlanTripMessage = z.object({
   text: z.string().min(1).max(2000),
 });
 
+// PRD 31: forma del viaje elegida (trip_shapes → plan_trip).
+export const TripShapeLegInput = z.object({
+  key: z.string().min(1).max(40),
+  city: z.string().min(1).max(120),
+  country: z.string().max(80),
+  start_date: IsoDate,
+  end_date: IsoDate,
+  includes_organizer: z.boolean().default(true),
+  participant_names: z.array(z.string().max(60)).max(20).default([]),
+  parallel_with: z.array(z.string().max(40)).max(8).default([]),
+  why: z.string().max(400).default(''),
+});
+
+export const TripShapeTransferInput = z.object({
+  from_key: z.string().min(1).max(40),
+  to_key: z.string().min(1).max(40),
+  date: IsoDate,
+  mode: z.enum(TRANSFER_MODES),
+  duration_min: z.number().int().positive().max(24 * 60),
+  participant_names: z.array(z.string().max(60)).max(20).default([]),
+});
+
+/** Ancla del viaje (TripAnchor): evento con fecha/sede que va como bloque fijo. Laxo: viene de un LLM. */
+export const TripAnchorInput = z.object({
+  id: z.string().max(60),
+  name: z.string().max(200),
+  kind: z.enum(['sports', 'concert', 'festival', 'wedding', 'conference', 'other']).catch('other'),
+  city: z.string().max(120).nullable().optional(),
+  country: z.string().max(80).nullable().optional(),
+  date: IsoDate.nullable().optional().catch(null),
+  time: TimeOfDay.nullable().optional().catch(null),
+  venue: z.string().max(200).nullable().optional(),
+  tickets: z.enum(['have', 'want', 'watch_out', 'unknown']).catch('unknown'),
+  researched: z.boolean().catch(false),
+  sources: z.array(z.object({ url: z.string().max(500), title: z.string().max(200).nullable().optional() })).max(6).catch([]),
+  note: z.string().max(400).nullable().optional(),
+});
+
+/** El esqueleto de una TripShape tal como vuelve en plan_trip (validado de nuevo en el servidor). */
+export const TripShapeSkeleton = z.object({
+  title: z.string().max(80).default(''),
+  start_date: IsoDate,
+  end_date: IsoDate,
+  legs: z.array(TripShapeLegInput).min(1).max(8),
+  transfers: z.array(TripShapeTransferInput).max(16).default([]),
+  assumptions: z.array(z.string().max(400)).max(12).default([]),
+  anchors: z.array(TripAnchorInput).max(12).optional().describe('v2: anclas investigadas (van como bloques fijos)'),
+});
+
+/** TripUnderstanding de trip_brief (laxo: todo opcional; el servidor lo usa para el perfil del grupo). */
+export const TripUnderstandingInput = z.object({
+  destinations: z.array(z.object({ city: z.string().max(120), country: z.string().max(80).nullable().optional() })).max(10).optional(),
+  start_date: IsoDate.nullable().optional(),
+  end_date: IsoDate.nullable().optional(),
+  // Laxo a propósito: viene de un LLM y un número raro no puede tumbar plan_trip (el servidor lo sanea).
+  days: z.number().nullable().optional(),
+  travelers: z.number().nullable().optional(),
+  party: z.enum(['solo', 'couple', 'friends', 'family']).nullable().optional(),
+  names: z.array(z.string().max(60)).max(20).optional(),
+  interests: z.record(z.string(), z.number()).optional(),
+  must: z.array(z.string().max(200)).max(20).optional(),
+  avoid: z.array(z.string().max(200)).max(20).optional(),
+  budget: z.enum(['low', 'mid', 'high', 'no_limit']).nullable().optional(),
+  pace: z.enum(['relaxed', 'balanced', 'intense']).nullable().optional(),
+  first_time: z.boolean().nullable().optional(),
+  kids_ages: z.array(z.string().max(40)).max(10).optional(),
+  arrival: z.string().max(300).nullable().optional(),
+  departure: z.string().max(300).nullable().optional(),
+  lodging_booked: z.string().max(300).nullable().optional(),
+  notes: z.array(z.string().max(300)).max(10).optional(),
+  trip_kind: z.enum(['event', 'city', 'road_trip', 'beach', 'nature', 'family', 'couple', 'backpacking', 'mixed']).nullable().optional().catch(null),
+  anchors: z.array(TripAnchorInput).max(12).optional(),
+  origin: z.string().max(120).nullable().optional(),
+});
+
 export const PlanTripInput = z.object({
   trip_id: Id.optional().describe('Viaje existente: solo completa tramos sin bloques. Sin trip_id: crea un viaje nuevo.'),
   title: z.string().max(80).optional(),
@@ -181,6 +256,49 @@ export const PlanTripInput = z.object({
     .describe('Lo que contó el usuario (destinos, fechas, quiénes, gustos, sí o sí / ni loco)'),
   start_date: IsoDate.optional().describe('YYYY-MM-DD si el usuario eligió fecha'),
   end_date: IsoDate.optional(),
+  // PRD 31 · planificador colaborativo
+  understanding: TripUnderstandingInput.optional().describe('Lo que entendió trip_brief (con las respuestas): gustos, ritmo, presupuesto del grupo'),
+  skeleton: TripShapeSkeleton.optional()
+    .describe('Forma del viaje elegida en trip_shapes: si viene, no se vuelve a pensar el esqueleto'),
+  mode: z
+    .enum(['auto', 'menu'])
+    .optional()
+    .describe('Default auto. auto = arma los días solo · menu = arma tramos + menú de opciones por tramo para que el grupo elija'),
+});
+
+// ---------- PRD 31 · planificador colaborativo ----------
+
+const PlannerConversation = z.array(PlanTripMessage).min(1).max(40);
+
+export const TripBriefInput = z.object({
+  trip_id: Id.optional(),
+  conversation: PlannerConversation.describe('Lo que contó el usuario + preguntas/respuestas anteriores'),
+  start_date: IsoDate.optional(),
+  end_date: IsoDate.optional(),
+  round: z.number().int().min(1).max(3).optional().describe('v2: ronda de la entrevista (1-3). Default 1.'),
+});
+
+export const TripShapesInput = z.object({
+  trip_id: Id.optional(),
+  conversation: PlannerConversation,
+  start_date: IsoDate.optional(),
+  end_date: IsoDate.optional(),
+  understanding: TripUnderstandingInput.optional().describe('v2: lo entendido en la última ronda de trip_brief (evita re-extraerlo)'),
+});
+
+export const ReactOptionInput = z.object({
+  option_id: Id,
+  reaction: z.enum(['love', 'no', 'must']).nullable().describe('null = sacar mi reacción'),
+});
+
+export const ComposeDaysInput = z.object({
+  trip_id: Id,
+  leg_ids: z.array(Id).max(8).optional().describe('Default: todos los tramos con menú y sin bloques armados'),
+  instruction: z.string().max(500).optional().describe('"más tranqui", "el martes libre a la tarde"'),
+});
+
+export const ChooseOptionInput = z.object({
+  block_id: Id.describe('La opción elegida de un lugar con choice_group: las otras pasan al banco de ideas'),
 });
 
 // ---------- PRD 06/18 · generate_tour ----------

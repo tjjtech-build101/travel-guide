@@ -44,7 +44,37 @@ const FRIENDLY: Record<string, string> = {
   at_stop: 'Marcando la llegada',
   look_at_photo: 'Mirando la foto',
   research: 'Averiguando',
+  // PRD 31 · planificador colaborativo
+  trip_brief: 'Entendiendo el viaje',
+  trip_shapes: 'Pensando formas del viaje',
+  react_option: 'Anotando tu voto',
+  compose_days: 'Armando los días',
+  choose_option: 'Eligiendo',
 };
+
+const REACTION_TEXT: Record<string, string> = { love: 'Me copa', no: 'Paso', must: 'Sí o sí' };
+
+/** Tarjetas de las herramientas del planificador colaborativo (PRD 31): algunas no devuelven undo_token. */
+function plannerText(name: string, data: Record<string, unknown>): string | null {
+  switch (name) {
+    case 'react_option': {
+      const r = typeof data.reaction === 'string' ? REACTION_TEXT[data.reaction] : null;
+      return r ? `Anoté «${r}» en el menú` : 'Saqué tu voto del menú';
+    }
+    case 'choose_option':
+      return 'Elegí esa opción · las otras quedaron en ideas';
+    case 'compose_days':
+      return 'Estoy armando los días con lo que eligieron';
+    case 'trip_brief':
+      return 'Entendí el viaje';
+    case 'trip_shapes': {
+      const n = Array.isArray(data.variants) ? data.variants.length : 0;
+      return n ? `Te propuse ${n} ${n === 1 ? 'forma' : 'formas'} del viaje` : 'Pensé formas del viaje';
+    }
+    default:
+      return null;
+  }
+}
 
 export function friendlyToolName(name: string): string {
   return FRIENDLY[name] ?? 'Trabajando';
@@ -54,7 +84,10 @@ type BlockLike = { title?: string; start_time?: string | null };
 
 /** Texto de la tarjeta de acción ("Agregué «Café» · 17:00"). null = la herramienta no deja tarjeta. */
 export function actionText(name: string, res: ToolResponse): { text: string; proposed: boolean } | null {
-  if (!res.ok || !res.undo_token) return null;
+  if (!res.ok) return null;
+  const planner = plannerText(name, (res.data ?? {}) as Record<string, unknown>);
+  if (planner) return { text: planner, proposed: false };
+  if (!res.undo_token) return null;
   const data = (res.data ?? {}) as { mode?: string; block?: BlockLike };
   if (data.mode === 'proposed') return { text: 'Propuesta enviada al grupo', proposed: true };
   const b = data.block;

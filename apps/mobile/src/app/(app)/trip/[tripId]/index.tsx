@@ -10,6 +10,10 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { AgentJobProgress } from '../../../../features/jobs/AgentJobProgress';
 import { BlockCard, GhostCard } from '../../../../features/plan/components/BlockCard';
 import { ActionToast } from '../../../../features/plan/components/ActionToast';
+import { ChoiceCard } from '../../../../features/plan/components/ChoiceCard';
+import { MenuEntry } from '../../../../features/menu/components';
+import { menuLegStates } from '../../../../features/menu/model';
+import { useChooseOption, useLegOptions } from '../../../../features/menu/queries';
 import { Segmented } from '../../../../features/plan/components/Controls';
 import {
   DayEmpty,
@@ -94,6 +98,9 @@ function ItineraryView() {
   const blocks = usePlanBlocks(tripId);
   const proposals = usePendingProposals(tripId);
   const perms = usePermissions(tripId);
+  // PRD 31: menú colaborativo por tramo + lugares "elegí 1 de N".
+  const legOptions = useLegOptions(tripId);
+  const choose = useChooseOption(tripId);
 
   const ensureTrip = usePlanMapStore((s) => s.ensureTrip);
   const filter = usePlanMapStore((s) => s.filter);
@@ -148,6 +155,14 @@ function ItineraryView() {
     return set;
   }, [sections]);
 
+  const menuStates = useMemo(
+    () => (legs && legOptions.data ? menuLegStates(legs, legOptions.data, blocks.data ?? []) : []),
+    [legs, legOptions.data, blocks.data],
+  );
+  const openMenu = useCallback((legId?: string) => {
+    router.push({ pathname: '/trip/[tripId]/menu', params: { tripId, ...(legId ? { legId } : {}) } });
+  }, [tripId]);
+
   const blocksByDay = useMemo(() => {
     const m = new Map<string, PlanBlock[]>();
     for (const b of blocks.data ?? []) if (b.day_id) m.set(b.day_id, [...(m.get(b.day_id) ?? []), b]);
@@ -183,8 +198,8 @@ function ItineraryView() {
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken<PlanRow>[] }) => {
     for (const v of viewableItems) {
       const r = v.item;
-      if (r && (r.kind === 'day' || r.kind === 'block' || r.kind === 'dayEmpty')) {
-        const dayId = r.kind === 'block' ? r.block.day_id : r.day.id;
+      if (r && (r.kind === 'day' || r.kind === 'block' || r.kind === 'dayEmpty' || r.kind === 'choice')) {
+        const dayId = r.kind === 'block' ? r.block.day_id : r.kind === 'choice' ? r.blocks[0].day_id : r.day.id;
         if (dayId) {
           visibleDay.current = { legId: r.leg.id, dayId };
           return;
@@ -237,6 +252,7 @@ function ItineraryView() {
             (legs ?? []).flatMap((l) => l.days),
           ),
       },
+      ...menuStates.map((m) => ({ label: `Ver menú de ${m.city}`, onPress: () => openMenu(m.legId) })),
       ...(sections?.groups.some((g) => g.parallel)
         ? [{ label: parallelView ? 'Ver una rama' : 'Ver tramos en paralelo', onPress: () => setParallelView(!parallelView) }]
         : []),
@@ -325,6 +341,17 @@ function ItineraryView() {
             onGenerateTour={onGenerateTour}
           />
         );
+      case 'choice':
+        return (
+          <ChoiceCard
+            blocks={item.blocks}
+            legColor={legColors.get(item.leg.id) ?? colors.primary}
+            canChoose={perms.canEditLeg(item.leg.id)}
+            choosing={choose.isPending ? (choose.variables?.blockId ?? null) : null}
+            onChoose={(b) => choose.mutate({ blockId: b.id, title: b.title })}
+            onPress={onPressBlock}
+          />
+        );
       case 'ghost':
         return <GhostCard ghost={item.ghost} onPress={() => openProposals(tripId)} />;
       case 'dayEmpty':
@@ -410,6 +437,7 @@ function ItineraryView() {
         </View>
       </View>
       <ProposalBanner count={pendingCount} onPress={() => openProposals(tripId)} />
+      <MenuEntry states={menuStates} onOpen={openMenu} />
       {stale ? <StaleBanner /> : null}
 
       <FlashList

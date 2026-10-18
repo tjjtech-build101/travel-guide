@@ -18,3 +18,4 @@ export * from './timezone';
 export * from './polyline';
 export * from './routeProgress';
 export * from './tourBrief';
+export * from './planner';

@@ -40,6 +40,9 @@ type RunnerResult<T> = { value: T | null; usage: Usage; web_search_calls: number
  * caller decide qué hacer, normalmente tratar el lugar/fact como "sin datos" y seguir).
  * Exportado: lo reusa también eventsSearch.ts (PRD 16) para no duplicar el Tool Runner.
  */
+const usesFor = (m: number | { web_search?: number; web_fetch?: number } | undefined, tool: 'web_search' | 'web_fetch') =>
+  (typeof m === 'number' ? m : m?.[tool]) ?? 3;
+
 export async function captureViaTool<T>(args: {
   system: string;
   user: string;
@@ -49,8 +52,9 @@ export async function captureViaTool<T>(args: {
   serverTools: ('web_search' | 'web_fetch')[];
   config: TourLlmConfig;
   signal?: AbortSignal;
-  /** Usos máximos de cada server tool (default 3; la investigación profunda usa más). */
-  maxUses?: number;
+  /** Usos máximos por server tool (default 3). Un número vale para las dos (investigación profunda de tours);
+   * un objeto, por herramienta (catálogo del planificador, PRD 31). */
+  maxUses?: number | { web_search?: number; web_fetch?: number };
 }): Promise<RunnerResult<T>> {
   const client = anthropicClient();
   let captured: T | null = null;
@@ -64,8 +68,8 @@ export async function captureViaTool<T>(args: {
     },
   });
   const serverToolDefs: Record<string, unknown> = {
-    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: args.maxUses ?? 3 },
-    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: args.maxUses ?? 3 },
+    web_search: { type: 'web_search_20260209', name: 'web_search', max_uses: usesFor(args.maxUses, 'web_search') },
+    web_fetch: { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: usesFor(args.maxUses, 'web_fetch') },
   };
   const tools: unknown[] = [captureTool, ...args.serverTools.map((t) => serverToolDefs[t])];
   const params = {

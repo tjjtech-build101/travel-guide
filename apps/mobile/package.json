@@ -62,6 +62,7 @@
     "test:nowv2": "tsx src/features/now/v2/model.test.ts",
     "test:profile": "tsx src/features/profile/model.test.ts",
     "test:map": "tsx src/features/map/model.test.ts",
+    "test:menu": "tsx src/features/menu/model.test.ts",
     "test:fresh": "tsx src/location/freshPositionTools.test.ts",
     "lint": "expo lint",
     "test:schedule": "tsx src/schedule/delivery.test.ts",

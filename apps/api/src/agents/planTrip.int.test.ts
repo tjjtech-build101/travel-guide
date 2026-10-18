@@ -98,6 +98,10 @@ describe.skipIf(!up)('plan_trip (integración, Supabase local + Claude mock)', a
     today: () => '2026-10-15',
     resolveCity: async (city: string) => ({ google_place_id: `city-${city}`, lat: -34.9, lng: -56.2 }),
     driveMinutes: async () => null,
+    // PRD 31: sin catálogo → cada tramo usa el relleno por LLM de siempre (lo que prueba este archivo).
+    planner: async () => {
+      throw new Error('sin catálogo en este test');
+    },
     heartbeatMs: 400,
   });
   const created: string[] = [];

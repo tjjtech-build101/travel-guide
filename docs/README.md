@@ -61,3 +61,4 @@ Regla: **no se arranca un P1 hasta que el P0 corra punta a punta.**
 | 28 | [Lugares guardados](prd/28-lugares-guardados.md) | App y producto | 03, 01 |
 | 29 | [Modo niños + accesibilidad](prd/29-modo-ninos-y-accesibilidad.md) | App y producto | 06, 07 |
 | 30 | [Llamada grupal con LiveKit (fase 2)](prd/30-llamada-grupal-livekit.md) | Columna / voz / nativo | 05 |
+| 31 | [Planificador colaborativo](prd/31-planificador-colaborativo.md) | Cerebro y contenido | 01, 04 |

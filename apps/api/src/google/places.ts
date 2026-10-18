@@ -251,3 +251,26 @@ export async function searchPlacesRich(args: { near: { lat: number; lng: number 
     }));
   });
 }
+
+// ───────────────────────── Planificador colaborativo (PRD 31): horarios + popularidad de un lugar del catálogo
+
+/**
+ * regularOpeningHours.periods + userRatingCount de un lugar (para saber qué días cierra y qué tan notorio es).
+ * null si es de OSM, si no hay key de Google o si Google no tiene datos.
+ */
+export async function placeHoursAndPopularity(googlePlaceId: string): Promise<{ periods: OpeningPeriod[] | null; rating_count: number | null } | null> {
+  if (isOsmId(googlePlaceId) || !env().GOOGLE_MAPS_API_KEY) return null;
+  return cached(
+    `hours:${googlePlaceId}`,
+    async () => {
+      const p = await googleFetch<GPlace>(`${BASE}/places/${encodeURIComponent(googlePlaceId)}?languageCode=${LANG}`, {
+        method: 'GET',
+        fieldMask: 'regularOpeningHours.periods,userRatingCount',
+      });
+      const periods = p.regularOpeningHours?.periods ?? null;
+      const rating_count = p.userRatingCount ?? null;
+      return periods || rating_count != null ? { periods, rating_count } : null;
+    },
+    24 * 60 * 60 * 1000,
+  );
+}

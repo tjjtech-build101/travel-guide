@@ -89,6 +89,27 @@ function TripShell({ tripId, title }: { tripId: string; title: string }) {
           <Tabs.Screen name="index" options={{ title: 'Planificación', tabBarIcon: ({ color }) => <PlanIcon color={color} /> }} />
           <Tabs.Screen name="map" options={{ title: 'Mapa', tabBarIcon: ({ color }) => <MapIcon color={color} /> }} />
           <Tabs.Screen name="now" options={{ title: 'Ahora', tabBarIcon: ({ color }) => <NowIcon color={color} /> }} />
+          {/* Menú colaborativo del tramo (PRD 31): pantalla del viaje fuera de la barra de tabs. */}
+          <Tabs.Screen
+            name="menu"
+            options={{
+              title: 'Menú',
+              // Sin `href: null` (expo-router 58 lo marca hidden y navegar a la tab redirige a la primera): mismo patrón que "route".
+              tabBarStyle: { display: 'none' },
+              tabBarButton: () => null,
+              tabBarItemStyle: { display: 'none' },
+              headerLeft: () => (
+                <Pressable
+                  onPress={() => router.navigate({ pathname: '/trip/[tripId]', params: { tripId } })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver al plan"
+                  style={styles.headerBtn}
+                >
+                  <BackIcon color={colors.text} />
+                </Pressable>
+              ),
+            }}
+          />
           {/* "Cómo llego" embebido: pantalla completa sin tab ni header (se abre con features/route/nav.openRoute).
               Sin `href: null`: en expo-router 58 eso marca la tab como `hidden` y navegar a ella redirige a la primera. */}
           <Tabs.Screen

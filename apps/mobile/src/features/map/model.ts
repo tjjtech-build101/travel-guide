@@ -3,6 +3,7 @@
 import type { DayRow } from '@build101/shared';
 
 import type { ScoutFocus } from '../../voice/useScout';
+import { collapseChoices } from '../plan/choices';
 import { LEG_COLORS, legColorMap, TYPE_LABEL } from '../plan/labels';
 import { compareBlocks, hhmm, shortDay, type PlanBlock, type PlanLeg } from '../plan/selectors';
 
@@ -150,9 +151,10 @@ export function buildMapModel({
 
   const leg = legs.find((l) => l.days.some((d) => d.id === scope.dayId));
   const color = (leg && colors.get(leg.id)) ?? LEG_COLORS[0];
-  const dayBlocks = blocks
-    .filter((b) => b.day_id === scope.dayId && (!b.plan_variant || b.plan_variant === 'main'))
-    .sort(compareBlocks);
+  // Un lugar "elegí 1 de N" pendiente es un solo pin: la opción recomendada (PRD 31).
+  const dayBlocks = collapseChoices(
+    blocks.filter((b) => b.day_id === scope.dayId && (!b.plan_variant || b.plan_variant === 'main')),
+  ).sort(compareBlocks);
   const visible = dayBlocks.filter((b) => !b.masked);
   const located = visible.filter(hasCoords);
   const unlocated = visible.filter((b) => !hasCoords(b));

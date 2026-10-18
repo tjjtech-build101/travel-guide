@@ -2,6 +2,7 @@
 // Cada caso tira si falla; al final se tira un error si hubo fallas (exit code ≠ 0).
 import type { DayRow } from '@build101/shared';
 
+import { collapseChoices, pendingChoiceGroups } from './choices';
 import { buildIcs } from './ics';
 import {
   branchFor,
@@ -289,6 +290,36 @@ test('.ics: líneas plegadas a ≤ 75 octetos sin romper UTF-8', () => {
   const summary = ics.split('\r\n').filter((l, i, arr) => l.startsWith('SUMMARY') || (l.startsWith(' ') && arr[i - 1]?.startsWith('SUMMARY')));
   ok(summary.length >= 2, 'debería plegarse');
   ok(summary.map((l, i) => (i ? l.slice(1) : l)).join('').endsWith('ñandú'), 'reconstruye el texto');
+});
+
+// ───────── PRD 31: lugares "elegí 1 de N"
+
+test('elecciones: un choice_group del día es UNA fila choice (la primera = menor sort_order)', () => {
+  const extra = [
+    block({ id: 'opt-b', leg_id: 'mvd', day_id: 'd17', title: 'Opción B', time_flex: 'afternoon', sort_order: 20, choice_group: 'g1' }),
+    block({ id: 'opt-a', leg_id: 'mvd', day_id: 'd17', title: 'Opción A', time_flex: 'afternoon', sort_order: 10, choice_group: 'g1' }),
+    block({ id: 'cena', leg_id: 'mvd', day_id: 'd17', title: 'Cena', start_time: '21:00:00', sort_order: 30 }),
+    // Solo una opción en el día (las otras ya se descartaron): bloque normal.
+    block({ id: 'sola', leg_id: 'mvd', day_id: 'd19', title: 'Sola', sort_order: 1, choice_group: 'g2' }),
+  ];
+  const s = buildPlanSections({ legs, blocks: [...blocks, ...extra], filter: 'all', branchByDate: {}, me: JUAN });
+  const choiceRows = s.rows.filter((r) => r.kind === 'choice');
+  eq(choiceRows.length, 1);
+  const c = choiceRows[0];
+  ok(c.kind === 'choice' && c.blocks.map((b) => b.id).join(',') === 'opt-a,opt-b', 'opciones ordenadas');
+  eq(titlesOfDay(s.rows, 'd17'), ['Cena'], 'las opciones no se repiten como bloques');
+  ok(titlesOfDay(s.rows, 'd19').includes('Sola'), 'opción sola = bloque');
+});
+
+test('elecciones: collapseChoices deja solo la recomendada por grupo', () => {
+  const list = [
+    block({ id: 'x-b', leg_id: 'mvd', day_id: 'd17', sort_order: 2, choice_group: 'g' }),
+    block({ id: 'x-a', leg_id: 'mvd', day_id: 'd17', sort_order: 1, choice_group: 'g' }),
+    block({ id: 'x-c', leg_id: 'mvd', day_id: 'd17', sort_order: 3 }),
+    block({ id: 'x-idea', leg_id: 'mvd', day_id: null, sort_order: 4, choice_group: 'g' }),
+  ];
+  eq(collapseChoices(list).map((b) => b.id), ['x-a', 'x-c', 'x-idea']);
+  eq(pendingChoiceGroups(list).get('g')?.map((b) => b.id), ['x-a', 'x-b']);
 });
 
 if (failures) throw new Error(`${failures} test(s) fallaron`);
