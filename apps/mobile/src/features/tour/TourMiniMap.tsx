@@ -104,9 +104,12 @@ function MapInner({ tour, engine, fix, nextId, height }: Required<Omit<Props, 'f
         onDidFailLoadingMap={() => setFailed(true)}
       >
         <Camera ref={camera} defaultSettings={{ centerCoordinate: [ordered[0]?.lng ?? -56.19, ordered[0]?.lat ?? -34.9], zoomLevel: 15 }} />
-        <ShapeSource id="tour-line" shape={line}>
-          <LineLayer id="tour-line-l" style={{ lineColor: colors.primary, lineWidth: 3, lineDasharray: [2, 1.5], lineOpacity: 0.8 }} />
-        </ShapeSource>
+        {/* Una línea necesita 2 puntos: con todo salteado menos una parada, Mapbox tira "GeoJSON Parse Error". */}
+        {line.geometry.coordinates.length >= 2 ? (
+          <ShapeSource id="tour-line" shape={line}>
+            <LineLayer id="tour-line-l" style={{ lineColor: colors.primary, lineWidth: 3, lineDasharray: [2, 1.5], lineOpacity: 0.8 }} />
+          </ShapeSource>
+        ) : null}
         <ShapeSource id="tour-stops" shape={points}>
           <CircleLayer
             id="tour-stops-c"
