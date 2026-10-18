@@ -193,6 +193,22 @@ export const TripShapeTransferInput = z.object({
   participant_names: z.array(z.string().max(60)).max(20).default([]),
 });
 
+/** Ancla del viaje (TripAnchor): evento con fecha/sede que va como bloque fijo. Laxo: viene de un LLM. */
+export const TripAnchorInput = z.object({
+  id: z.string().max(60),
+  name: z.string().max(200),
+  kind: z.enum(['sports', 'concert', 'festival', 'wedding', 'conference', 'other']).catch('other'),
+  city: z.string().max(120).nullable().optional(),
+  country: z.string().max(80).nullable().optional(),
+  date: IsoDate.nullable().optional().catch(null),
+  time: TimeOfDay.nullable().optional().catch(null),
+  venue: z.string().max(200).nullable().optional(),
+  tickets: z.enum(['have', 'want', 'watch_out', 'unknown']).catch('unknown'),
+  researched: z.boolean().catch(false),
+  sources: z.array(z.object({ url: z.string().max(500), title: z.string().max(200).nullable().optional() })).max(6).catch([]),
+  note: z.string().max(400).nullable().optional(),
+});
+
 /** El esqueleto de una TripShape tal como vuelve en plan_trip (validado de nuevo en el servidor). */
 export const TripShapeSkeleton = z.object({
   title: z.string().max(80).default(''),
@@ -201,6 +217,7 @@ export const TripShapeSkeleton = z.object({
   legs: z.array(TripShapeLegInput).min(1).max(8),
   transfers: z.array(TripShapeTransferInput).max(16).default([]),
   assumptions: z.array(z.string().max(400)).max(12).default([]),
+  anchors: z.array(TripAnchorInput).max(12).optional().describe('v2: anclas investigadas (van como bloques fijos)'),
 });
 
 /** TripUnderstanding de trip_brief (laxo: todo opcional; el servidor lo usa para el perfil del grupo). */
@@ -224,6 +241,9 @@ export const TripUnderstandingInput = z.object({
   departure: z.string().max(300).nullable().optional(),
   lodging_booked: z.string().max(300).nullable().optional(),
   notes: z.array(z.string().max(300)).max(10).optional(),
+  trip_kind: z.enum(['event', 'city', 'road_trip', 'beach', 'nature', 'family', 'couple', 'backpacking', 'mixed']).nullable().optional().catch(null),
+  anchors: z.array(TripAnchorInput).max(12).optional(),
+  origin: z.string().max(120).nullable().optional(),
 });
 
 export const PlanTripInput = z.object({
@@ -255,6 +275,7 @@ export const TripBriefInput = z.object({
   conversation: PlannerConversation.describe('Lo que contó el usuario + preguntas/respuestas anteriores'),
   start_date: IsoDate.optional(),
   end_date: IsoDate.optional(),
+  round: z.number().int().min(1).max(3).optional().describe('v2: ronda de la entrevista (1-3). Default 1.'),
 });
 
 export const TripShapesInput = z.object({
