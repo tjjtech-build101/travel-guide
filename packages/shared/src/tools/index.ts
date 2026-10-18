@@ -5,6 +5,7 @@ import {
   AddIdeaInput,
   DeleteTripInput,
   EventsSearchInput,
+  GenerateIndoorTourInput,
   GenerateTourInput,
   GetDayPlanInput,
   GetTripOverviewInput,
@@ -108,6 +109,11 @@ export const toolDefs = {
     description:
       'Arma un tour con paradas verificadas (planificado, espontáneo o explorador). Trabajo en segundo plano: devuelve { job_id, tour_id } y el progreso (y las paradas) se ven por Realtime en agent_jobs / tour_stops.',
     input: GenerateTourInput,
+  },
+  generate_indoor_tour: {
+    description:
+      'Arma un tour POR DENTRO de un lugar (museo, mercado, iglesia, palacio): 4-7 puntos (obras, salas, objetos) con datos verificados. Como adentro el GPS no sirve, la llegada a cada punto la marca la persona (voz, botón o foto). Trabajo en segundo plano: devuelve { job_id, tour_id }.',
+    input: GenerateIndoorTourInput,
   },
   weather: {
     description: 'Pronóstico diario y horario (Open-Meteo) para un punto y rango de fechas.',

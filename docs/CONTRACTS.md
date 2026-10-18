@@ -400,3 +400,13 @@ implementación en `apps/api/src/google/routes.ts` (`routeDetail`, `parseRouteDe
 - **`GenerateTourResult`** suma `title`, `thesis` y en `stats`: `facts_cited`, `sentences_dropped`, `critic_rewrites`, `duration_ms`.
 - Voz: el Scout llama `tour_brief`, hace como mucho 2 preguntas en una frase y después `generate_tour` con las respuestas (`apps/api/src/voice/instructions.ts`).
 - Env opcionales de la API: `TOUR_DIRECTOR_EFFORT` (default `high`), `TOUR_WRITER_EFFORT` (`medium`), `TOUR_RESEARCH_EFFORT` (`medium`), `TOUR_CRITIC` (`true`).
+
+## Cambios tour interno (museo / mercado por dentro) — en código
+
+- **Herramienta nueva `generate_indoor_tour`** `{venue_name, lat?, lng?, trip_id?, duration_min=45 (15-120), language='es', notes?}` → `{job_id, tour_id}`. Job `kind='generate_tour'` con el mismo `GenerateTourResult` (la app y la voz lo esperan igual: `[EVENTO:tour_ready]`). Investiga 4-7 puntos de adentro con web_search/web_fetch, verifica cada dato (la cita tiene que estar en la página; si no se puede bajar, web_fetch de Claude; después el juez) y escribe narraciones solo con lo verificado.
+- **`tours.route` (jsonb, sin migración)** suma `positioning: 'gps' | 'manual'`, `indoor: boolean`, `venue: {name, lat, lng, place_id}`. `isManualTour(route)` en `packages/shared`. `tours.mode` queda `spontaneous`.
+- **Paradas**: un `place_library` por punto (tier `researched`, con las coordenadas del lugar), `tour_stops.look_at` = "dónde está. qué mirar", `nav_to_next` = cómo llegar adentro.
+- **Motor** (`tourEngine`): `EngineTour.positioning`; con `'manual'` las muestras de GPS no generan llegadas, salidas ni desvíos. `engineArrive(tour, state, stop_id, t)` (llegada a mano) y `engineLeave(tour, state, t)` ("sigo"). `ArrivedStopPayload.manual?: true`.
+- **Herramienta del celu `at_stop`** `{stop_id?, name?}` (en `VOICE_CLIENT_TOOLS`): "llegué / estoy frente a X" → marca la llegada en el motor y devuelve la parada. `next_stop` en un tour interno además sale de la parada actual.
+- **`look_at_photo`** con `tour_id` de un tour interno: compara contra las paradas del tour (no lo cercano por GPS) y devuelve `tour_stop: {stop_id, name} | null`; el celu marca la llegada y `[EVENTO:photo_result]` lleva `tour_stop`. En tour interno no crea lugares nuevos desde la cámara.
+- **Reglas de voz**: `INDOOR_TOUR_RULES` (se suman a `TOUR_RULES` si el tour es manual; también en `tour_started`). Llegada marcada por la persona → narra directo, sin "¿te cuento?".

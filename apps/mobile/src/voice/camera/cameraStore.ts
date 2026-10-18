@@ -35,3 +35,12 @@ export const useCameraStore = create<CameraState>((set) => ({
 export const camera = {
   open: (opts?: { question?: string | null; source?: CameraSource }) => useCameraStore.getState().openCamera(opts),
 };
+
+/**
+ * Tour interno (PRD 07 + 08): la pantalla de tour le dice a la cámara qué tour está en curso (así look_at_photo compara
+ * contra sus paradas) y se entera cuando una foto reconoce una (= llegada). Hooks para no acoplar la cámara al tour.
+ */
+export const cameraTourHooks: {
+  tourId: () => string | null;
+  onTourStop: (stopId: string) => void;
+} = { tourId: () => null, onTourStop: () => {} };

@@ -6,6 +6,7 @@ import { add_idea } from './add_idea';
 import { delete_trip } from './delete_trip';
 import { events_search } from './events_search';
 import { gap_suggestions } from './gap_suggestions';
+import { generate_indoor_tour } from './generate_indoor_tour';
 import { generate_tour } from './generate_tour';
 import { get_day_plan } from './get_day_plan';
 import { get_trip_overview } from './get_trip_overview';
@@ -48,6 +49,7 @@ export const handlers: { [N in ToolName]: Handler<N> } = {
   research,
   tour_brief,
   generate_tour,
+  generate_indoor_tour,
   weather,
   events_search,
   should_generate_tour,
